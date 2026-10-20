@@ -153,7 +153,7 @@ export function createInlineEditor({
     shell.style.left = `${rect.left - padX}px`;
     shell.style.top = `${rect.top - padY}px`;
     shell.style.width = `${Math.max(24, rect.width + padX * 2)}px`;
-    shell.style.minHeight = `${Math.max(12, rect.height + padY * 2)}px`;
+    shell.style.minHeight = `${Math.max(4, rect.height + padY * 2)}px`;
     shell.style.padding = `${padY}px ${padX}px`;
   }
 

@@ -91,6 +91,19 @@ const els = {
   editUndo: $('editUndo'),
   editRedo: $('editRedo'),
   editbarCount: $('editbarCount'),
+  formatbar: $('formatbar'),
+  fmtSize: $('fmtSize'),
+  fmtFont: $('fmtFont'),
+  fmtColorBtn: $('fmtColorBtn'),
+  fmtSwatch: $('fmtSwatch'),
+  fmtColorPop: $('fmtColorPop'),
+  fmtColorGrid: $('fmtColorGrid'),
+  fmtColorInput: $('fmtColorInput'),
+  fmtMore: $('fmtMore'),
+  fmtMorePop: $('fmtMorePop'),
+  fmtLineHeight: $('fmtLineHeight'),
+  fmtDuplicate: $('fmtDuplicate'),
+  fmtDelete: $('fmtDelete'),
   ocrLang: $('ocrLang'),
   ocrContrast: $('ocrContrast'),
   ocrDeskew: $('ocrDeskew'),
@@ -715,6 +728,174 @@ els.overlay.addEventListener('click', async (ev) => {
 
 /* ─────────────────────── Édition directe ─────────────────────── */
 
+const COLOR_PRESETS = [
+  '#111827', '#ffffff', '#6b7280', '#ef4444', '#f97316', '#eab308',
+  '#22c55e', '#0ea5e9', '#4f46e5', '#a855f7', '#ec4899', '#78350f',
+];
+
+function normalizeHexColor(value, fallback = '#111827') {
+  if (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) return value;
+  if (typeof value === 'string' && /^#[0-9a-f]{3}$/i.test(value)) {
+    return `#${value.slice(1).split('').map((c) => c + c).join('')}`;
+  }
+  return fallback;
+}
+
+function buildColorGrid() {
+  if (!els.fmtColorGrid || els.fmtColorGrid.childElementCount) return;
+  for (const color of COLOR_PRESETS) {
+    const dot = document.createElement('button');
+    dot.type = 'button';
+    dot.className = 'color-dot';
+    dot.style.background = color;
+    dot.dataset.color = color;
+    dot.setAttribute('aria-label', color);
+    dot.addEventListener('click', () => {
+      applyFormat((e) => {
+        e.color = color;
+      });
+      closeFormatPops();
+    });
+    els.fmtColorGrid.appendChild(dot);
+  }
+}
+
+function syncFormatbar() {
+  const e = state.active?.edit;
+  if (!e || !els.formatbar) return;
+  els.fmtSize.textContent = String(Math.round(Number(e.size) || 12));
+  if (els.fmtFont) els.fmtFont.value = e.font || 'Helvetica';
+  if (els.fmtSwatch) els.fmtSwatch.style.background = e.color || '#111827';
+  if (els.fmtColorInput) els.fmtColorInput.value = normalizeHexColor(e.color);
+  if (els.fmtLineHeight) {
+    els.fmtLineHeight.textContent = (Number(e.lineHeight) || 1.16).toFixed(2).replace('.', ',');
+  }
+  document.querySelectorAll('[data-fmt]').forEach((btn) => {
+    btn.classList.toggle('active', !!e[btn.dataset.fmt]);
+  });
+  document.querySelectorAll('[data-align]').forEach((btn) => {
+    btn.classList.toggle('active', (e.align || 'left') === btn.dataset.align);
+  });
+}
+
+function applyFormat(mutator) {
+  const e = state.active?.edit;
+  if (!e) return;
+  mutator(e);
+  inline.refresh();
+  syncFormatbar();
+  onInlineChange();
+  scheduleAutosave();
+}
+
+function closeFormatPops() {
+  if (els.fmtColorPop) els.fmtColorPop.hidden = true;
+  if (els.fmtMorePop) els.fmtMorePop.hidden = true;
+}
+
+function showFormatbar() {
+  if (!els.formatbar) return;
+  buildColorGrid();
+  els.formatbar.hidden = false;
+  closeFormatPops();
+  syncFormatbar();
+  updateKeyboardInset();
+  const row = els.formatbar.querySelector('.formatbar-row');
+  if (row) row.scrollLeft = 0;
+}
+
+function hideFormatbar() {
+  if (!els.formatbar) return;
+  els.formatbar.hidden = true;
+  closeFormatPops();
+}
+
+function updateKeyboardInset() {
+  const vv = window.visualViewport;
+  let inset = 0;
+  if (vv) inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+  document.documentElement.style.setProperty('--kb-offset', `${Math.round(inset)}px`);
+}
+
+function bindFormatbar() {
+  if (!els.formatbar) return;
+  // Garde le focus et la sélection dans le bloc éditable.
+  els.formatbar.addEventListener('pointerdown', (ev) => {
+    if (ev.target.closest('button')) ev.preventDefault();
+  });
+
+  els.formatbar.querySelectorAll('[data-fmt]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.fmt;
+      applyFormat((e) => {
+        e[key] = !e[key];
+      });
+    });
+  });
+
+  els.formatbar.querySelectorAll('[data-size]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      applyFormat((e) => {
+        const next = Math.round((Number(e.size) || 12) + Number(btn.dataset.size));
+        e.size = U.clamp(next, 4, 200);
+      });
+    });
+  });
+
+  els.fmtFont?.addEventListener('change', () => {
+    applyFormat((e) => {
+      e.font = els.fmtFont.value;
+    });
+  });
+
+  document.querySelectorAll('[data-align]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      applyFormat((e) => {
+        e.align = btn.dataset.align;
+      });
+    });
+  });
+
+  els.fmtColorBtn?.addEventListener('click', () => {
+    if (!els.fmtColorPop) return;
+    const open = els.fmtColorPop.hidden;
+    closeFormatPops();
+    els.fmtColorPop.hidden = !open;
+  });
+
+  els.fmtColorInput?.addEventListener('input', () => {
+    const color = normalizeHexColor(els.fmtColorInput.value);
+    applyFormat((e) => {
+      e.color = color;
+    });
+  });
+
+  els.fmtMore?.addEventListener('click', () => {
+    if (!els.fmtMorePop) return;
+    const open = els.fmtMorePop.hidden;
+    closeFormatPops();
+    els.fmtMorePop.hidden = !open;
+  });
+
+  els.formatbar.querySelectorAll('[data-lh]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      applyFormat((e) => {
+        const next = (Number(e.lineHeight) || 1.16) + Number(btn.dataset.lh);
+        e.lineHeight = U.clamp(Math.round(next * 100) / 100, 0.8, 2.6);
+      });
+    });
+  });
+
+  els.fmtDuplicate?.addEventListener('click', () => {
+    closeFormatPops();
+    duplicateActiveEdit();
+  });
+  els.fmtDelete?.addEventListener('click', () => {
+    closeFormatPops();
+    deleteActiveEdit();
+  });
+}
+
 function showEditingUi() {
   const e = state.active?.edit;
   if (!e) return;
@@ -725,11 +906,13 @@ function showEditingUi() {
   }
   updateEditbarCount();
   updateHistoryButtons();
+  showFormatbar();
 }
 
 function hideEditingUi() {
   document.body.classList.remove('editing');
   if (els.editbar) els.editbar.hidden = true;
+  hideFormatbar();
 }
 
 function updateEditbarCount() {
@@ -812,6 +995,7 @@ function selectLine(lineId) {
   renderOverlay();
   inline.open(edit, { isNew: true });
   showEditingUi();
+  syncFormatbar();
   renderEditList();
   updateExportUi();
 }
@@ -829,6 +1013,7 @@ function selectEdit(id) {
   renderOverlay();
   inline.open(edit, { isNew: false });
   showEditingUi();
+  syncFormatbar();
   renderEditList();
   updateExportUi();
 }
@@ -2402,6 +2587,8 @@ function bindEvents() {
     redoEdits();
   });
 
+  bindFormatbar();
+
   // Toucher en dehors du texte valide la modification.
   document.addEventListener(
     'pointerdown',
@@ -2696,6 +2883,9 @@ function init() {
   initTheme();
   bindPinchZoom();
   bindTabsKeyboard();
+  updateKeyboardInset();
+  window.visualViewport?.addEventListener('resize', updateKeyboardInset);
+  window.visualViewport?.addEventListener('scroll', updateKeyboardInset);
 }
 
 init();

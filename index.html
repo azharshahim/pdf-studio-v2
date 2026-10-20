@@ -403,6 +403,66 @@
       </div>
     </div>
 
+    <!-- ══════════════ BARRE DE MISE EN FORME (au-dessus du clavier) ══════════════ -->
+    <div class="formatbar" id="formatbar" role="toolbar" aria-label="Mise en forme" hidden>
+      <div class="formatbar-row">
+        <button class="fmt-btn" type="button" data-fmt="bold" data-i18n-title="editor.bold" aria-label="Gras"><span class="fmt-glyph fg-bold">B</span></button>
+        <button class="fmt-btn" type="button" data-fmt="italic" data-i18n-title="editor.italic" aria-label="Italique"><span class="fmt-glyph fg-italic">I</span></button>
+        <button class="fmt-btn" type="button" data-fmt="underline" data-i18n-title="editor.underline" aria-label="Souligné"><span class="fmt-glyph fg-underline">U</span></button>
+        <span class="fmt-sep"></span>
+        <div class="fmt-stepper" role="group" data-i18n-title="editor.size" aria-label="Taille du texte">
+          <button class="fmt-btn" type="button" data-size="-1" aria-label="Réduire la taille">−</button>
+          <span class="fmt-size" id="fmtSize">12</span>
+          <button class="fmt-btn" type="button" data-size="1" aria-label="Augmenter la taille">+</button>
+        </div>
+        <label class="fmt-select-wrap">
+          <select id="fmtFont" class="fmt-select" data-i18n-title="editor.font" aria-label="Police">
+            <option value="Helvetica">Helvetica</option>
+            <option value="Times">Times</option>
+            <option value="Courier">Courier</option>
+            <option value="Noto Sans">Noto Sans</option>
+          </select>
+        </label>
+        <button class="fmt-btn fmt-color-btn" type="button" id="fmtColorBtn" data-i18n-title="editor.color" aria-label="Couleur">
+          <span class="fmt-swatch" id="fmtSwatch"></span>
+        </button>
+        <span class="fmt-sep"></span>
+        <div class="fmt-group" role="group" data-i18n-title="editor.align" aria-label="Alignement">
+          <button class="fmt-btn" type="button" data-align="left" data-i18n-title="editor.alignLeft" aria-label="Aligner à gauche">
+            <svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true"><path d="M3 4h12M3 8h8M3 12h12M3 16h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          </button>
+          <button class="fmt-btn" type="button" data-align="center" data-i18n-title="editor.alignCenter" aria-label="Centrer">
+            <svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true"><path d="M3 4h12M5 8h8M3 12h12M6 16h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          </button>
+          <button class="fmt-btn" type="button" data-align="right" data-i18n-title="editor.alignRight" aria-label="Aligner à droite">
+            <svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true"><path d="M3 4h12M7 8h8M3 12h12M9 16h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <button class="fmt-btn fmt-more" type="button" id="fmtMore" data-i18n-title="editor.more" aria-label="Plus d’options">…</button>
+      </div>
+
+      <div class="fmt-pop color-pop" id="fmtColorPop" hidden>
+        <div class="color-grid" id="fmtColorGrid"></div>
+        <label class="color-custom">
+          <span data-i18n="editor.customColor">Couleur personnalisée</span>
+          <input type="color" id="fmtColorInput" value="#111827" />
+        </label>
+      </div>
+
+      <div class="fmt-pop more-pop" id="fmtMorePop" hidden>
+        <div class="more-row">
+          <span data-i18n="editor.lineHeight">Interligne</span>
+          <div class="fmt-stepper">
+            <button class="fmt-btn" type="button" data-lh="-0.1" aria-label="Réduire l’interligne">−</button>
+            <span class="fmt-size" id="fmtLineHeight">1,16</span>
+            <button class="fmt-btn" type="button" data-lh="0.1" aria-label="Augmenter l’interligne">+</button>
+          </div>
+        </div>
+        <button class="more-item" type="button" id="fmtDuplicate"><span data-icon="copy"></span><span data-i18n="editor.duplicate">Dupliquer le bloc</span></button>
+        <button class="more-item danger" type="button" id="fmtDelete"><span data-icon="trash"></span><span data-i18n="editor.deleteBlock">Supprimer le bloc</span></button>
+      </div>
+    </div>
+
     <button class="fab" id="btnAddText" type="button" aria-label="Ajouter du texte" data-i18n-title="editor.addText">
       <span data-icon="plus"></span><span data-i18n="editor.addTextShort">Texte</span>
     </button>
