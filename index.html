@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="PDF Studio — lisez, océrisez et modifiez le texte de vos PDF directement dans le navigateur." />
+    <title>PDF Studio — OCR & édition de PDF</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%234f46e5'/%3E%3Cpath d='M20 12h16l10 10v30a4 4 0 0 1-4 4H20a4 4 0 0 1-4-4V16a4 4 0 0 1 4-4z' fill='%23fff'/%3E%3Cpath d='M36 12v10h10' fill='%23c7d2fe'/%3E%3Cg stroke='%234f46e5' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M24 32h16M24 39h16M24 46h10'/%3E%3C/g%3E%3C/svg%3E" />
+  </head>
+  <body class="no-doc">
+    <div class="app" id="app">
+      <!-- ══════════════ TOP BAR ══════════════ -->
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 64 64" width="34" height="34">
+              <defs>
+                <linearGradient id="brandGrad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#6366f1" />
+                  <stop offset="1" stop-color="#4338ca" />
+                </linearGradient>
+              </defs>
+              <rect width="64" height="64" rx="17" fill="url(#brandGrad)" />
+              <path d="M21 12h14l10 10v28a5 5 0 0 1-5 5H21a5 5 0 0 1-5-5V17a5 5 0 0 1 5-5z" fill="#ffffff" />
+              <path d="M35 12v10h10z" fill="#c7d2fe" />
+              <g stroke="#4f46e5" stroke-width="3.2" stroke-linecap="round">
+                <path d="M24 32h16M24 39h16M24 46h9" />
+              </g>
+              <path d="M17 54c6-3 24-3 30 0" fill="none" stroke="#a5b4fc" stroke-width="2.5" stroke-linecap="round" />
+            </svg>
+          </div>
+          <div class="brand-text">
+            <strong>PDF Studio</strong>
+            <span>OCR &amp; édition</span>
+          </div>
+        </div>
+
+        <div class="file-chip" id="fileChip" hidden>
+          <span class="file-chip-icon" data-icon="file"></span>
+          <span class="file-chip-name" id="fileName">document.pdf</span>
+          <span class="file-chip-meta" id="fileMeta"></span>
+        </div>
+
+        <div class="topbar-spacer"></div>
+
+        <button class="icon-btn" id="btnSearch" title="Rechercher dans le document (Ctrl+F)" data-icon="search"></button>
+        <button class="btn ghost" id="btnOpen"><span data-icon="folder"></span><span>Ouvrir un PDF</span></button>
+
+        <div class="export-wrap">
+          <button class="btn primary" id="btnExport" disabled>
+            <span data-icon="download"></span><span>Exporter</span><span class="caret" data-icon="chevronDown"></span>
+          </button>
+          <div class="popover export-menu" id="exportMenu" hidden>
+            <div class="popover-head">
+              <h4>Exporter le document</h4>
+              <button class="icon-btn tiny" id="exportClose" aria-label="Fermer" data-icon="x"></button>
+            </div>
+            <label class="check">
+              <input type="checkbox" id="expEdits" checked />
+              <span>Appliquer les modifications <b class="count" id="expEditsCount">(0)</b></span>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="expOcr" checked />
+              <span>Ajouter la couche OCR <b class="count" id="expOcrCount">(0)</b></span>
+            </label>
+            <button class="btn primary wide" id="btnExportPdf"><span data-icon="download"></span>Télécharger le PDF</button>
+            <div class="popover-divider"></div>
+            <button class="btn ghost wide" id="btnExportText"><span data-icon="fileText"></span>Texte extrait (.txt)</button>
+            <p class="muted xsmall">Traitement 100 % local — vos fichiers ne quittent pas votre navigateur.</p>
+          </div>
+        </div>
+      </header>
+
+      <!-- ══════════════ SEARCH ══════════════ -->
+      <div class="searchbar" id="searchbar" hidden>
+        <div class="search-inner">
+          <span class="search-ico" data-icon="search"></span>
+          <input id="searchInput" type="search" placeholder="Rechercher dans le document…" autocomplete="off" spellcheck="false" />
+          <span class="search-count" id="searchCount"></span>
+          <button class="icon-btn tiny" id="searchPrev" title="Résultat précédent" data-icon="chevronUp"></button>
+          <button class="icon-btn tiny" id="searchNext" title="Résultat suivant" data-icon="chevronDown"></button>
+          <button class="icon-btn tiny" id="searchClose" title="Fermer" data-icon="x"></button>
+          <div class="search-results" id="searchResults" hidden></div>
+        </div>
+      </div>
+
+      <!-- ══════════════ WORKSPACE ══════════════ -->
+      <div class="workspace" id="workspace">
+        <aside class="thumbrail" id="thumbrail">
+          <div class="thumbrail-head">
+            <span>Pages</span>
+            <span class="thumbrail-count" id="thumbCount">0</span>
+          </div>
+          <div class="thumbs" id="thumbs"></div>
+        </aside>
+
+        <main class="viewer">
+          <div class="viewer-top" id="viewerTop">
+            <div class="page-nav">
+              <button class="icon-btn" id="btnPrev" title="Page précédente (←)" data-icon="chevronLeft"></button>
+              <div class="page-num">
+                <input id="pageInput" type="number" min="1" value="1" aria-label="Numéro de page" />
+                <span>/ <b id="pageCount">0</b></span>
+              </div>
+              <button class="icon-btn" id="btnNext" title="Page suivante (→)" data-icon="chevronRight"></button>
+            </div>
+            <div class="vsep"></div>
+            <div class="zoom">
+              <button class="icon-btn" id="btnZoomOut" title="Zoom arrière (−)" data-icon="minus"></button>
+              <button class="zoom-label" id="zoomLabel" title="Ajuster à la fenêtre">100 %</button>
+              <button class="icon-btn" id="btnZoomIn" title="Zoom avant (+)" data-icon="plus"></button>
+              <button class="icon-btn" id="btnFit" title="Ajuster à la largeur" data-icon="fit"></button>
+            </div>
+            <div class="topbar-spacer"></div>
+            <span class="ocr-hint" id="ocrHint" hidden><span class="dot amber"></span>Page OCRisée</span>
+            <button class="btn soft small" id="btnAddTextTop"><span data-icon="plus"></span><span>Texte</span></button>
+            <button class="icon-btn inspector-toggle" id="btnInspectorToggle" title="Panneau latéral" data-icon="panel"></button>
+          </div>
+
+          <div class="canvas-scroll" id="canvasScroll">
+            <div class="stage" id="stage" hidden>
+              <canvas id="pdfCanvas"></canvas>
+              <div class="overlay" id="overlay"></div>
+            </div>
+
+            <div class="empty" id="emptyState">
+              <div class="empty-inner">
+                <div class="hero-art" aria-hidden="true">
+                  <svg viewBox="0 0 420 210" width="420" height="210">
+                    <defs>
+                      <linearGradient id="artBg" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0" stop-color="#eef0ff" />
+                        <stop offset="1" stop-color="#e0f2fe" />
+                      </linearGradient>
+                      <linearGradient id="artPage" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0" stop-color="#ffffff" />
+                        <stop offset="1" stop-color="#f8fafc" />
+                      </linearGradient>
+                      <filter id="artShadow" x="-30%" y="-30%" width="160%" height="160%">
+                        <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#1e1b4b" flood-opacity="0.16" />
+                      </filter>
+                    </defs>
+                    <rect x="30" y="12" width="360" height="186" rx="26" fill="url(#artBg)" />
+                    <g filter="url(#artShadow)">
+                      <rect x="126" y="26" width="168" height="158" rx="10" fill="url(#artPage)" stroke="#e2e8f0" />
+                    </g>
+                    <rect x="146" y="48" width="76" height="10" rx="5" fill="#4f46e5" />
+                    <rect x="146" y="68" width="128" height="6" rx="3" fill="#e2e8f0" />
+                    <rect x="146" y="82" width="112" height="6" rx="3" fill="#e2e8f0" />
+                    <rect x="146" y="96" width="120" height="6" rx="3" fill="#e2e8f0" />
+                    <rect x="146" y="118" width="52" height="6" rx="3" fill="#fca5a5" />
+                    <rect x="202" y="118" width="70" height="6" rx="3" fill="#e2e8f0" />
+                    <rect x="146" y="132" width="96" height="6" rx="3" fill="#e2e8f0" />
+                    <rect x="146" y="146" width="108" height="6" rx="3" fill="#e2e8f0" />
+                    <rect x="146" y="160" width="66" height="6" rx="3" fill="#e2e8f0" />
+                    <g>
+                      <rect x="236" y="92" width="118" height="72" rx="12" fill="#0f172a" opacity="0.9" />
+                      <g stroke="#a5b4fc" stroke-width="3" stroke-linecap="round">
+                        <path d="M252 110V102h8M330 110V102h-8M252 146v8h8M330 146v8h-8" fill="none" />
+                        <path d="M252 128h88" stroke="#818cf8" />
+                      </g>
+                      <rect x="252" y="138" width="46" height="6" rx="3" fill="#6366f1" />
+                      <rect x="304" y="138" width="36" height="6" rx="3" fill="#334155" />
+                    </g>
+                    <g transform="translate(76 116) rotate(-8)">
+                      <rect x="0" y="0" width="74" height="30" rx="15" fill="#ffffff" stroke="#c7d2fe" />
+                      <text x="37" y="20" text-anchor="middle" font-family="ui-sans-serif, system-ui" font-size="13" font-weight="700" fill="#4338ca">OCR</text>
+                    </g>
+                    <circle cx="88" cy="52" r="5" fill="#fbbf24" />
+                    <circle cx="352" cy="168" r="7" fill="#34d399" opacity="0.85" />
+                    <path d="M60 176c14 5 30 6 44 3" stroke="#c7d2fe" stroke-width="3" stroke-linecap="round" fill="none" />
+                  </svg>
+                </div>
+                <h1>Modifiez le texte de vos PDF,<br /><em>même les scans.</em></h1>
+                <p class="lead">
+                  Ouvrez un document, cliquez sur un texte pour le corriger, puis lancez l'OCR sur les pages
+                  numérisées. Rien ne quitte votre navigateur.
+                </p>
+                <div class="empty-actions">
+                  <button class="btn primary lg" id="btnEmptyOpen"><span data-icon="folder"></span>Choisir un PDF</button>
+                </div>
+                <div class="demo-row">
+                  <span class="demo-label">Pas de fichier sous la main ?</span>
+                  <button class="linkbtn" id="btnDemoText">Essayer un PDF d'exemple</button>
+                  <span class="demo-sep">·</span>
+                  <button class="linkbtn" id="btnDemoScan">Essayer un scan à OCRiser</button>
+                </div>
+                <div class="feature-chips">
+                  <span><i data-icon="scan"></i>OCR français &amp; anglais</span>
+                  <span><i data-icon="edit"></i>Édition du texte</span>
+                  <span><i data-icon="shield"></i>100 % local</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="hintbar" id="hintbar" hidden>
+            <span class="hint-dot"></span>
+            <span id="hintText">Cliquez sur un texte pour le modifier</span>
+            <button class="linkbtn" id="hintCancel" hidden>Annuler</button>
+          </div>
+        </main>
+
+        <aside class="inspector" id="inspector">
+          <div class="tabs" role="tablist">
+            <button class="tab active" data-tab="edit" role="tab"><span data-icon="edit"></span>Éditer<span class="tab-badge" id="editCount">0</span></button>
+            <button class="tab" data-tab="ocr" role="tab"><span data-icon="scan"></span>OCR</button>
+            <button class="tab" data-tab="text" role="tab"><span data-icon="text"></span>Texte</button>
+          </div>
+
+          <div class="panels">
+            <!-- ───── EDIT PANEL ───── -->
+            <section class="panel active" data-panel="edit">
+              <div class="panel-scroll">
+                <div id="editEmpty">
+                  <div class="callout">
+                    <div class="callout-icon" data-icon="edit"></div>
+                    <h3>Corriger un texte</h3>
+                    <p>Cliquez sur n'importe quelle ligne du document pour la réécrire, ajuster sa police, sa taille ou sa couleur.</p>
+                    <button class="btn soft wide" id="btnAddText"><span data-icon="plus"></span>Ajouter un bloc de texte</button>
+                  </div>
+                  <div class="panel-section">
+                    <div class="section-head">
+                      <h4>Modifications</h4>
+                      <span class="badge" id="editCountList">0</span>
+                      <button class="linkbtn push" id="btnClearEdits">Tout effacer</button>
+                    </div>
+                    <div class="edit-list" id="editList"></div>
+                    <p class="muted small" id="editListEmpty">Aucune modification pour l'instant.</p>
+                  </div>
+                </div>
+
+                <div id="editForm" hidden>
+                  <div class="form-head">
+                    <div class="form-head-badges">
+                      <span class="badge" id="efPage">Page 1</span>
+                      <span class="badge outline" id="efSource">Texte PDF</span>
+                    </div>
+                    <button class="icon-btn tiny" id="efClose" title="Fermer" data-icon="x"></button>
+                  </div>
+
+                  <div class="original" id="efOriginalWrap">
+                    <span>Texte d'origine</span>
+                    <p id="efOriginal"></p>
+                  </div>
+
+                  <label class="field">
+                    <span>Nouveau texte</span>
+                    <textarea id="efText" rows="3" placeholder="Saisissez le texte…"></textarea>
+                  </label>
+
+                  <div class="field-grid">
+                    <label class="field">
+                      <span>Police</span>
+                      <select id="efFont">
+                        <option value="Helvetica">Sans-serif (Helvetica)</option>
+                        <option value="Times">Serif (Times)</option>
+                        <option value="Courier">Monospace (Courier)</option>
+                      </select>
+                    </label>
+                    <label class="field">
+                      <span>Taille</span>
+                      <input id="efSize" type="number" min="4" max="200" step="0.5" />
+                    </label>
+                  </div>
+
+                  <div class="field-grid three">
+                    <div class="field">
+                      <span>Style</span>
+                      <div class="style-toggle">
+                        <button id="efBold" class="toggle-btn" title="Gras">B</button>
+                        <button id="efItalic" class="toggle-btn" title="Italique">I</button>
+                      </div>
+                    </div>
+                    <label class="field">
+                      <span>Texte</span>
+                      <input id="efColor" type="color" />
+                    </label>
+                    <label class="field">
+                      <span>Fond</span>
+                      <input id="efBg" type="color" />
+                    </label>
+                  </div>
+
+                  <label class="check">
+                    <input type="checkbox" id="efFit" />
+                    <span>Ajuster la taille à la zone</span>
+                  </label>
+
+                  <div class="form-actions">
+                    <button class="btn primary wide" id="efApply"><span data-icon="check"></span>Valider</button>
+                    <button class="btn ghost" id="efReset"><span data-icon="undo"></span>Rétablir l'original</button>
+                  </div>
+                  <p class="muted xsmall">Le fond masque le texte d'origine. Choisissez une couleur proche du papier pour un rendu invisible.</p>
+                </div>
+              </div>
+            </section>
+
+            <!-- ───── OCR PANEL ───── -->
+            <section class="panel" data-panel="ocr">
+              <div class="panel-scroll">
+                <div class="callout">
+                  <div class="callout-icon scan" data-icon="scan"></div>
+                  <h3>Lire un document scanné</h3>
+                  <p>L'OCR extrait le texte des images pour le rendre lisible, copiable et recherchable — et vous permet de le corriger.</p>
+
+                  <label class="field">
+                    <span>Langue des documents</span>
+                    <select id="ocrLang">
+                      <option value="fra+eng" selected>Français + anglais</option>
+                      <option value="fra">Français</option>
+                      <option value="eng">Anglais</option>
+                    </select>
+                  </label>
+
+                  <div class="btn-row">
+                    <button class="btn primary" id="btnOcrPage"><span data-icon="scan"></span>Cette page</button>
+                    <button class="btn soft" id="btnOcrAll">Tout le PDF</button>
+                  </div>
+
+                  <div class="progress-box" id="ocrProgress" hidden>
+                    <div class="progress-track"><div class="progress-fill" id="ocrProgressFill"></div></div>
+                    <div class="progress-meta">
+                      <span id="ocrStatus">Initialisation…</span>
+                      <button class="linkbtn" id="btnOcrCancel">Annuler</button>
+                    </div>
+                  </div>
+
+                  <p class="muted xsmall">L'OCR s'exécute localement. Les documents nets et droits donnent les meilleurs résultats.</p>
+                </div>
+
+                <div class="panel-section">
+                  <div class="section-head">
+                    <h4>Texte reconnu</h4>
+                    <span class="badge ok" id="ocrConf" hidden></span>
+                  </div>
+                  <div id="ocrResultBox" hidden>
+                    <textarea id="ocrText" readonly rows="8"></textarea>
+                    <div class="btn-row">
+                      <button class="btn ghost small" id="btnCopyOcr"><span data-icon="copy"></span>Copier</button>
+                      <button class="btn ghost small" id="btnOcrFix"><span data-icon="edit"></span>Corriger sur la page</button>
+                    </div>
+                  </div>
+                  <p class="muted small" id="ocrNoResult">Aucune page analysée pour l'instant. Lancez l'OCR pour voir le texte reconnu apparaître ici.</p>
+                </div>
+
+                <div class="panel-section">
+                  <div class="section-head"><h4>Pages analysées</h4></div>
+                  <div class="chip-list" id="ocrPageChips"><span class="muted small">—</span></div>
+                </div>
+              </div>
+            </section>
+
+            <!-- ───── TEXT PANEL ───── -->
+            <section class="panel" data-panel="text">
+              <div class="panel-scroll">
+                <div class="section-head">
+                  <h4>Texte de la page</h4>
+                  <span class="badge" id="textSource">—</span>
+                </div>
+                <textarea id="pageText" readonly rows="14" placeholder="Aucun texte détecté sur cette page."></textarea>
+                <div class="btn-row">
+                  <button class="btn ghost small" id="btnCopyPageText"><span data-icon="copy"></span>Copier la page</button>
+                  <button class="btn ghost small" id="btnDownloadText"><span data-icon="download"></span>Tout en .txt</button>
+                </div>
+                <p class="muted small">Le texte affiché inclut vos modifications. Pour une page scannée sans texte natif, lancez d'abord l'OCR.</p>
+                <div class="panel-section tips">
+                  <h4>Astuces</h4>
+                  <ul class="muted small">
+                    <li>Recherchez un mot avec <kbd>Ctrl</kbd>+<kbd>F</kbd> — les pages OCRisées sont incluses.</li>
+                    <li>Double-cliquez sur un bloc pour le corriger depuis l'onglet Éditer.</li>
+                    <li>Exportez le PDF avec la couche OCR pour un document recherchable.</li>
+                  </ul>
+                </div>
+              </div>
+            </section>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <div class="drop-overlay" id="dropOverlay" hidden>
+      <div class="drop-card">
+        <div class="drop-icon" data-icon="file"></div>
+        <h2>Déposez votre PDF ici</h2>
+        <p>Relâchez pour l'ouvrir — le fichier reste sur votre appareil.</p>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="exportModal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="exportModalTitle">
+        <div class="modal-head">
+          <div class="modal-title">
+            <span class="modal-check" data-icon="check"></span>
+            <h3 id="exportModalTitle">Export prêt</h3>
+          </div>
+          <button class="icon-btn" id="exportModalClose" aria-label="Fermer" data-icon="x"></button>
+        </div>
+        <div class="modal-content">
+          <div class="modal-preview" id="exportPreviewWrap">
+            <canvas id="exportPreview"></canvas>
+          </div>
+          <div class="modal-info">
+            <div class="modal-file">
+              <span class="badge" id="exportKind">PDF</span>
+              <div class="modal-file-text">
+                <strong id="exportFileName"></strong>
+                <span class="muted small" id="exportFileMeta"></span>
+              </div>
+            </div>
+            <label class="field" id="exportTextBox" hidden>
+              <span>Aperçu du texte</span>
+              <textarea id="exportTextPreview" readonly rows="10"></textarea>
+            </label>
+            <a class="btn primary wide" id="exportDownload" download><span data-icon="download"></span>Télécharger le fichier</a>
+            <button class="btn ghost wide" id="exportCopyText" hidden><span data-icon="copy"></span>Copier le texte</button>
+            <p class="muted xsmall">Si le téléchargement ne démarre pas (aperçu intégré), ouvrez l’application dans un nouvel onglet.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="loading-screen" id="loadingScreen" hidden>
+      <div class="loading-card">
+        <div class="spinner"></div>
+        <p id="loadingLabel">Ouverture du document…</p>
+      </div>
+    </div>
+
+    <div class="toasts" id="toasts"></div>
+
+    <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden />
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
