@@ -3671,6 +3671,14 @@ body.on-screen #btnOpen {
 body.editing .annobar {
   display: none;
 }
+/* Plein écran pendant l'annotation : la barre du bas et le bouton Texte s'effacent. */
+body.annotating .tabbar,
+body.annotating .fab {
+  display: none;
+}
+body.annotating .annobar {
+  bottom: calc(8px + env(safe-area-inset-bottom));
+}
 
 /* Sélection d'un objet posé sur la page */
 .mk.selected {

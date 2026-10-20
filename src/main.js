@@ -2016,6 +2016,8 @@ async function openPdfBytes(bytes, name, password = '') {
     markup.setObjects([]);
     markupHistory.stack = [];
     markupHistory.index = -1;
+    insertCount = 0;
+    if (els.annobar && !els.annobar.hidden) closeAnnotate();
     if (els.tabForm) els.tabForm.hidden = true;
     if (els.formFields) els.formFields.innerHTML = '';
     els.stage.classList.remove('placing');
@@ -2779,7 +2781,7 @@ function editNote(obj) {
 /* ───────────────────────── Signatures et tampons ───────────────────────── */
 
 /** Décalage en cascade pour que les objets insérés ne se superposent pas. */
-let insertCount = 0;
+var insertCount = 0;
 /** Taille de la page en points PDF (l'origine des bbox d'objets). */
 function pdfPageSize() {
   const vp = state.viewport;

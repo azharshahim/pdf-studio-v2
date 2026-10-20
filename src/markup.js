@@ -155,9 +155,15 @@ export function createMarkup({
       img.draggable = false;
       el.appendChild(img);
     } else if (o.type === 'stamp') {
-      el.innerHTML = `<span class="stamp-text" style="color:${o.color};border-color:${o.borderColor || o.color}">${
-        o.text || ''
-      }</span>`;
+      // Le texte du tampon suit la taille réelle (points PDF × échelle) : ce que
+      // l'on voit à l'écran est exactement ce qui sera dessiné dans le PDF.
+      const fs = Math.max(6, (o.fontSize || 18) * scale);
+      el.innerHTML = `<span class="stamp-text" style="color:${o.color};border-color:${
+        o.borderColor || o.color
+      };font-size:${fs}px;border-width:${Math.max(1, fs * 0.09)}px;border-radius:${Math.max(
+        2,
+        fs * 0.28,
+      )}px;padding:${Math.max(1, fs * 0.14)}px ${Math.max(2, fs * 0.36)}px">${o.text || ''}</span>`;
     } else if (o.type === 'check') {
       el.innerHTML =
         o.mark === 'cross'
@@ -166,6 +172,7 @@ export function createMarkup({
     } else if (o.type === 'date') {
       el.className = 'mk mk-date';
       el.style.color = o.color;
+      el.style.fontSize = `${Math.max(6, (o.fontSize || 12) * scale)}px`;
       el.textContent = o.text || new Date().toLocaleDateString();
     }
     if (o.id === selectedId) {

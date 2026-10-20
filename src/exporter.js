@@ -702,10 +702,10 @@ export async function drawObjects(pdfDoc, pages, objects) {
       const text = obj.text || '';
       const textWidth = font.widthOfTextAtSize(text, size);
       const boxW = Math.min(w || textWidth + 18, textWidth + 18);
-      const boxH = Math.max(h, size + 10);
+      const boxH = Math.min(Math.max(h, size + 10), size * 1.9);
       page.drawRectangle({
-        x,
-        y,
+        x: x + ((w || boxW) - boxW) / 2,
+        y: y + (h - boxH) / 2,
         width: boxW,
         height: boxH,
         borderColor: color,
@@ -715,8 +715,8 @@ export async function drawObjects(pdfDoc, pages, objects) {
         rotate: degrees(obj.rotation || 0),
       });
       page.drawText(text, {
-        x: x + (boxW - textWidth) / 2,
-        y: y + (boxH - size * 0.72) / 2,
+        x: x + ((w || boxW) - boxW) / 2 + (boxW - textWidth) / 2,
+        y: y + (h - boxH) / 2 + (boxH - size * 0.72) / 2,
         size,
         font,
         color,
