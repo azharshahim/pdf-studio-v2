@@ -3678,10 +3678,17 @@ body.on-screen #btnOpen {
 body.editing .annobar {
   display: none;
 }
-/* Plein écran pendant l'annotation : la barre du bas et le bouton Texte s'effacent. */
+/* Plein écran pendant l'annotation ou le remplissage : la barre du bas et le
+   bouton Texte s'effacent pour ne pas déborder sous la barre d'outils. */
 body.annotating .tabbar,
-body.annotating .fab {
+body.annotating .fab,
+body.form-open .tabbar,
+body.form-open .fab {
   display: none;
+}
+body.annotating .canvas-scroll,
+body.form-open .canvas-scroll {
+  padding-bottom: calc(88px + env(safe-area-inset-bottom));
 }
 body.annotating .annobar {
   bottom: calc(8px + env(safe-area-inset-bottom));

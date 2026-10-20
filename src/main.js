@@ -3282,6 +3282,9 @@ async function openFormTool() {
 function showFormBar() {
   els.annobar.hidden = false;
   els.annoSub.hidden = true;
+  // Comme pour l'annotation : la barre d'onglets s'efface pour laisser la place
+  // aux champs et à la barre Valider / Fermer.
+  document.body.classList.add('form-open');
   els.annoTools.innerHTML = `
     <button class="anno-btn" id="formValidate" type="button">${icon('check', 19)}<span>${t('form.validate')}</span></button>
     <button class="anno-btn" id="formClose" type="button">${icon('x', 19)}<span>${t('common.close')}</span></button>`;
@@ -3291,6 +3294,7 @@ function showFormBar() {
 
 function closeFormTool() {
   formOverlay.active = false;
+  document.body.classList.remove('form-open');
   els.overlay.querySelectorAll('.form-widget, .form-area').forEach((n) => n.remove());
   els.annobar.hidden = true;
   renderOverlay();
