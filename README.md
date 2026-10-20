@@ -23,6 +23,8 @@ entièrement dans le navigateur.
   - option « ajuster la taille à la zone ».
 - **Recherche** insensible à la casse et aux accents, dans le texte natif **et** le texte OCR.
 - **Export**
+  - suppression réelle du texte remplacé dans le flux de contenu (option par défaut) ;
+  - mode « caviardé » qui rastérise la page pour garantir la disparition du texte ;
   - PDF avec les modifications appliquées ;
   - PDF avec couche OCR invisible (texte recherchable / sélectionnable) ;
   - les deux combinés ;
@@ -45,12 +47,31 @@ npm run dev        # http://localhost:5173
 > `--legacy-peer-deps` contourne un bug de résolution de npm 10 rencontré à l'installation.
 > Toutes les dépendances sont déjà présentes dans `node_modules` si le projet vous est livré avec.
 
-Build de production :
+Build de production et prévisualisation :
 
 ```bash
-npm run build      # génère dist/
+npm run build      # génère dist/ (chemins relatifs, prêt pour GitHub Pages)
 npm run preview    # http://localhost:4173
 ```
+
+### Déploiement GitHub Pages
+
+Le workflow `.github/workflows/deploy.yml` construit et publie automatiquement l'application à
+chaque push sur `main` :
+
+**https://azharshahim.github.io/pdf-studio-v2/**
+
+`vite.config.js` utilise `base: './'` et tous les assets (`pdfjs`, `tessdata`, `tesseract`,
+polices) sont résolus à l'exécution via `import.meta.env.BASE_URL`, ce qui permet au site de
+fonctionner aussi bien à la racine que dans un sous-dossier.
+
+### Compatibilité navigateurs
+
+- pdf.js est importé depuis **`pdfjs-dist/legacy`**, qui embarque les polyfills nécessaires aux
+  navigateurs sans `Map.prototype.getOrInsertComputed`, `Promise.try` ou `Promise.withResolvers`.
+- `src/polyfills.js` complète ces API pour le reste de l'application (Safari < 17.4,
+  Firefox < 128, anciens Chrome).
+- Testé sur Chromium récent ; le build legacy couvre Safari iOS 15+ et Firefox ESR.
 
 ---
 
@@ -89,7 +110,9 @@ pdf-studio/
 │   ├── main.js           # application : viewer, édition, OCR, recherche, export, UI
 │   ├── pdfEngine.js      # pdf.js : rendu, extraction de lignes + polices
 │   ├── ocrEngine.js      # worker Tesseract partagé, parsing des blocs
-│   ├── exporter.js       # pdf-lib : masquage, nouveau texte, couche OCR invisible
+│   ├── exporter.js       # pdf-lib : suppression du texte, Noto, couche OCR invisible
+│   ├── textRemoval.js    # réécriture des opérateurs Tj/TJ dans les flux de contenu
+│   ├── polyfills.js      # API récentes pour navigateurs anciens
 │   ├── samples.js        # PDF d'exemple (texte et scan) générés à la volée
 │   ├── icons.js          # icônes SVG
 │   ├── utils.js          # helpers
@@ -115,12 +138,38 @@ pdf-studio/
 
 ---
 
+## Suppression du texte d'origine
+
+Trois modes sont proposés dans le menu Exporter (champ « Texte d'origine ») :
+
+| Mode | Effet | Quand l'utiliser |
+| --- | --- | --- |
+| **Retiré du flux** (défaut) | Les opérateurs `Tj`/`TJ` de la zone éditée sont supprimés du flux de contenu : le texte n'est plus extractible. | PDF générés par un logiciel classique (texte dans le flux de page). |
+| **Caviardé (rastérisé)** | La page est rendue en image, la zone repeinte, puis le nouveau texte est ajouté. | PDF complexes, texte dans des XObjects, garantie absolue. |
+| **Masqué seulement** | Ancien comportement : rectangle de couleur. Le texte reste extractible. | Débogage / préservation maximale du vecteur. |
+
+Le mode « flux » est prudent : si un opérateur couvre visiblement plus que la ligne éditée, ou si
+le flux utilise un filtre non géré, la page concernée bascule automatiquement sur le masque.
+
+## Polices Unicode
+
+Les polices **Noto Sans** (regular / bold / italic / bold-italic) et **Noto Naskh Arabic** sont
+embarquées dans `public/fonts/` et intégrées avec `@pdf-lib/fontkit` :
+
+- les accents rares, symboles et l'arabe sont conservés (au lieu d'être supprimés) ;
+- le texte arabe est shapingé (formes contextuelles) puis réordonné en bidi avant le dessin ;
+- les lignes mixtes arabe/latin sont découpées en segments et dessinées avec la police adaptée ;
+- si un caractère n'existe dans **aucune** police embarquée (emoji, notations musicales…), un
+  avertissement liste les caractères concernés **avant** de lancer l'export.
+
 ## Limites connues
 
-- **Le texte d'origine est masqué visuellement mais reste dans le flux du PDF.** La copie ou
-  l'extraction peuvent donc renvoyer l'ancien texte en plus du nouveau. Une suppression réelle des
-  opérateurs de texte d'origine demanderait une réécriture complète des flux de contenu (hors
-  périmètre de cette version).
+- **Texte dans les objets de formulaire (XObjects)** : le mode « flux » ne parcourt que le flux
+  principal de la page. Ces textes ne sont pas retirés ; utilisez le mode « caviardé ».
+- **Texte d'origine et copier-coller** : en mode « masqué seulement », l'ancien texte reste dans le
+  PDF. Les modes « flux » et « rastérisé » corrigent ce point.
+- **Arabe** : les ligatures complexes et certaines mises en forme (kashida, diacritiques rares)
+  peuvent être approximées ; la sélection du texte arabe exporté renvoie des formes de présentation.
 - Le rendu est optimal lorsque le fond est uniforme (papier, aplat de couleur). Sur les photos ou
   dégradés, le rectangle de masquage peut être perceptible.
 - Les polices d'origine ne sont pas embarquées : l'édition utilise Helvetica, Times ou Courier,

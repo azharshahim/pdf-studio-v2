@@ -1,13 +1,16 @@
-import * as pdfjsLib from 'pdfjs-dist';
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
+import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
+import { assetUrl } from './utils.js';
 
+// Le build `legacy` de pdf.js inclut les polyfills (Promise.try,
+// Map#getOrInsertComputed…) nécessaires aux navigateurs un peu anciens.
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 const PDF_OPTS = {
-  cMapUrl: '/pdfjs/cmaps/',
+  cMapUrl: assetUrl('pdfjs/cmaps/'),
   cMapPacked: true,
-  standardFontDataUrl: '/pdfjs/standard_fonts/',
-  wasmUrl: '/pdfjs/wasm/',
+  standardFontDataUrl: assetUrl('pdfjs/standard_fonts/'),
+  wasmUrl: assetUrl('pdfjs/wasm/'),
 };
 
 function mapFontFamily(family = '') {

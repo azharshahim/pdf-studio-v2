@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  // Chemins relatifs : indispensable pour GitHub Pages (sous /pdf-studio-v2/).
+  base: './',
   server: {
     host: '0.0.0.0',
     port: 5173,
@@ -18,7 +20,7 @@ export default defineConfig({
   build: {
     target: 'es2022',
     assetsInlineLimit: 0,
-    outDir: 'release',
+    outDir: 'dist',
     emptyOutDir: true,
   },
 });

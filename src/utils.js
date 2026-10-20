@@ -1,3 +1,22 @@
+/**
+ * Construit une URL absolue à partir d'un chemin du dossier `public/`.
+ * Compatible avec un déploiement sous sous-dossier (GitHub Pages) grâce à
+ * `import.meta.env.BASE_URL` (`./` en production, `/` en développement).
+ */
+export function assetUrl(path = '') {
+  const base = (import.meta.env?.BASE_URL || '/').replace(/\/+$/, '/');
+  const clean = String(path).replace(/^\/+/, '');
+  const relative = `${base}${clean}`;
+  if (typeof document !== 'undefined' && document.baseURI) {
+    try {
+      return new URL(relative, document.baseURI).href;
+    } catch {
+      return relative;
+    }
+  }
+  return relative;
+}
+
 export const qs = (sel, root = document) => root.querySelector(sel);
 export const qsa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 export const clamp = (v, min, max) => Math.min(max, Math.max(min, v));

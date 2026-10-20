@@ -1,4 +1,5 @@
 import { createWorker, OEM } from 'tesseract.js';
+import { assetUrl } from './utils.js';
 
 const LANG_MAP = {
   'fra+eng': ['fra', 'eng'],
@@ -16,7 +17,8 @@ let lastUsed = 0;
 
 /**
  * Crée (ou réutilise) le worker Tesseract. Les ressources sont servies
- * localement depuis /tesseract, /tesseract-core et /tessdata.
+ * localement depuis `public/tesseract`, `public/tesseract-core` et
+ * `public/tessdata`, avec des URL construites à partir de BASE_URL.
  */
 async function ensureWorker(langsKey) {
   workerLangs = workerLangs || langsKey;
@@ -35,9 +37,9 @@ async function ensureWorker(langsKey) {
 
   workerLangs = langsKey;
   initPromise = createWorker(LANG_MAP[langsKey] || ['fra', 'eng'], OEM.LSTM_ONLY, {
-    workerPath: `/tesseract/worker.min.js?v=${VERSION}`,
-    corePath: '/tesseract-core',
-    langPath: '/tessdata',
+    workerPath: `${assetUrl('tesseract/worker.min.js')}?v=${VERSION}`,
+    corePath: assetUrl('tesseract-core'),
+    langPath: assetUrl('tessdata'),
     cacheMethod: 'none', // évite IndexedDB (bloqué dans certains contextes sandboxés)
     workerBlobURL: true,
     legacyCore: false,

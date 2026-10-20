@@ -63,6 +63,14 @@
               <input type="checkbox" id="expOcr" checked />
               <span>Ajouter la couche OCR <b class="count" id="expOcrCount">(0)</b></span>
             </label>
+            <label class="field-inline export-redact">
+              <span>Texte d'origine</span>
+              <select id="expRedact" title="Traitement appliqué au texte remplacé">
+                <option value="stream">Retiré du flux (recommandé)</option>
+                <option value="raster">Caviardé (page rastérisée)</option>
+                <option value="mask">Masqué seulement</option>
+              </select>
+            </label>
             <button class="btn primary wide" id="btnExportPdf"><span data-icon="download"></span>Télécharger le PDF</button>
             <div class="popover-divider"></div>
             <button class="btn ghost wide" id="btnExportText"><span data-icon="fileText"></span>Texte extrait (.txt)</button>
@@ -430,6 +438,15 @@
     <div class="toasts" id="toasts"></div>
 
     <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden />
-    <script type="module" src="/src/main.js"></script>
+    <dialog class="dialog" id="glyphDialog" aria-labelledby="glyphTitle">
+    <h3 id="glyphTitle">Caractères non pris en charge</h3>
+    <p class="dialog-text" id="glyphText"></p>
+    <div class="dialog-actions">
+      <button class="btn ghost" id="glyphCancel" type="button">Annuler</button>
+      <button class="btn primary" id="glyphContinue" type="button">Exporter quand même</button>
+    </div>
+  </dialog>
+
+  <script type="module" src="/src/main.js"></script>
   </body>
 </html>

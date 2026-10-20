@@ -1,7 +1,8 @@
+import './polyfills.js';
 import './style.css';
 import { PdfEngine, pdfRectToViewportRect, fontTraits } from './pdfEngine.js';
 import { recognizeCanvas, terminateOcr } from './ocrEngine.js';
-import { exportPdf } from './exporter.js';
+import { exportPdf, analyzeExport } from './exporter.js';
 import { buildSampleTextPdf, buildSampleScanPdf } from './samples.js';
 import { icon, hydrateIcons } from './icons.js';
 import * as U from './utils.js';
@@ -19,6 +20,11 @@ const els = {
   expEdits: $('expEdits'),
   expOcr: $('expOcr'),
   expEditsCount: $('expEditsCount'),
+  expRedact: $('expRedact'),
+  glyphDialog: $('glyphDialog'),
+  glyphText: $('glyphText'),
+  glyphCancel: $('glyphCancel'),
+  glyphContinue: $('glyphContinue'),
   expOcrCount: $('expOcrCount'),
   btnExportPdf: $('btnExportPdf'),
   btnExportText: $('btnExportText'),
@@ -1638,6 +1644,46 @@ function closeExportMenu() {
   els.exportMenu.hidden = true;
 }
 
+/**
+ * Avertit l'utilisateur lorsque des caractères ne peuvent être dessinés par
+ * aucune police embarquée, avant de lancer l'export.
+ */
+function confirmMissingGlyphs(missing) {
+  return new Promise((resolve) => {
+    const list = missing
+      .slice(0, 8)
+      .map((m) => `<code>${U.escapeHtml(m.char)}</code> (U+${m.char.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')})`)
+      .join(', ');
+    const more = missing.length > 8 ? ` et ${missing.length - 8} autre(s)` : '';
+    els.glyphText.innerHTML =
+      `Ces caractères n'existent dans aucune des polices embarquées et seront remplacés par un carré vide : ` +
+      `${list}${more}.<br />Vérifiez le texte ou choisissez une autre police.`;
+    const done = (value) => {
+      els.glyphDialog.removeEventListener('close', onClose);
+      els.glyphCancel.removeEventListener('click', onCancel);
+      els.glyphContinue.removeEventListener('click', onContinue);
+      if (els.glyphDialog.open) els.glyphDialog.close();
+      resolve(value);
+    };
+    const onClose = () => done(false);
+    const onCancel = () => done(false);
+    const onContinue = () => done(true);
+    els.glyphDialog.addEventListener('close', onClose);
+    els.glyphCancel.addEventListener('click', onCancel);
+    els.glyphContinue.addEventListener('click', onContinue);
+    els.glyphDialog.showModal();
+  });
+}
+
+/** Rend une page du PDF source en canvas pour la rastérisation d'export. */
+async function renderPageForExport(pageNo) {
+  const size = await state.engine.getPageSize(pageNo);
+  const scale = Math.min(3, 1800 / Math.max(1, size.width));
+  const canvas = document.createElement('canvas');
+  await state.engine.renderToCanvas(pageNo, canvas, Math.max(1, scale));
+  return canvas;
+}
+
 async function handleExportPdf() {
   if (!state.engine) return;
   const includeEdits = els.expEdits.checked;
@@ -1650,16 +1696,42 @@ async function handleExportPdf() {
   const ocrPages = includeOcr
     ? [...state.pages.entries()].filter(([, p]) => p.ocr).map(([n, p]) => ({ pageNo: n, ocr: p.ocr }))
     : [];
+  const edits = includeEdits ? state.edits : [];
+  const redactMode = els.expRedact?.value || 'stream';
+
   pushLoading('Génération du PDF…');
   try {
-    const bytes = await exportPdf({
+    // 1. Vérification des caractères non dessinables (avertissement avant export)
+    if (edits.length || ocrPages.length) {
+      const analysis = await analyzeExport({ edits, ocrPages });
+      if (analysis.missing?.length) {
+        const cont = await confirmMissingGlyphs(analysis.missing);
+        if (!cont) {
+          popLoading();
+          return;
+        }
+      }
+    }
+
+    // 2. Génération
+    const result = await exportPdf({
       sourceBytes: state.bytes,
-      edits: includeEdits ? state.edits : [],
+      edits,
       ocrPages,
+      redactMode,
+      renderPage: redactMode === 'raster' ? renderPageForExport : null,
     });
+    const bytes = result.bytes;
     const suffix = fileNameSuffix(includeEdits, includeOcr);
     const name = `${U.baseName(state.fileName)}-${suffix}.pdf`;
     saveBytes(bytes, name);
+    if (redactMode === 'stream' && result.stats?.removedPages?.length) {
+      toast(
+        `Texte d'origine retiré du flux sur ${result.stats.removedPages.length} page(s).`,
+        'success',
+        { duration: 3800 }
+      );
+    }
     closeExportMenu();
   } catch (err) {
     console.error(err);

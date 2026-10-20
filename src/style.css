@@ -2066,3 +2066,60 @@ kbd {
     min-height: 200px;
   }
 }
+
+
+/* ── Options d'export & dialogue d'avertissement ─────────────────── */
+.export-redact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 2px 0 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.export-redact select {
+  max-width: 210px;
+  padding: 6px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+.dialog {
+  border: none;
+  border-radius: 16px;
+  padding: 22px 24px;
+  max-width: min(480px, 92vw);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+  color: var(--text);
+  background: var(--surface);
+}
+.dialog::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+}
+.dialog h3 {
+  margin: 0 0 8px;
+  font-size: 17px;
+}
+.dialog-text {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+  word-break: break-word;
+}
+.dialog-text code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--surface-2, #f1f5f9);
+  color: var(--text);
+  font-size: 12px;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
