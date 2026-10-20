@@ -16,6 +16,7 @@ import { applyLanguage, t } from './i18n.js';
 import * as U from './utils.js';
 import { initShell, routeTo, openSheet, closeSheet, isSheetOpen, isMobile, renderTools, showOnboarding } from './shell.js';
 import { createMarkup, HIGHLIGHT_COLORS, STAMP_PRESETS } from './markup.js';
+import { computeEditZoom, centerAxis } from './zoomView.js';
 import {
   renderPagesGrid,
   estimateCompression,
@@ -1085,25 +1086,93 @@ function makeEditFromLine(line, pageNo) {
   };
 }
 
-/** Sur téléphone, zoome sur la ligne touchée pour la rendre lisible. */
+/* ─────────────── Zoom d'édition et retour à la vue précédente ─────────────── */
+
+/** Hauteur du clavier virtuel (px), exposée par --kb-offset. */
+function keyboardInset() {
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--kb-offset');
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? Math.max(0, n) : 0;
+}
+
+/** Mémorise zoom et position de défilement avant d'ouvrir une ligne. */
+let editViewSnapshot = null;
+
+function captureEditView() {
+  if (!state.engine) {
+    editViewSnapshot = null;
+    return;
+  }
+  editViewSnapshot = {
+    zoom: state.zoom,
+    left: els.canvasScroll.scrollLeft,
+    top: els.canvasScroll.scrollTop,
+  };
+}
+
+/** Revient exactement au zoom et au défilement d'avant l'édition. */
+async function restoreEditView() {
+  const snap = editViewSnapshot;
+  editViewSnapshot = null;
+  if (!snap || !state.engine || state.active) return;
+  const sameZoom = (snap.zoom ?? null) === (state.zoom ?? null);
+  if (!sameZoom) {
+    state.zoom = snap.zoom;
+    await renderCurrent();
+  }
+  const apply = () => els.canvasScroll.scrollTo({ left: snap.left, top: snap.top, behavior: 'auto' });
+  apply();
+  requestAnimationFrame(apply);
+}
+
+/**
+ * Cadre la ligne touchée : texte lisible (≈16 px), ligne centrée horizontalement
+ * quand elle tient, sinon on aligne son début sans jamais le couper ; centrage
+ * vertical dans la zone encore visible au-dessus du clavier.
+ */
 async function zoomForLine(line) {
-  if (!isMobile() || !state.scale) return;
-  const size = Number(line.fontSize) || 12;
-  if (size * state.scale >= 16 && line.bbox.w * state.scale <= els.canvasScroll.clientWidth - 24) return;
-  const readable = U.clamp(17 / size, state.scale, 3);
-  const maxFit = (els.canvasScroll.clientWidth - 24) / Math.max(40, line.bbox.w);
-  const target = U.clamp(Math.min(readable, Math.max(state.scale, maxFit)), 0.15, 3);
-  if (target <= state.scale * 1.02) return;
+  if (!state.scale) return false;
+  const viewW = els.canvasScroll.clientWidth;
+  const target = computeEditZoom({
+    fontSize: line.fontSize,
+    scale: state.scale,
+    mobile: isMobile(),
+    maxZoom: 3,
+    fits: line.bbox.w * state.scale <= viewW - 28,
+  });
+  if (!target) return false;
   state.zoom = target;
   await renderCurrent();
+  return true;
+}
+
+/** Centre la vue sur une ligne (appelé après le zoom, avant l'ouverture du champ). */
+function focusLineInView(line) {
+  const scroller = els.canvasScroll;
+  if (!scroller || !state.viewport || !els.stage) return;
+  const rect = pdfRectToViewportRect(line.bbox, state.viewport);
+  const view = scroller.getBoundingClientRect();
+  const stage = els.stage.getBoundingClientRect();
+  const left = scroller.scrollLeft + (stage.left - view.left) + rect.left;
+  const top = scroller.scrollTop + (stage.top - view.top) + rect.top;
+  const usableH = Math.max(
+    120,
+    view.height - keyboardInset() - (document.body.classList.contains('editing') ? 78 : 12)
+  );
+  const margin = 14;
+  const targetLeft = centerAxis({ start: left, size: rect.width, view: view.width, margin });
+  const targetTop = centerAxis({ start: top, size: rect.height, view: usableH, margin: 0 });
+  scroller.scrollTo({ left: targetLeft, top: targetTop, behavior: 'auto' });
 }
 
 async function selectLine(lineId) {
   const pageNo = state.pageIndex + 1;
   const line = editLinesForPage(pageNo).find((l) => l.id === lineId);
   if (!line) return;
-  await zoomForLine(line);
   closeActive();
+  captureEditView();
+  await zoomForLine(line);
+  focusLineInView(line);
   const before = U.clone(state.edits);
   const edit = makeEditFromLine(line, pageNo);
   state.edits.push(edit);
@@ -1163,6 +1232,7 @@ function closeActive() {
   updateTextPanel();
   updateHistoryButtons();
   scheduleAutosave();
+  restoreEditView();
 }
 
 function deleteActiveEdit() {
@@ -1182,6 +1252,7 @@ function deleteActiveEdit() {
   updateExportUi();
   updateTextPanel();
   scheduleAutosave();
+  restoreEditView();
   if (!a.isNew) {
     toast(t('msg.blockDeleted'), 'info', {
       action: 'Annuler',

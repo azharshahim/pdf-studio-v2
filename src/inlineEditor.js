@@ -162,25 +162,40 @@ export function createInlineEditor({
     shell.style.padding = `${padY}px ${padX}px`;
   }
 
+  /**
+   * Centre le bloc dans la zone visible au-dessus du clavier. Si le bloc est
+   * plus large que l'écran, on aligne son bord gauche : le début de la ligne
+   * n'est jamais coupé. Idempotent, donc rappelable après l'apparition du clavier.
+   */
   function scrollIntoView() {
     if (!shell?.isConnected) return;
     const scroller = document.getElementById('canvasScroll');
     if (!scroller) return;
     const vv = window.visualViewport;
     const keyboard = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
-    const bar = keyboard + 74;
+    const bar = keyboard + (document.body.classList.contains('editing') ? 78 : 12);
     const rect = shell.getBoundingClientRect();
     const view = scroller.getBoundingClientRect();
-    const centerY = view.top + Math.max(60, view.height - bar) / 2;
+    const margin = 14;
+    const usableH = Math.max(120, view.height - bar);
+    const centerY = view.top + usableH / 2;
     const centerX = view.left + view.width / 2;
-    const dx = rect.left + rect.width / 2 - centerX;
-    const dy = rect.top + rect.height / 2 - centerY;
-    if (Math.abs(dx) < 2 && Math.abs(dy) < 2) return;
-    scroller.scrollTo({
-      left: scroller.scrollLeft + dx,
-      top: scroller.scrollTop + dy,
-      behavior: 'smooth',
-    });
+
+    const contentLeft = scroller.scrollLeft + (rect.left - view.left);
+    const contentTop = scroller.scrollTop + (rect.top - view.top);
+    let left;
+    if (rect.width <= view.width - margin * 2) {
+      left = contentLeft + rect.width / 2 - view.width / 2;
+    } else {
+      left = contentLeft - margin;
+    }
+    const top = contentTop + rect.height / 2 - usableH / 2;
+    const targetLeft = Math.max(0, left);
+    const targetTop = Math.max(0, top);
+    if (Math.abs(targetLeft - scroller.scrollLeft) < 2 && Math.abs(targetTop - scroller.scrollTop) < 2) return;
+    // « auto » plutôt que « smooth » : les appels successifs (ouverture, puis
+    // apparition du clavier) calculent depuis une position stable.
+    scroller.scrollTo({ left: targetLeft, top: targetTop, behavior: 'auto' });
   }
 
   function placeCaret({ selectAll = false, atEnd = true } = {}) {
