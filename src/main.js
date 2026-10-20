@@ -1200,34 +1200,49 @@ function keyboardInset() {
   return Number.isFinite(n) ? Math.max(0, n) : 0;
 }
 
-/** Mémorise zoom et position de défilement avant d'ouvrir une ligne. */
+/**
+ * Mémorise zoom et position de défilement avant d'ouvrir une ligne.
+ * Chaque capture reçoit un jeton : une fermeture asynchrone (le rendu au Zoom
+ * précédent prend quelques dizaines de ms) ne peut pas écraser la capture
+ * d'une édition ouverte entre-temps.
+ */
 let editViewSnapshot = null;
+let editViewSeq = 0;
 
 function captureEditView() {
   if (!state.engine) {
     editViewSnapshot = null;
-    return;
+    return null;
   }
+  editViewSeq += 1;
   editViewSnapshot = {
+    token: editViewSeq,
     zoom: state.zoom,
     left: els.canvasScroll.scrollLeft,
     top: els.canvasScroll.scrollTop,
   };
+  return editViewSnapshot.token;
 }
 
 /** Revient exactement au zoom et au défilement d'avant l'édition. */
-async function restoreEditView() {
+async function restoreEditView(token = null) {
   const snap = editViewSnapshot;
+  if (!snap) return;
+  if (token != null && snap.token !== token) return; // vue déjà remplacée
   editViewSnapshot = null;
-  if (!snap || !state.engine || state.active) return;
+  if (!state.engine || state.active) return;
   const sameZoom = (snap.zoom ?? null) === (state.zoom ?? null);
   if (!sameZoom) {
     state.zoom = snap.zoom;
     await renderCurrent();
+    // Un autre bloc a pu être ouvert pendant le rendu : sa capture prime.
+    if (editViewSnapshot && editViewSnapshot.token !== snap.token) return;
   }
   const apply = () => els.canvasScroll.scrollTo({ left: snap.left, top: snap.top, behavior: 'auto' });
   apply();
   requestAnimationFrame(apply);
+  // Le défilement d'un navigateur mobile se stabilise après le rendu.
+  setTimeout(apply, 120);
 }
 
 /**
@@ -1284,14 +1299,20 @@ async function selectLine(lineId) {
     bold: line.bold,
     italic: line.italic,
   });
-  closeActive();
-  captureEditView();
+  if (state.active) closeActive({ restore: false });
+  const viewToken = captureEditView();
   await zoomForLine(line);
   focusLineInView(line);
   const before = U.clone(state.edits);
   const edit = makeEditFromLine(line, pageNo);
   state.edits.push(edit);
-  state.active = { edit, before, snapshot: { sig: editSignature(edit), data: U.clone(edit) }, isNew: true };
+  state.active = {
+    edit,
+    before,
+    snapshot: { sig: editSignature(edit), data: U.clone(edit) },
+    isNew: true,
+    viewToken,
+  };
   renderOverlay();
   inline.open(edit, { isNew: true, caret });
   showEditingUi();
@@ -1311,12 +1332,14 @@ function selectEdit(id) {
     bold: edit.bold,
     italic: edit.italic,
   });
-  closeActive();
+  if (state.active) closeActive({ restore: false });
+  const viewToken = captureEditView();
   state.active = {
     edit,
     before: U.clone(state.edits),
     snapshot: { sig: editSignature(edit), data: U.clone(edit) },
     isNew: false,
+    viewToken,
   };
   renderOverlay();
   inline.open(edit, { isNew: false, caret });
@@ -1326,7 +1349,7 @@ function selectEdit(id) {
   updateExportUi();
 }
 
-function closeActive() {
+function closeActive({ restore = true } = {}) {
   const a = state.active;
   if (!a) {
     hideEditingUi();
@@ -1336,12 +1359,12 @@ function closeActive() {
   const changed = editSignature(a.edit) !== a.snapshot.sig;
   const hasText = String(a.edit.text || '').trim().length > 0;
 
-  if (a.isNew) {
-    if (!hasText) {
-      state.edits = state.edits.filter((x) => x.id !== a.edit.id);
-    } else if (changed) {
-      state.history.push(a.before);
-    }
+  if (a.isNew && !changed) {
+    // Annuler une modification non validée ne doit laisser aucune trace :
+    // ni bloc superposé, ni entrée dans l'historique, ni compteur incrémenté.
+    state.edits = state.edits.filter((x) => x.id !== a.edit.id);
+  } else if (!hasText && a.isNew) {
+    state.edits = state.edits.filter((x) => x.id !== a.edit.id);
   } else if (changed) {
     state.history.push(a.before);
   }
@@ -1355,7 +1378,7 @@ function closeActive() {
   updateTextPanel();
   updateHistoryButtons();
   scheduleAutosave();
-  restoreEditView();
+  if (restore) restoreEditView(a.viewToken);
 }
 
 function deleteActiveEdit() {
@@ -1375,7 +1398,7 @@ function deleteActiveEdit() {
   updateExportUi();
   updateTextPanel();
   scheduleAutosave();
-  restoreEditView();
+  restoreEditView(a.viewToken);
   if (!a.isNew) {
     toast(t('msg.blockDeleted'), 'info', {
       action: 'Annuler',
