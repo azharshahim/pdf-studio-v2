@@ -173,16 +173,21 @@ export function createInlineEditor({
     const selection = window.getSelection();
     if (!selection) return;
     const range = document.createRange();
-    range.selectNodeContents(textEl);
+    const node = textEl.firstChild;
     if (selectAll && textEl.textContent?.length) {
-      selection.removeAllRanges();
-      selection.addRange(range);
-      return;
+      range.selectNodeContents(textEl);
+    } else if (node && node.nodeType === Node.TEXT_NODE) {
+      // Curseur dans le nœud texte : évite un décalage au début du bloc.
+      range.setStart(node, atEnd ? node.textContent.length : 0);
+    } else {
+      range.selectNodeContents(textEl);
+      range.collapse(atEnd);
     }
-    range.collapse(atEnd);
+    if (!selectAll) range.collapse(true);
     selection.removeAllRanges();
     selection.addRange(range);
   }
+
 
   function startDrag(kind, ev) {
     if (!edit || edit.kind !== 'add') return;
@@ -240,11 +245,21 @@ export function createInlineEditor({
     position();
     overlay.classList.add('has-inline-editor');
 
+    const initial = edit.text || '';
     requestAnimationFrame(() => {
       textEl.focus({ preventScroll: true });
-      placeCaret({ selectAll: !fresh && !!edit.text, atEnd: true });
+      placeCaret({ selectAll: false, atEnd: true });
       scrollIntoView();
     });
+    // Certains navigateurs replacent le curseur au début juste après le focus.
+    setTimeout(() => {
+      if (!shell?.isConnected) return;
+      if (textEl.textContent !== initial) return; // l'utilisateur a déjà saisi
+      const sel = window.getSelection();
+      if (sel && sel.isCollapsed && sel.anchorOffset === 0) {
+        placeCaret({ atEnd: true });
+      }
+    }, 80);
   }
 
   function close() {
