@@ -304,6 +304,18 @@ embarquées dans `public/fonts/` et intégrées avec `@pdf-lib/fontkit` :
 - si un caractère n'existe dans **aucune** police embarquée (emoji, notations musicales…), un
   avertissement liste les caractères concernés **avant** de lancer l'export.
 
+## Version 2.3 — installation et édition mobile
+
+- l'application s'installe sous l'identifiant **`/studio-pdf/`** (manifeste), avec `start_url` et
+  `scope` relatifs, et un cache hors ligne renommé `studio-pdf-v2.3` ;
+- la barre d'édition mobile est une grille **coche / titre tronqué / Enregistrer + annuler +
+  rétablir** : plus aucun chevauchement, en français, anglais et arabe (RTL) ;
+- toucher une ligne zoome **juste ce qu'il faut** (≈ 16 px de texte), la centre horizontalement et
+  verticalement au-dessus du clavier sans couper son début, puis rend la vue précédente à la
+  validation ou à l'annulation.
+
+Le détail des mesures et des captures est dans [`docs/verifications-v2.3.md`](docs/verifications-v2.3.md).
+
 ## Ce qui a été vérifié, et comment
 
 Les tests automatiques (`npm test`, 58 tests) couvrent la logique pure : recherche, polices,
