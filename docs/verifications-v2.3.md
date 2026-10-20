@@ -1,7 +1,8 @@
 # Construction 2.3 : ce qui est corrigé et ce qui a été vérifié
 
-Les captures correspondantes sont dans `docs/captures/v2.3/`. Elles ont toutes été prises
-automatiquement à **390 × 844** (téléphone, émulation tactile) sur la version publiée :
+Les captures correspondantes sont dans `docs/captures/v2.3/` (et réunies dans
+[`planche.png`](captures/v2.3/planche.png)). Elles ont toutes été prises automatiquement à
+**390 × 844** (téléphone, émulation tactile) sur la version publiée :
 https://azharshahim.github.io/studio-pdf/
 
 ## Corrections
