@@ -1,4 +1,3 @@
-import { createWorker, OEM } from 'tesseract.js';
 import { assetUrl } from './utils.js';
 
 const LANG_MAP = {
@@ -36,6 +35,8 @@ async function ensureWorker(langsKey) {
   if (initPromise) return initPromise;
 
   workerLangs = langsKey;
+  // Import paresseux : Tesseract n'est chargé qu'au premier lancement d'un OCR.
+  const { createWorker, OEM } = await import('tesseract.js');
   initPromise = createWorker(LANG_MAP[langsKey] || ['fra', 'eng'], OEM.LSTM_ONLY, {
     workerPath: `${assetUrl('tesseract/worker.min.js')}?v=${VERSION}`,
     corePath: assetUrl('tesseract-core'),

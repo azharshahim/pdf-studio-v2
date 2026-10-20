@@ -31,11 +31,31 @@ entièrement dans le navigateur.
   - texte brut `.txt` de tout le document ;
   - fenêtre d'aperçu avec lien de téléchargement après génération.
 - **Confort**
+  - **annuler / rétablir** (boutons visibles + raccourcis) sur toutes les modifications ;
+  - **sauvegarde automatique** des modifications et résultats OCR (IndexedDB) avec
+    proposition « Reprendre le travail ? » à la réouverture du même fichier ;
+  - ouverture des **PDF protégés par mot de passe** (saisie et nouvelle tentative) ;
+  - messages explicites pour les PDF corrompus ou les fichiers trop lourds (limite 200 Mo) ;
+  - chargement paresseux de Tesseract et de pdf-lib : **bundle initial ≈ 340 Ko gzip** ;
   - extraits d'exemple intégrés : rapport texte et facture scannée ;
   - vignettes de pages (rendu paresseux), zoom, navigation clavier ;
   - interface responsive (panneau latéral escamotable sur mobile).
 
 ---
+
+## Tests
+
+```bash
+npm test          # Vitest : utilitaires, recherche, assainissement, export PDF
+```
+
+Les tests couvrent notamment :
+- la recherche insensible à la casse/aux accents (index d'origine, ligatures œ/æ) ;
+- `sanitizePdfText` et la couverture WinAnsi ;
+- l'export : PDF valide, texte réellement remplacé (extrait avec pdf.js), couche OCR
+  extractible, mode masque conservant l'ancien texte.
+
+La CI GitHub Actions exécute `npm test` puis `npm run build` avant chaque déploiement.
 
 ## Démarrage
 
@@ -94,6 +114,8 @@ fonctionner aussi bien à la racine que dans un sous-dossier.
 | `Ctrl/Cmd + O` | Ouvrir un PDF |
 | `Ctrl/Cmd + F` | Rechercher |
 | `Ctrl/Cmd + S` | Exporter le PDF |
+| `Ctrl/Cmd + Z` | Annuler la dernière modification |
+| `Ctrl/Cmd + Maj + Z` (ou `Ctrl+Y`) | Rétablir |
 | `←` / `→` | Page précédente / suivante |
 | `+` / `−` | Zoom avant / arrière |
 | `Échap` | Fermer le panneau, annuler l'ajout de texte |
@@ -112,6 +134,10 @@ pdf-studio/
 │   ├── ocrEngine.js      # worker Tesseract partagé, parsing des blocs
 │   ├── exporter.js       # pdf-lib : suppression du texte, Noto, couche OCR invisible
 │   ├── textRemoval.js    # réécriture des opérateurs Tj/TJ dans les flux de contenu
+│   ├── search.js         # recherche sans accents + extraits surlignés
+│   ├── history.js        # piles annuler / rétablir
+│   ├── session.js        # sauvegarde IndexedDB (empreinte SHA-256 du PDF)
+│   ├── ui.js             # toasts, chargement, dialogues
 │   ├── polyfills.js      # API récentes pour navigateurs anciens
 │   ├── samples.js        # PDF d'exemple (texte et scan) générés à la volée
 │   ├── icons.js          # icônes SVG
@@ -123,6 +149,15 @@ pdf-studio/
     ├── tesseract-core/   # moteurs wasm (variantes LSTM)
     └── tessdata/         # modèles de langue fra + eng (best_int)
 ```
+
+### Modules
+
+`main.js` reste le contrôleur de l'application (viewer, édition, OCR) et délègue :
+- la **recherche** à `search.js` (fonctions pures testées) ;
+- l'**historique** à `history.js` ;
+- la **persistance de session** à `session.js` ;
+- les **composants d'interface** (toasts, chargement, dialogues) à `ui.js` ;
+- les **moteurs** à `pdfEngine.js`, `ocrEngine.js`, `exporter.js`, `textRemoval.js`.
 
 ### Pipeline d'édition
 
@@ -174,7 +209,9 @@ embarquées dans `public/fonts/` et intégrées avec `@pdf-lib/fontkit` :
   dégradés, le rectangle de masquage peut être perceptible.
 - Les polices d'origine ne sont pas embarquées : l'édition utilise Helvetica, Times ou Courier,
   choisies automatiquement d'après la police détectée.
-- Les PDF chiffrés / protégés par mot de passe ne sont pas pris en charge.
+- Les PDF protégés par mot de passe sont ouverts après saisie du mot de passe ; les PDF
+  chiffrés avec un algorithme exotique peuvent échouer.
+- Les fichiers de plus de 200 Mo sont refusés (au-delà de 60 Mo, un avertissement s'affiche).
 - La qualité de l'OCR dépend de la résolution et de la propreté du scan.
 
 ---

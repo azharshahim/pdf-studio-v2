@@ -119,6 +119,11 @@
               <button class="icon-btn" id="btnZoomIn" title="Zoom avant (+)" data-icon="plus"></button>
               <button class="icon-btn" id="btnFit" title="Ajuster à la largeur" data-icon="fit"></button>
             </div>
+            <div class="vsep"></div>
+            <div class="history-actions" role="group" aria-label="Annuler ou rétablir">
+              <button class="icon-btn" id="btnUndo" title="Annuler (Ctrl+Z)" aria-label="Annuler" data-icon="undo" disabled></button>
+              <button class="icon-btn" id="btnRedo" title="Rétablir (Ctrl+Maj+Z)" aria-label="Rétablir" data-icon="redo" disabled></button>
+            </div>
             <div class="topbar-spacer"></div>
             <span class="ocr-hint" id="ocrHint" hidden><span class="dot amber"></span>Page OCRisée</span>
             <button class="btn soft small" id="btnAddTextTop"><span data-icon="plus"></span><span>Texte</span></button>
@@ -445,6 +450,28 @@
       <button class="btn ghost" id="glyphCancel" type="button">Annuler</button>
       <button class="btn primary" id="glyphContinue" type="button">Exporter quand même</button>
     </div>
+  </dialog>
+
+  <dialog class="dialog" id="resumeDialog" aria-labelledby="resumeTitle">
+    <h3 id="resumeTitle">Reprendre le travail ?</h3>
+    <p class="dialog-text" id="resumeText"></p>
+    <div class="dialog-actions">
+      <button class="btn ghost" id="resumeNo" type="button">Non merci</button>
+      <button class="btn primary" id="resumeYes" type="button">Reprendre</button>
+    </div>
+  </dialog>
+
+  <dialog class="dialog" id="passwordDialog" aria-labelledby="passwordTitle">
+    <h3 id="passwordTitle">PDF protégé par mot de passe</h3>
+    <p class="dialog-text">Ce document est chiffré. Saisissez son mot de passe pour l'ouvrir (il reste dans votre navigateur).</p>
+    <form method="dialog" class="dialog-form" id="passwordForm">
+      <input type="password" id="passwordInput" autocomplete="current-password" placeholder="Mot de passe" aria-label="Mot de passe" />
+      <p class="dialog-error" id="passwordError" hidden>Mot de passe incorrect.</p>
+      <div class="dialog-actions">
+        <button class="btn ghost" id="passwordCancel" type="button">Annuler</button>
+        <button class="btn primary" id="passwordSubmit" value="ok" type="submit">Ouvrir</button>
+      </div>
+    </form>
   </dialog>
 
   <script type="module" src="/src/main.js"></script>

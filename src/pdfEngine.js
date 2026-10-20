@@ -172,9 +172,10 @@ export class PdfEngine {
     this.pageCache = new Map();
   }
 
-  async load() {
+  async load(password = '') {
     const task = pdfjsLib.getDocument({
       data: this.bytes,
+      password: password || undefined,
       ...PDF_OPTS,
       isEvalSupported: false,
       useSystemFonts: true,

@@ -25,6 +25,7 @@ jobs:
           cache: npm
       # --legacy-peer-deps : contourne un bug de résolution de npm 10
       - run: npm ci --legacy-peer-deps
+      - run: npm test
       - run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

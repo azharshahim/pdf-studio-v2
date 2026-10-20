@@ -2123,3 +2123,38 @@ kbd {
   justify-content: flex-end;
   gap: 8px;
 }
+
+
+/* ── Annuler / rétablir, dialogues de session et mot de passe ────── */
+.history-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dialog-form input[type='password'] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 14px;
+  background: var(--surface);
+  color: var(--text);
+}
+.dialog-form input[type='password']:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.dialog-error {
+  margin: 0;
+  color: #dc2626;
+  font-size: 12.5px;
+}

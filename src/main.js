@@ -2,7 +2,10 @@ import './polyfills.js';
 import './style.css';
 import { PdfEngine, pdfRectToViewportRect, fontTraits } from './pdfEngine.js';
 import { recognizeCanvas, terminateOcr } from './ocrEngine.js';
-import { exportPdf, analyzeExport } from './exporter.js';
+import { findMatch } from './search.js';
+import { createHistory } from './history.js';
+import { createUi } from './ui.js';
+import * as Session from './session.js';
 import { buildSampleTextPdf, buildSampleScanPdf } from './samples.js';
 import { icon, hydrateIcons } from './icons.js';
 import * as U from './utils.js';
@@ -21,6 +24,17 @@ const els = {
   expOcr: $('expOcr'),
   expEditsCount: $('expEditsCount'),
   expRedact: $('expRedact'),
+  btnUndo: $('btnUndo'),
+  btnRedo: $('btnRedo'),
+  resumeDialog: $('resumeDialog'),
+  resumeText: $('resumeText'),
+  resumeYes: $('resumeYes'),
+  resumeNo: $('resumeNo'),
+  passwordDialog: $('passwordDialog'),
+  passwordForm: $('passwordForm'),
+  passwordInput: $('passwordInput'),
+  passwordError: $('passwordError'),
+  passwordCancel: $('passwordCancel'),
   glyphDialog: $('glyphDialog'),
   glyphText: $('glyphText'),
   glyphCancel: $('glyphCancel'),
@@ -120,6 +134,10 @@ const els = {
   exportCopyText: $('exportCopyText'),
 };
 
+// Helpers d'interface (toasts, chargement, dialogues)
+const ui = createUi(els);
+const { toast, pushLoading, popLoading, confirmMissingGlyphs, askPassword } = ui;
+
 const state = {
   engine: null,
   bytes: null,
@@ -141,45 +159,17 @@ const state = {
   textIndexReady: false,
   ensuringAll: null,
   ocr: { running: false, cancel: false },
+  history: createHistory(),
+  hash: null,
+  autosaveTimer: null,
+  restoring: false,
 };
 
 /* ─────────────────────────── UI helpers ─────────────────────────── */
 
-let loadingDepth = 0;
 let modalUrl = null;
 let modalToken = 0;
-function pushLoading(label = 'Chargement…') {
-  loadingDepth++;
-  els.loadingLabel.textContent = label;
-  els.loadingScreen.hidden = false;
-}
-function popLoading() {
-  loadingDepth = Math.max(0, loadingDepth - 1);
-  if (!loadingDepth) els.loadingScreen.hidden = true;
-}
 
-function toast(message, type = 'info', opts = {}) {
-  const el = document.createElement('div');
-  el.className = `toast ${type}`;
-  const icoName = type === 'success' ? 'check' : type === 'error' || type === 'warn' ? 'alert' : 'sparkle';
-  el.innerHTML = `<span class="t-ico">${icon(icoName, 16)}</span><span class="t-msg">${U.escapeHtml(message)}</span>`;
-  els.toasts.appendChild(el);
-  const dismiss = () => {
-    el.classList.add('out');
-    setTimeout(() => el.remove(), 220);
-  };
-  if (opts.action) {
-    const b = document.createElement('button');
-    b.className = 't-action';
-    b.textContent = opts.action;
-    b.addEventListener('click', () => {
-      opts.onAction?.();
-      dismiss();
-    });
-    el.appendChild(b);
-  }
-  setTimeout(dismiss, opts.duration ?? (type === 'error' ? 7500 : 4200));
-}
 
 function setTab(name) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
@@ -724,9 +714,10 @@ function selectLine(lineId) {
   const line = editLinesForPage(pageNo).find((l) => l.id === lineId);
   if (!line) return;
   closeActive();
+  const before = U.clone(state.edits);
   const edit = makeEditFromLine(line, pageNo);
   state.edits.push(edit);
-  state.active = { edit, snapshot: { sig: editSignature(edit), data: U.clone(edit) }, isNew: true };
+  state.active = { edit, before, snapshot: { sig: editSignature(edit), data: U.clone(edit) }, isNew: true };
   fillForm(edit);
   renderOverlay();
   renderEditList();
@@ -740,7 +731,12 @@ function selectEdit(id) {
   const edit = state.edits.find((x) => x.id === id);
   if (!edit) return;
   closeActive();
-  state.active = { edit, snapshot: { sig: editSignature(edit), data: U.clone(edit) }, isNew: false };
+  state.active = {
+    edit,
+    before: U.clone(state.edits),
+    snapshot: { sig: editSignature(edit), data: U.clone(edit) },
+    isNew: false,
+  };
   fillForm(edit);
   renderOverlay();
   renderEditList();
@@ -763,6 +759,9 @@ function closeActive() {
   const dirty = editSignature(a.edit) !== a.snapshot.sig;
   if (!dirty && a.isNew) {
     state.edits = state.edits.filter((x) => x.id !== a.edit.id);
+  } else if (dirty && a.before) {
+    state.history.push(a.before);
+    updateHistoryButtons();
   }
   state.active = null;
   hideForm();
@@ -799,6 +798,10 @@ function resetActiveEdit() {
   if (!a) return;
   const removed = a.edit;
   const wasNew = a.isNew;
+  if (!wasNew) {
+    state.history.push(U.clone(state.edits));
+    updateHistoryButtons();
+  }
   state.edits = state.edits.filter((x) => x.id !== removed.id);
   state.active = null;
   hideForm();
@@ -859,8 +862,9 @@ function placeTextAt(cssX, cssY) {
     bg: null,
     fit: false,
   };
+  const before = U.clone(state.edits);
   state.edits.push(edit);
-  state.active = { edit, snapshot: { sig: editSignature(edit), data: U.clone(edit) }, isNew: true };
+  state.active = { edit, before, snapshot: { sig: editSignature(edit), data: U.clone(edit) }, isNew: true };
   cancelAddMode();
   fillForm(edit);
   els.efText.focus();
@@ -870,7 +874,145 @@ function placeTextAt(cssX, cssY) {
   setTab('edit');
 }
 
+function updateHistoryButtons() {
+  if (els.btnUndo) els.btnUndo.disabled = !state.history.canUndo();
+  if (els.btnRedo) els.btnRedo.disabled = !state.history.canRedo();
+}
+
+/** Remplace l'état des modifications (undo/redo, restauration de session). */
+function applyEditsSnapshot(snapshot, { autosave = true } = {}) {
+  state.active = null;
+  hideForm();
+  state.edits = U.clone(snapshot);
+  renderOverlay();
+  renderEditList();
+  updateExportUi();
+  updateTextPanel();
+  updateHistoryButtons();
+  if (autosave) scheduleAutosave();
+}
+
+function undoEdits() {
+  if (!state.engine) return;
+  closeActive();
+  const previous = state.history.undo(state.edits);
+  if (previous == null) {
+    toast('Rien à annuler.', 'info', { duration: 1800 });
+    return;
+  }
+  applyEditsSnapshot(previous);
+  toast('Modification annulée.', 'info', { duration: 1800 });
+}
+
+function redoEdits() {
+  if (!state.engine) return;
+  closeActive();
+  const next = state.history.redo(state.edits);
+  if (next == null) {
+    toast('Rien à rétablir.', 'info', { duration: 1800 });
+    return;
+  }
+  applyEditsSnapshot(next);
+  toast('Modification rétablie.', 'info', { duration: 1800 });
+}
+
+/* ── Sauvegarde / restauration de session (IndexedDB) ─────────────── */
+
+function collectOcrForSession() {
+  return [...state.pages.entries()]
+    .filter(([, p]) => p.ocr)
+    .map(([pageNo, p]) => ({ pageNo, ocr: p.ocr }));
+}
+
+function scheduleAutosave() {
+  if (!state.hash || state.restoring) return;
+  clearTimeout(state.autosaveTimer);
+  state.autosaveTimer = setTimeout(() => {
+    const payload = {
+      name: state.fileName,
+      numPages: state.numPages,
+      edits: state.edits,
+      ocrPages: collectOcrForSession(),
+    };
+    if (!payload.edits.length && !payload.ocrPages.length) return;
+    Session.saveSession(state.hash, payload).catch(() => {});
+  }, 900);
+}
+
+/**
+ * Propose de reprendre une session existante pour ce document.
+ * `state.hash` doit être calculé avant l'appel.
+ */
+async function maybeRestoreSession() {
+  if (!state.hash) return;
+  let saved = null;
+  try {
+    saved = await Session.loadSession(state.hash);
+  } catch {
+    return;
+  }
+  if (!saved) return;
+  const nEdits = saved.edits?.length || 0;
+  const nOcr = saved.ocrPages?.length || 0;
+  if (!nEdits && !nOcr) return;
+
+  const parts = [];
+  if (nEdits) parts.push(`${nEdits} modification${nEdits > 1 ? 's' : ''}`);
+  if (nOcr) parts.push(`${nOcr} page${nOcr > 1 ? 's' : ''} OCRisée${nOcr > 1 ? 's' : ''}`);
+  els.resumeText.textContent = `Une session a été trouvée pour « ${saved.name || state.fileName} » : ${parts.join(
+    ' et '
+  )}. Voulez-vous reprendre où vous en étiez ?`;
+
+  const answer = await new Promise((resolve) => {
+    const finish = (value) => {
+      els.resumeYes.removeEventListener('click', onYes);
+      els.resumeNo.removeEventListener('click', onNo);
+      els.resumeDialog.removeEventListener('close', onClose);
+      if (els.resumeDialog.open) els.resumeDialog.close();
+      resolve(value);
+    };
+    const onYes = () => finish(true);
+    const onNo = () => finish(false);
+    const onClose = () => finish(false);
+    els.resumeYes.addEventListener('click', onYes);
+    els.resumeNo.addEventListener('click', onNo);
+    els.resumeDialog.addEventListener('close', onClose);
+    els.resumeDialog.showModal();
+  });
+
+  if (!answer) {
+    await Session.deleteSession(state.hash).catch(() => {});
+    return;
+  }
+  try {
+    state.restoring = true;
+    if (Array.isArray(saved.edits)) {
+      state.edits = saved.edits.filter((e) => e && e.page >= 1 && e.page <= state.numPages);
+    }
+    for (const entry of saved.ocrPages || []) {
+      if (!entry?.ocr || entry.pageNo < 1 || entry.pageNo > state.numPages) continue;
+      const pd = getPageData(entry.pageNo);
+      pd.ocr = entry.ocr;
+      pd.ocrStatus = 'done';
+    }
+    state.history.clear();
+    updateHistoryButtons();
+    renderOverlay();
+    renderEditList();
+    updateExportUi();
+    updatePanelsForPage();
+    toast('Session restaurée.', 'success', { duration: 2600 });
+  } finally {
+    state.restoring = false;
+  }
+}
+
+/* ── Dialogue de mot de passe ─────────────────────────────────────── */
+
+
+
 function renderEditList() {
+  scheduleAutosave();
   const n = state.edits.length;
   els.editCount.textContent = n;
   els.editCount.dataset.zero = n ? '0' : '1';
@@ -904,6 +1046,8 @@ function deleteEditById(id) {
     state.active = null;
     hideForm();
   }
+  state.history.push(U.clone(state.edits));
+  updateHistoryButtons();
   state.edits = state.edits.filter((e) => e.id !== id);
   renderOverlay();
   renderEditList();
@@ -924,6 +1068,8 @@ function deleteEditById(id) {
 function clearAllEdits() {
   if (!state.edits.length) return;
   const snapshot = [...state.edits];
+  state.history.push(U.clone(state.edits));
+  updateHistoryButtons();
   state.active = null;
   hideForm();
   state.edits = [];
@@ -1120,6 +1266,7 @@ async function runOcr(pageNumbers) {
       });
       if (state.ocr.cancel || docToken !== state.docToken) break;
       pd.ocr = result;
+      scheduleAutosave();
       pd.ocrStatus = 'done';
       done++;
       if (n === state.pageIndex + 1) {
@@ -1319,7 +1466,6 @@ async function performSearch(rawQuery) {
   }
   if (state.search.query !== query) return;
 
-  const nq = U.normalizeText(query);
   const matches = [];
   for (let n = 1; n <= state.numPages; n++) {
     const pd = getPageData(n);
@@ -1345,33 +1491,6 @@ async function performSearch(rawQuery) {
     renderOverlay();
     updateHint();
   }
-}
-
-/** Recherche insensible à la casse ET aux accents, avec l'index dans le texte d'origine. */
-function findMatch(text, query) {
-  const direct = text.toLowerCase().indexOf(query.toLowerCase());
-  if (direct >= 0) return { index: direct, length: query.length };
-  const target = U.normalizeText(query);
-  if (!target) return { index: -1, length: 0 };
-  let norm = '';
-  const map = [];
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    let n = ch.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-    if (ch === 'œ' || ch === 'Œ') n = 'oe';
-    else if (ch === 'æ' || ch === 'Æ') n = 'ae';
-    if (!n) continue;
-    for (const c of n) {
-      norm += c;
-      map.push(i);
-    }
-  }
-  const idx = norm.indexOf(target);
-  if (idx < 0) return { index: -1, length: 0 };
-  const start = map[idx];
-  const lastIdx = Math.min(map.length - 1, idx + target.length - 1);
-  const end = map[lastIdx] + 1;
-  return { index: start, length: Math.max(1, end - start) };
 }
 
 function renderSearchResults() {
@@ -1465,12 +1584,13 @@ function closeSearch() {
 
 /* ─────────────────────────── Import / démo ─────────────────────────── */
 
-async function openPdfBytes(bytes, name) {
+async function openPdfBytes(bytes, name, password = '') {
   pushLoading('Ouverture du document…');
   const attempt = ++state.loadToken;
+  let passwordPrompt = null;
   try {
     const engine = new PdfEngine(bytes.slice());
-    await engine.load();
+    await engine.load(password);
     if (attempt !== state.loadToken) {
       engine.destroy();
       return;
@@ -1498,6 +1618,9 @@ async function openPdfBytes(bytes, name) {
     state.textIndexReady = false;
     state.ensuringAll = null;
     state.ocr = { running: false, cancel: false };
+    state.hash = null;
+    state.history.clear();
+    updateHistoryButtons();
     els.stage.classList.remove('placing');
     els.searchbar.hidden = true;
     els.searchResults.hidden = true;
@@ -1525,20 +1648,42 @@ async function openPdfBytes(bytes, name) {
     toast(`« ${state.fileName} » ouvert${state.numPages > 1 ? ` — ${state.numPages} pages` : ''}.`, 'success', {
       duration: 2600,
     });
+
+    // Empreinte + session éventuelle (sans bloquer le rendu)
+    const docToken = state.docToken;
+    Session.hashBytes(bytes)
+      .then((hash) => {
+        if (docToken !== state.docToken) return;
+        state.hash = hash;
+        return maybeRestoreSession();
+      })
+      .catch(() => {});
   } catch (err) {
-    console.error(err);
-    if (state.numPages === 0) {
-      document.body.classList.add('no-doc');
-      els.emptyState.hidden = false;
-      els.stage.hidden = true;
+    if (err?.name === 'PasswordException') {
+      passwordPrompt = { wrong: !!password };
+    } else {
+      console.error(err);
+      if (state.numPages === 0) {
+        document.body.classList.add('no-doc');
+        els.emptyState.hidden = false;
+        els.stage.hidden = true;
+      }
+      const msg =
+        err?.name === 'InvalidPDFException'
+          ? 'fichier corrompu ou qui n’est pas un PDF valide.'
+          : err?.name === 'MissingPDFException'
+            ? 'fichier introuvable.'
+            : err?.message || String(err);
+      toast(`Impossible d’ouvrir le PDF — ${msg}`, 'error', { duration: 8000 });
     }
-    const msg =
-      err?.name === 'PasswordException'
-        ? 'Ce PDF est protégé par mot de passe.'
-        : err?.message || String(err);
-    toast(`Impossible d’ouvrir le PDF — ${msg}`, 'error', { duration: 8000 });
   } finally {
     popLoading();
+  }
+
+  // Demande de mot de passe (nouvelle tentative avec le mot de passe saisi)
+  if (passwordPrompt) {
+    const pwd = await askPassword(!passwordPrompt.wrong);
+    if (pwd) return openPdfBytes(bytes, name, pwd);
   }
 }
 
@@ -1547,6 +1692,26 @@ async function handleFile(file) {
   if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) {
     toast('Merci de choisir un fichier PDF.', 'warn');
     return;
+  }
+  const MB = 1024 * 1024;
+  if (!file.size) {
+    toast('Ce fichier est vide.', 'error');
+    return;
+  }
+  if (file.size > 200 * MB) {
+    toast(
+      `Fichier trop lourd (${Math.round(file.size / MB)} Mo). La limite est de 200 Mo ; découpez le PDF ou compressez-le.`,
+      'error',
+      { duration: 9000 }
+    );
+    return;
+  }
+  if (file.size > 60 * MB) {
+    toast(
+      `PDF volumineux (${Math.round(file.size / MB)} Mo) : l’ouverture peut prendre plusieurs secondes.`,
+      'warn',
+      { duration: 5000 }
+    );
   }
   try {
     pushLoading('Lecture du fichier…');
@@ -1644,36 +1809,7 @@ function closeExportMenu() {
   els.exportMenu.hidden = true;
 }
 
-/**
- * Avertit l'utilisateur lorsque des caractères ne peuvent être dessinés par
- * aucune police embarquée, avant de lancer l'export.
- */
-function confirmMissingGlyphs(missing) {
-  return new Promise((resolve) => {
-    const list = missing
-      .slice(0, 8)
-      .map((m) => `<code>${U.escapeHtml(m.char)}</code> (U+${m.char.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')})`)
-      .join(', ');
-    const more = missing.length > 8 ? ` et ${missing.length - 8} autre(s)` : '';
-    els.glyphText.innerHTML =
-      `Ces caractères n'existent dans aucune des polices embarquées et seront remplacés par un carré vide : ` +
-      `${list}${more}.<br />Vérifiez le texte ou choisissez une autre police.`;
-    const done = (value) => {
-      els.glyphDialog.removeEventListener('close', onClose);
-      els.glyphCancel.removeEventListener('click', onCancel);
-      els.glyphContinue.removeEventListener('click', onContinue);
-      if (els.glyphDialog.open) els.glyphDialog.close();
-      resolve(value);
-    };
-    const onClose = () => done(false);
-    const onCancel = () => done(false);
-    const onContinue = () => done(true);
-    els.glyphDialog.addEventListener('close', onClose);
-    els.glyphCancel.addEventListener('click', onCancel);
-    els.glyphContinue.addEventListener('click', onContinue);
-    els.glyphDialog.showModal();
-  });
-}
+
 
 /** Rend une page du PDF source en canvas pour la rastérisation d'export. */
 async function renderPageForExport(pageNo) {
@@ -1701,6 +1837,8 @@ async function handleExportPdf() {
 
   pushLoading('Génération du PDF…');
   try {
+    // Import paresseux : pdf-lib et fontkit ne pèsent pas sur le bundle initial.
+    const { exportPdf, analyzeExport } = await import('./exporter.js');
     // 1. Vérification des caractères non dessinables (avertissement avant export)
     if (edits.length || ocrPages.length) {
       const analysis = await analyzeExport({ edits, ocrPages });
@@ -1779,6 +1917,8 @@ function bindEvents() {
     els.fileInput.value = '';
     if (file) handleFile(file);
   });
+  els.btnUndo.addEventListener('click', undoEdits);
+  els.btnRedo.addEventListener('click', redoEdits);
   els.btnDemoText.addEventListener('click', () => openDemo('text'));
   els.btnDemoScan.addEventListener('click', () => openDemo('scan'));
 
@@ -2006,6 +2146,17 @@ function bindEvents() {
       if (state.engine) handleExportPdf();
       return;
     }
+    if (mod && e.key.toLowerCase() === 'z' && !typing) {
+      e.preventDefault();
+      if (e.shiftKey) redoEdits();
+      else undoEdits();
+      return;
+    }
+    if (mod && e.key.toLowerCase() === 'y' && !typing) {
+      e.preventDefault();
+      redoEdits();
+      return;
+    }
     if (e.key === 'Escape') {
       if (!els.exportModal.hidden) return closeExportModal();
       if (state.addMode) return cancelAddMode();
@@ -2039,6 +2190,7 @@ function init() {
   hideForm();
   updateOcrButtons();
   renderEditList();
+  updateHistoryButtons();
 }
 
 init();
@@ -2048,5 +2200,5 @@ window.__pdfStudio = {
   state,
   openPdfBytes,
   getPageText,
-  exportPdf,
+  exportPdf: (...args) => import('./exporter.js').then((m) => m.exportPdf(...args)),
 };
