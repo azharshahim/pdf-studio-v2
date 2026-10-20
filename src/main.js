@@ -9,6 +9,7 @@ import { findMatch } from './search.js';
 import { createHistory } from './history.js';
 import { createUi } from './ui.js';
 import { createInlineEditor } from './inlineEditor.js';
+import { estimateOffsetFromFraction, offsetAtPoint } from './caretPoint.js';
 import * as Session from './session.js';
 import { buildSampleTextPdf, buildSampleScanPdf } from './samples.js';
 import { icon, hydrateIcons } from './icons.js';
@@ -802,8 +803,112 @@ function stagePoint(ev) {
   return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
 }
 
+/* ─────────── Curseur au point touché (avant tout re-rendu) ─────────── */
+
+/**
+ * Dernier contact mémorisé : coordonnées écran + cible. Les coordonnées sont
+ * relevées sur `pointerdown`, avant l'ouverture du bloc éditable et avant le
+ * zoom, puis converties en index de caractère au moment du clic.
+ */
+const pendingPointer = { point: null, key: null, word: false, at: 0 };
+let longPressTimer = 0;
+let longPressOrigin = null;
+let suppressClickUntil = 0;
+
+function clearLongPress() {
+  if (longPressTimer) clearTimeout(longPressTimer);
+  longPressTimer = 0;
+  longPressOrigin = null;
+}
+
+/** Police du bloc superposé, identique à celle de l'éditeur en place. */
+function caretFontFor({ font, size, bold, italic }) {
+  const scale = state.scale || 1;
+  return {
+    fontFamily: U.cssFontFamily(font),
+    fontSize: `${Math.max(4, (Number(size) || 12) * scale)}px`,
+    fontWeight: bold ? '700' : '400',
+    fontStyle: italic ? 'italic' : 'normal',
+    lineHeight: '1.16',
+    letterSpacing: 'normal',
+  };
+}
+
+/**
+ * Convertit un point de l'écran en index de caractère dans `text`.
+ * Renvoie `null` quand aucune information fiable n'est disponible : l'éditeur
+ * retombe alors sur son comportement par défaut (fin de ligne).
+ */
+function caretFromPoint(point, el, { text, font, size, bold, italic }) {
+  if (!point || !el || !text) return null;
+  const measured = el.querySelector?.('.edit-text') || el;
+  const rect = measured.getBoundingClientRect();
+  if (!rect.width) return null;
+  const descriptor = caretFontFor({ font, size, bold, italic });
+  const offset = offsetAtPoint({ x: point.x, y: point.y, text, rect, font: descriptor });
+  if (offset == null) {
+    const fraction = (point.x - rect.left) / rect.width;
+    return { offset: estimateOffsetFromFraction(text, fraction), word: pendingPointer.word };
+  }
+  return { offset, word: pendingPointer.word };
+}
+
+/** Curseur pour l'élément de ligne touché, si le contact le concernait. */
+function caretForElement(el, payload) {
+  const key = el.dataset.lineId || el.dataset.editId || null;
+  if (!key || key !== pendingPointer.key || !pendingPointer.point) return null;
+  return caretFromPoint(pendingPointer.point, el, payload);
+}
+
+els.overlay.addEventListener(
+  'pointerdown',
+  (ev) => {
+    const el = ev.target.closest('.line-block, .edit-block');
+    if (!el || !state.engine) {
+      pendingPointer.point = null;
+      pendingPointer.key = null;
+      clearLongPress();
+      return;
+    }
+    // Mémorisé ici : les coordonnées du doigt restent valables même si le
+    // bloc est redessiné (zoom) avant l'ouverture du champ.
+    pendingPointer.point = { x: ev.clientX, y: ev.clientY };
+    pendingPointer.key = el.dataset.lineId || el.dataset.editId || null;
+    pendingPointer.word = false;
+    pendingPointer.at = performance.now();
+    clearLongPress();
+    if (ev.pointerType !== 'touch' && ev.pointerType !== 'pen') return;
+    longPressOrigin = { x: ev.clientX, y: ev.clientY, t: performance.now() };
+    longPressTimer = setTimeout(() => {
+      longPressTimer = 0;
+      if (!longPressOrigin) return;
+      pendingPointer.word = true;
+      pendingPointer.point = { x: longPressOrigin.x, y: longPressOrigin.y };
+      suppressClickUntil = performance.now() + 1500;
+      navigator.vibrate?.(8);
+      if (el.classList.contains('line-block')) selectLine(el.dataset.lineId);
+      else selectEdit(el.dataset.editId);
+    }, 480);
+  },
+  true
+);
+
+els.overlay.addEventListener('pointermove', (ev) => {
+  if (!longPressOrigin) return;
+  // Un simple frôlement ne doit pas transformer le toucher en appui long.
+  if (Math.hypot(ev.clientX - longPressOrigin.x, ev.clientY - longPressOrigin.y) > 10) clearLongPress();
+});
+
+els.overlay.addEventListener('pointerup', clearLongPress);
+els.overlay.addEventListener('pointercancel', clearLongPress);
+els.overlay.addEventListener('contextmenu', (ev) => {
+  // L'appui long est déjà géré : on ne laisse pas le menu natif interrompre.
+  if (ev.target.closest('.line-block, .edit-block, .inline-shell')) ev.preventDefault();
+});
+
 els.overlay.addEventListener('click', async (ev) => {
   if (!state.engine) return;
+  if (performance.now() < suppressClickUntil) return;
   const editEl = ev.target.closest('.edit-block');
   const lineEl = ev.target.closest('.line-block');
 
@@ -1169,6 +1274,16 @@ async function selectLine(lineId) {
   const pageNo = state.pageIndex + 1;
   const line = editLinesForPage(pageNo).find((l) => l.id === lineId);
   if (!line) return;
+  // Le point touché a été mémorisé avant le zoom : on le convertit ici, sur la
+  // géométrie encore affichée, en index de caractère de la ligne d'origine.
+  const blockEl = els.overlay.querySelector(`.line-block[data-line-id="${CSS.escape(lineId)}"]`);
+  const caret = caretForElement(blockEl || { dataset: {} }, {
+    text: line.text,
+    font: line.font,
+    size: line.fontSize,
+    bold: line.bold,
+    italic: line.italic,
+  });
   closeActive();
   captureEditView();
   await zoomForLine(line);
@@ -1178,7 +1293,7 @@ async function selectLine(lineId) {
   state.edits.push(edit);
   state.active = { edit, before, snapshot: { sig: editSignature(edit), data: U.clone(edit) }, isNew: true };
   renderOverlay();
-  inline.open(edit, { isNew: true });
+  inline.open(edit, { isNew: true, caret });
   showEditingUi();
   syncFormatbar();
   renderEditList();
@@ -1188,6 +1303,14 @@ async function selectLine(lineId) {
 function selectEdit(id) {
   const edit = state.edits.find((x) => x.id === id);
   if (!edit) return;
+  const blockEl = els.overlay.querySelector(`.edit-block[data-edit-id="${CSS.escape(id)}"]`);
+  const caret = caretForElement(blockEl || { dataset: {} }, {
+    text: edit.text,
+    font: edit.font,
+    size: edit.size,
+    bold: edit.bold,
+    italic: edit.italic,
+  });
   closeActive();
   state.active = {
     edit,
@@ -1196,7 +1319,7 @@ function selectEdit(id) {
     isNew: false,
   };
   renderOverlay();
-  inline.open(edit, { isNew: false });
+  inline.open(edit, { isNew: false, caret });
   showEditingUi();
   syncFormatbar();
   renderEditList();

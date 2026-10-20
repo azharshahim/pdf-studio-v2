@@ -9,6 +9,7 @@
  */
 
 import * as U from './utils.js';
+import { wordBoundsAt } from './caretPoint.js';
 
 /** Familles CSS correspondant aux polices proposées à l'édition. */
 export function cssFontFamilyFor(font) {
@@ -198,24 +199,43 @@ export function createInlineEditor({
     scroller.scrollTo({ left: targetLeft, top: targetTop, behavior: 'auto' });
   }
 
-  function placeCaret({ selectAll = false, atEnd = true } = {}) {
-    if (!textEl) return;
+  /**
+   * Place le curseur dans le bloc éditable.
+   *
+   * `offset` est l'index de caractère calculé à partir du point touché : le
+   * curseur apparaît sous le doigt, ni au début ni à la fin de la ligne.
+   * `word` étend la sélection au mot touché (appui long), avec les poignées
+   * natives du navigateur.
+   */
+  function placeCaret({ selectAll = false, atEnd = true, offset = null, word = false } = {}) {
+    if (!textEl) return { offset: 0, word: false };
     const selection = window.getSelection();
-    if (!selection) return;
+    if (!selection) return { offset: 0, word: false };
     const range = document.createRange();
     const node = textEl.firstChild;
-    if (selectAll && textEl.textContent?.length) {
+    const length = textEl.textContent?.length || 0;
+    let target = 0;
+    if (selectAll && length) {
       range.selectNodeContents(textEl);
     } else if (node && node.nodeType === Node.TEXT_NODE) {
-      // Curseur dans le nœud texte : évite un décalage au début du bloc.
-      range.setStart(node, atEnd ? node.textContent.length : 0);
+      target = Number.isFinite(offset) ? Math.min(length, Math.max(0, Math.round(offset))) : atEnd ? length : 0;
+      if (word && length) {
+        const [start, end] = wordBoundsAt(node.textContent, target);
+        range.setStart(node, start);
+        range.setEnd(node, end);
+      } else {
+        // Curseur dans le nœud texte : évite un décalage au début du bloc.
+        range.setStart(node, target);
+        range.collapse(true);
+      }
     } else {
       range.selectNodeContents(textEl);
       range.collapse(atEnd);
     }
-    if (!selectAll) range.collapse(true);
+    if (!selectAll && !word) range.collapse(true);
     selection.removeAllRanges();
     selection.addRange(range);
+    return { offset: target, word: !selectAll && word };
   }
 
 
@@ -262,7 +282,7 @@ export function createInlineEditor({
     if (edit) onChange?.(edit);
   }
 
-  function open(nextEdit, { isNew: fresh = false } = {}) {
+  function open(nextEdit, { isNew: fresh = false, caret = null } = {}) {
     if (!nextEdit) return;
     close();
     if (!shell) build();
@@ -276,20 +296,31 @@ export function createInlineEditor({
     overlay.classList.add('has-inline-editor');
 
     const initial = edit.text || '';
+    const hasCaret = caret && Number.isFinite(caret.offset);
+    // Le curseur est posé après le focus (rAF), puis re-posé une fois à 50 ms :
+    // certains navigateurs mobiles replacent le caret à 0 quand le clavier
+    // s'ouvre, ce qui annulerait le point touché.
     requestAnimationFrame(() => {
       textEl.focus({ preventScroll: true });
-      placeCaret({ selectAll: false, atEnd: true });
+      placeCaret(hasCaret ? { offset: caret.offset, word: !!caret.word } : { selectAll: false, atEnd: true });
       scrollIntoView();
     });
-    // Certains navigateurs replacent le curseur au début juste après le focus.
     setTimeout(() => {
       if (!shell?.isConnected) return;
       if (textEl.textContent !== initial) return; // l'utilisateur a déjà saisi
       const sel = window.getSelection();
-      if (sel && sel.isCollapsed && sel.anchorOffset === 0) {
-        placeCaret({ atEnd: true });
+      if (!hasCaret) {
+        if (sel && sel.isCollapsed && sel.anchorOffset === 0) placeCaret({ atEnd: true });
+        return;
       }
-    }, 80);
+      const node = textEl.firstChild;
+      const correct = !!sel && !!node && node.nodeType === Node.TEXT_NODE && (
+        caret.word
+          ? !sel.isCollapsed && sel.anchorNode === node && sel.anchorOffset === wordBoundsAt(initial, caret.offset)[0]
+          : sel.isCollapsed && sel.anchorNode === node && sel.anchorOffset === Math.min(initial.length, caret.offset)
+      );
+      if (!correct) placeCaret({ offset: caret.offset, word: !!caret.word });
+    }, 50);
   }
 
   // Quand le clavier apparaît, on garde la ligne visible au-dessus de la barre.
