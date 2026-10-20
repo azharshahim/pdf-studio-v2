@@ -1,4 +1,4 @@
-# PDF Studio — OCR & édition de PDF · V2.2
+# PDF Studio — OCR & édition de PDF · V2.3
 
 Application web **100 % locale** : ouvrez un PDF, corrigez le texte **directement sur la page**,
 annotez-le, signez-le, remplissez ses formulaires, lancez l'OCR sur les pages scannées puis
@@ -157,7 +157,7 @@ npm run preview    # http://localhost:4173
 Le workflow `.github/workflows/deploy.yml` construit et publie automatiquement l'application à
 chaque push sur `main` :
 
-**https://azharshahim.github.io/pdf-studio-v2/**
+**https://azharshahim.github.io/studio-pdf/**
 
 `vite.config.js` utilise `base: './'` et tous les assets (`pdfjs`, `tessdata`, `tesseract`,
 polices) sont résolus à l'exécution via `import.meta.env.BASE_URL`, ce qui permet au site de
@@ -220,7 +220,7 @@ fonctionner aussi bien à la racine que dans un sous-dossier.
 ## Architecture
 
 ```
-pdf-studio/
+studio-pdf/
 ├── index.html            # structure de l'interface
 ├── src/
 │   ├── main.js           # application : viewer, édition, OCR, recherche, export, UI

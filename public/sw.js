@@ -7,7 +7,7 @@
  * Aucune requête ne sort de l'origine : aucun fichier utilisateur n'est transmis.
  */
 
-const VERSION = 'pdf-studio-v2';
+const VERSION = 'studio-pdf-v2.3';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 
 /** Liste complète des fichiers du build (générée par Vite dans precache.json). */

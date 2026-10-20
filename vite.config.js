@@ -31,7 +31,7 @@ function precacheManifest() {
 
 export default defineConfig({
   plugins: [precacheManifest()],
-  // Chemins relatifs : indispensable pour GitHub Pages (sous /pdf-studio-v2/).
+  // Chemins relatifs : indispensable pour GitHub Pages (sous /studio-pdf/).
   base: './',
   server: {
     host: '0.0.0.0',

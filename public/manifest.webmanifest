@@ -1,5 +1,6 @@
 {
   "name": "PDF Studio — OCR & édition de PDF",
+  "id": "/studio-pdf/",
   "short_name": "PDF Studio",
   "description": "Lecture, OCR français/anglais et édition de texte PDF, 100 % en local.",
   "lang": "fr",
@@ -11,15 +12,35 @@
   "theme_color": "#4f46e5",
   "orientation": "any",
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ],
-  "categories": ["productivity", "utilities"],
+  "categories": [
+    "productivity",
+    "utilities"
+  ],
   "file_handlers": [
     {
       "action": "./",
-      "accept": { "application/pdf": [".pdf"] }
+      "accept": {
+        "application/pdf": [
+          ".pdf"
+        ]
+      }
     }
   ]
 }
