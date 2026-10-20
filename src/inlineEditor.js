@@ -150,9 +150,14 @@ export function createInlineEditor({
     const rect = rectFor(edit.bbox);
     const padX = Math.max(1, (Number(edit.size) || 10) * 0.12) * scale;
     const padY = Math.max(0.8, (Number(edit.size) || 10) * 0.05) * scale;
-    shell.style.left = `${rect.left - padX}px`;
+    const left = rect.left - padX;
+    shell.style.left = `${left}px`;
     shell.style.top = `${rect.top - padY}px`;
-    shell.style.width = `${Math.max(24, rect.width + padX * 2)}px`;
+    // La boîte s'élargit pour contenir le texte saisi, sans déborder de la page.
+    const base = Math.max(24, rect.width + padX * 2);
+    const needed = textEl ? textEl.scrollWidth + padX * 2 : base;
+    const bound = Math.max(base, (overlay.clientWidth || base) - left - 2);
+    shell.style.width = `${Math.min(Math.max(base, needed), bound)}px`;
     shell.style.minHeight = `${Math.max(4, rect.height + padY * 2)}px`;
     shell.style.padding = `${padY}px ${padX}px`;
   }

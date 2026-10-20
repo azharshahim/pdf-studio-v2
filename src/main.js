@@ -936,6 +936,7 @@ const refreshTextEcho = U.debounce(() => {
 }, 200);
 
 function onInlineChange() {
+  inline.refresh();
   updateEditbarCount();
   updateExportUi();
   refreshTextEcho();
