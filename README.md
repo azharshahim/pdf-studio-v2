@@ -1,8 +1,8 @@
-# PDF Studio — OCR & édition de PDF · V2.1
+# PDF Studio — OCR & édition de PDF · V2.2
 
-Application web **100 % locale** : ouvrez un PDF, cliquez sur un texte pour le corriger, lancez
-l'OCR sur les pages scannées (français + anglais) puis exportez un PDF modifié et/ou une couche de
-texte recherchable.
+Application web **100 % locale** : ouvrez un PDF, corrigez le texte **directement sur la page**,
+annotez-le, signez-le, remplissez ses formulaires, lancez l'OCR sur les pages scannées puis
+exportez un PDF modifié. Tout se fait au doigt ou à la souris, sans panneau latéral.
 
 Aucun fichier n'est envoyé sur un serveur : le rendu, l'OCR, l'édition et l'export s'exécutent
 entièrement dans le navigateur.
@@ -22,6 +22,11 @@ entièrement dans le navigateur.
 | Ordinateur — document | Ordinateur — outils | Thème sombre |
 | --- | --- | --- |
 | ![Document sur ordinateur](docs/captures/document-ordinateur.png) | ![Outils sur ordinateur](docs/captures/outils-ordinateur.png) | ![Thème sombre](docs/captures/accueil-sombre-mobile.png) |
+
+Le PDF exporté, rouvert dans l'application : le tampon, la date et le surlignage font partie du
+document, ce ne sont pas de simples repères d'écran.
+
+![Export relu](docs/captures/export-relu-mobile.png)
 
 ---
 
@@ -181,6 +186,16 @@ fonctionner aussi bien à la racine que dans un sous-dossier.
    choisissez d'aplatir ou non, puis « Exporter le PDF rempli ».
 7. **Apparence et langue** : bouton lune/soleil pour le thème sombre, sélecteur de langue
    (français, anglais, arabe) dans la barre du haut.
+
+### Gestes sur téléphone
+
+| Geste | Action |
+| --- | --- |
+| Toucher une ligne | ouvrir le texte à cet endroit, prêt à corriger |
+| Pincer à deux doigts | zoomer / dézoomer dans la page |
+| Balayer horizontalement | page suivante / précédente |
+| Toucher un objet (tampon, signature) | afficher ses poignées : déplacer, redimensionner, pivoter, supprimer |
+| Glisser une vignette dans Pages | réordonner les pages |
 
 ### Raccourcis
 
