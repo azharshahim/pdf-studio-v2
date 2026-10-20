@@ -2864,15 +2864,55 @@ function pdfPageSize() {
   return { w: (vp?.width || 595) / scale, h: (vp?.height || 842) / scale };
 }
 
-/** Coordonnées PDF du centre de la zone visible (bbox des objets = points PDF). */
+/** Coordonnées PDF du centre de la zone réellement visible (bbox = points PDF). */
 function viewCenterPdf() {
   const vp = state.viewport;
+  const scroller = els.canvasScroll;
+  const stage = els.stage;
+  if (vp?.convertToPdfPoint && scroller && stage) {
+    const sr = scroller.getBoundingClientRect();
+    const st = stage.getBoundingClientRect();
+    // Centre de la fenêtre, ramené dans les limites de la page.
+    const cx = Math.min(Math.max(sr.left + sr.width / 2 - st.left, 0), st.width);
+    const cy = Math.min(Math.max(sr.top + sr.height / 2 - st.top, 0), st.height);
+    const [x, y] = vp.convertToPdfPoint(cx, cy);
+    return { x, y };
+  }
   if (vp?.convertToPdfPoint) {
     const [x, y] = vp.convertToPdfPoint(vp.width / 2, vp.height / 2);
     return { x, y };
   }
   const { w, h } = pdfPageSize();
   return { x: w / 2, y: h / 2 };
+}
+
+/** Deux rectangles PDF se chevauchent-ils vraiment (pas juste leurs bords) ? */
+function bboxOverlap(a, b, slack = 2) {
+  return (
+    a.x + slack < b.x + b.w &&
+    b.x + slack < a.x + a.w &&
+    a.y + slack < b.y + b.h &&
+    b.y + slack < a.y + a.h
+  );
+}
+
+/**
+ * Décale une zone nouvellement insérée vers le bas tant qu'elle recouvre un
+ * objet déjà posé sur la page : le tampon ne se superpose pas à la signature.
+ */
+function freeSpot(bbox) {
+  const page = state.pageIndex + 1;
+  const others = markup.objects.filter((o) => o.page === page && o.bbox && o.type !== 'ink');
+  const { w: pageW } = pdfPageSize();
+  let box = { ...bbox };
+  for (let i = 0; i < 8 && others.some((o) => bboxOverlap(box, o.bbox)); i++) {
+    box = { ...box, y: box.y - Math.max(16, box.h * 0.65) };
+    if (box.y < 10) {
+      box = { ...box, y: Math.max(10, bbox.y - Math.max(16, box.h * 0.65)) };
+      box.x = Math.min(Math.max(10, box.x + box.w * 0.35), Math.max(10, pageW - box.w - 10));
+    }
+  }
+  return box;
 }
 
 /** Décalage en cascade exprimé en points PDF, pour ne pas empiler les insertions. */
@@ -2892,12 +2932,12 @@ function addImageObject(src, { ratio = 3, label = '', type = 'image' } = {}) {
   const height = width / Math.max(0.2, ratio);
   const center = viewCenterPdf();
   const { dx, dy } = cascadeOffset();
-  const bbox = {
+  const bbox = freeSpot({
     x: center.x - width / 2 + dx,
     y: center.y - height / 2 - dy,
     w: width,
     h: height,
-  };
+  });
   const obj = markup.add({ type, src, bbox, label, rotation: 0, opacity: 1 });
   markup.setTool(null);
   markup.select?.(obj.id);
@@ -3048,7 +3088,7 @@ function openStampTool() {
           type: 'date',
           text: today,
           fontSize: Math.max(8, 18 / (state.scale || 1)),
-          bbox: { x: center.x - w / 2, y: center.y - h / 2, w, h },
+          bbox: freeSpot({ x: center.x - w / 2, y: center.y - h / 2, w, h }),
           color: '#111827',
         });
         place(obj);
@@ -3064,7 +3104,7 @@ function openStampTool() {
         text: preset.text,
         color: preset.color,
         borderColor: preset.color,
-        bbox: { x: center.x - width / 2, y: center.y - height / 2, w: width, h: height },
+        bbox: freeSpot({ x: center.x - width / 2, y: center.y - height / 2, w: width, h: height }),
         rotation: 0,
         opacity: 0.95,
         fontSize: Math.max(9, Math.min(36, width * 0.13)),
@@ -3089,7 +3129,7 @@ function openStampTool() {
       text,
       color,
       borderColor: color,
-      bbox: { x: center.x - w / 2, y: center.y - h / 2, w, h },
+      bbox: freeSpot({ x: center.x - w / 2, y: center.y - h / 2, w, h }),
       rotation: 0,
       opacity: 0.95,
       fontSize: Math.max(9, Math.min(36, w * 0.13)),
@@ -3134,12 +3174,12 @@ function insertMark(symbol) {
     type: 'check',
     mark: symbol,
     color: symbol === 'cross' ? '#dc2626' : '#059669',
-    bbox: {
+    bbox: freeSpot({
       x: center.x - size / 2 + dx,
       y: center.y - size / 2 - dy,
       w: size,
       h: size,
-    },
+    }),
   });
   markup.select?.(obj.id);
 }
@@ -3156,7 +3196,7 @@ function insertToday() {
     text: today,
     fontSize: Math.max(8, 16 / scale),
     color: '#111827',
-    bbox: { x: center.x - w / 2 + dx, y: center.y - h / 2 - dy, w, h },
+    bbox: freeSpot({ x: center.x - w / 2 + dx, y: center.y - h / 2 - dy, w, h }),
   });
   markup.select?.(obj.id);
 }
