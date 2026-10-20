@@ -14,7 +14,6 @@
   </head>
   <body class="no-doc">
     <div class="app" id="app">
-      <div class="doc-view" id="docView">
       <!-- ══════════════ TOP BAR ══════════════ -->
       <header class="topbar">
         <div class="brand">
@@ -106,6 +105,9 @@
           </div>
         </div>
       </header>
+
+      <div class="doc-view" id="docView">
+
 
       <!-- ══════════════ BARRE D'ÉDITION DIRECTE ══════════════ -->
       <header class="editbar" id="editbar" hidden>
@@ -554,6 +556,12 @@
       </div>
     </div>
 
+    <!-- ══════════════ BARRE D'ANNOTATION (bas d'écran) ══════════════ -->
+    <div class="annobar" id="annobar" role="toolbar" aria-label="Annotation" hidden>
+      <div class="annobar-row" id="annoTools"></div>
+      <div class="anno-sub" id="annoSub" hidden></div>
+    </div>
+
     <button class="fab" id="btnAddText" type="button" aria-label="Ajouter du texte" data-i18n-title="editor.addText">
       <span data-icon="plus"></span><span data-i18n="editor.addTextShort">Texte</span>
     </button>
@@ -588,13 +596,13 @@
               </div>
             </div>
             <label class="field" id="exportTextBox" hidden>
-              <span>Aperçu du texte</span>
+              <span data-i18n="modal.preview">Aperçu du texte</span>
               <textarea id="exportTextPreview" readonly rows="10"></textarea>
             </label>
-            <a class="btn primary wide" id="exportDownload" download><span data-icon="download"></span>Télécharger le fichier</a>
+            <a class="btn primary wide" id="exportDownload" download><span data-icon="download"></span><span data-i18n="modal.download">Télécharger le fichier</span></a>
             <button class="btn ghost wide" id="exportShare" hidden><span data-icon="share"></span><span data-i18n="common.share">Partager</span></button>
             <button class="btn ghost wide" id="exportCopyText" hidden><span data-icon="copy"></span>Copier le texte</button>
-            <p class="muted xsmall">Si le téléchargement ne démarre pas (aperçu intégré), ouvrez l’application dans un nouvel onglet.</p>
+            <p class="muted xsmall" data-i18n="modal.note">Si le téléchargement ne démarre pas (aperçu intégré), ouvrez l’application dans un nouvel onglet.</p>
           </div>
         </div>
       </div>
@@ -603,7 +611,7 @@
     <div class="loading-screen" id="loadingScreen" hidden>
       <div class="loading-card">
         <div class="spinner"></div>
-        <p id="loadingLabel">Ouverture du document…</p>
+        <p id="loadingLabel" data-i18n="msg.opening">Ouverture du document…</p>
       </div>
     </div>
 
@@ -611,41 +619,41 @@
 
     <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden />
     <dialog class="dialog" id="glyphDialog" aria-labelledby="glyphTitle">
-    <h3 id="glyphTitle">Caractères non pris en charge</h3>
+    <h3 id="glyphTitle" data-i18n="glyph.title">Caractères non pris en charge</h3>
     <p class="dialog-text" id="glyphText"></p>
     <div class="dialog-actions">
-      <button class="btn ghost" id="glyphCancel" type="button">Annuler</button>
-      <button class="btn primary" id="glyphContinue" type="button">Exporter quand même</button>
+      <button class="btn ghost" id="glyphCancel" type="button" data-i18n="common.cancel">Annuler</button>
+      <button class="btn primary" id="glyphContinue" type="button" data-i18n="glyph.continue">Exporter quand même</button>
     </div>
   </dialog>
 
   <dialog class="dialog" id="discardDialog" aria-labelledby="discardTitle">
-    <h3 id="discardTitle">Réinitialiser le travail en cours ?</h3>
-    <p class="dialog-text">Cette opération de page recrée le PDF. Les modifications de texte et les résultats OCR non exportés seront perdus.</p>
+    <h3 id="discardTitle" data-i18n="discard.title">Réinitialiser le travail en cours ?</h3>
+    <p class="dialog-text" data-i18n="discard.text">Cette opération de page recrée le PDF. Les modifications de texte et les résultats OCR non exportés seront perdus.</p>
     <div class="dialog-actions">
-      <button class="btn ghost" id="discardCancel" type="button">Annuler</button>
-      <button class="btn primary" id="discardOk" type="button">Continuer</button>
+      <button class="btn ghost" id="discardCancel" type="button" data-i18n="common.cancel">Annuler</button>
+      <button class="btn primary" id="discardOk" type="button" data-i18n="common.continue">Continuer</button>
     </div>
   </dialog>
 
   <dialog class="dialog" id="resumeDialog" aria-labelledby="resumeTitle">
-    <h3 id="resumeTitle">Reprendre le travail ?</h3>
+    <h3 id="resumeTitle" data-i18n="resume.title">Reprendre le travail ?</h3>
     <p class="dialog-text" id="resumeText"></p>
     <div class="dialog-actions">
-      <button class="btn ghost" id="resumeNo" type="button">Non merci</button>
-      <button class="btn primary" id="resumeYes" type="button">Reprendre</button>
+      <button class="btn ghost" id="resumeNo" type="button" data-i18n="resume.no">Non merci</button>
+      <button class="btn primary" id="resumeYes" type="button" data-i18n="resume.yes">Reprendre</button>
     </div>
   </dialog>
 
   <dialog class="dialog" id="passwordDialog" aria-labelledby="passwordTitle">
-    <h3 id="passwordTitle">PDF protégé par mot de passe</h3>
-    <p class="dialog-text">Ce document est chiffré. Saisissez son mot de passe pour l'ouvrir (il reste dans votre navigateur).</p>
+    <h3 id="passwordTitle" data-i18n="password.title">PDF protégé par mot de passe</h3>
+    <p class="dialog-text" data-i18n="password.text">Ce document est chiffré. Saisissez son mot de passe pour l'ouvrir (il reste dans votre navigateur).</p>
     <form method="dialog" class="dialog-form" id="passwordForm">
       <input type="password" id="passwordInput" autocomplete="current-password" placeholder="Mot de passe" aria-label="Mot de passe" />
-      <p class="dialog-error" id="passwordError" hidden>Mot de passe incorrect.</p>
+      <p class="dialog-error" id="passwordError" hidden data-i18n="password.error">Mot de passe incorrect.</p>
       <div class="dialog-actions">
-        <button class="btn ghost" id="passwordCancel" type="button">Annuler</button>
-        <button class="btn primary" id="passwordSubmit" value="ok" type="submit">Ouvrir</button>
+        <button class="btn ghost" id="passwordCancel" type="button" data-i18n="common.cancel">Annuler</button>
+        <button class="btn primary" id="passwordSubmit" value="ok" type="submit" data-i18n="password.open">Ouvrir</button>
       </div>
     </form>
   </dialog>

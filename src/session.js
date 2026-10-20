@@ -96,3 +96,47 @@ export async function deleteSession(key) {
 export async function clearSessions() {
   return withStore('readwrite', (store) => store.clear());
 }
+
+/** Enregistre les octets du document avec la session (pour « Fichiers »). */
+export async function saveBytes(key, bytes, meta = {}) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const copy = data.slice();
+  return withStore('readwrite', (store) =>
+    store.put({
+      key,
+      bytes: copy.buffer,
+      name: meta.name || 'document.pdf',
+      size: copy.byteLength,
+      updatedAt: Date.now(),
+    })
+  );
+}
+
+export async function loadBytes(key) {
+  const entry = await loadSession(key);
+  if (!entry?.bytes) return null;
+  return new Uint8Array(entry.bytes);
+}
+
+/** Liste les documents enregistrés (sans les octets). */
+export async function listSessions() {
+  const all = await withStore('readonly', (store) => store.getAll());
+  if (!Array.isArray(all)) return [];
+  return all
+    .map((entry) => ({
+      key: entry.key,
+      name: entry.name || 'document.pdf',
+      size: entry.size || 0,
+      updatedAt: entry.updatedAt || 0,
+      edits: entry.edits?.length || 0,
+      ocr: entry.ocrPages?.length || 0,
+      hasBytes: !!entry.bytes,
+    }))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+export async function renameSession(key, name) {
+  const entry = await loadSession(key);
+  if (!entry) return;
+  return saveSession(key, { ...entry, name });
+}

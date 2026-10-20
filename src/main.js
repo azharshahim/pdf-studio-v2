@@ -14,7 +14,18 @@ import { buildSampleTextPdf, buildSampleScanPdf } from './samples.js';
 import { icon, hydrateIcons } from './icons.js';
 import { applyLanguage, t } from './i18n.js';
 import * as U from './utils.js';
-import { initShell, routeTo, openSheet, closeSheet, isSheetOpen, isMobile } from './shell.js';
+import { initShell, routeTo, openSheet, closeSheet, isSheetOpen, isMobile, renderTools } from './shell.js';
+import { createMarkup, HIGHLIGHT_COLORS, STAMP_PRESETS } from './markup.js';
+import {
+  createSignaturePad,
+  typedSignature,
+  removeLightBackground,
+  signatureSheetHtml,
+  loadSignatures,
+  saveSignature,
+  deleteSignature,
+  SIGNATURE_FONTS,
+} from './signature.js';
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -50,6 +61,9 @@ const els = {
   glyphContinue: $('glyphContinue'),
   expOcrCount: $('expOcrCount'),
   btnExportPdf: $('btnExportPdf'),
+  annobar: $('annobar'),
+  annoTools: $('annoTools'),
+  annoSub: $('annoSub'),
   btnSave: $('btnSave'),
   editSave: $('editSave'),
   saveAsPdf: $('saveAsPdf'),
@@ -229,6 +243,57 @@ const inline = createInlineEditor({
   onDuplicate: () => duplicateActiveEdit(),
 });
 
+const markup = createMarkup({
+  overlay: els.overlay,
+  getScale: () => state.scale || 1,
+  rectFor: (bbox) => pdfRectToViewportRect(bbox, state.viewport),
+  pageHeight: () => state.viewport?.height || 842,
+  getPage: () => state.pageIndex + 1,
+  onChange: () => {
+    pushMarkupHistory();
+    updateExportUi();
+    scheduleAutosave();
+  },
+  onPickNote: (obj) => editNote(obj),
+});
+
+/** Historique dédié aux annotations (annulable indépendamment du texte). */
+const markupHistory = { stack: [], index: -1 };
+
+function pushMarkupHistory() {
+  const snapshot = JSON.stringify(markup.objects);
+  if (markupHistory.stack[markupHistory.index] === snapshot) return;
+  markupHistory.stack = markupHistory.stack.slice(0, markupHistory.index + 1);
+  markupHistory.stack.push(snapshot);
+  markupHistory.index = markupHistory.stack.length - 1;
+  if (markupHistory.stack.length > 80) {
+    markupHistory.stack.shift();
+    markupHistory.index--;
+  }
+  updateAnnoUndo();
+}
+
+function undoMarkup() {
+  if (markupHistory.index <= 0) return;
+  markupHistory.index--;
+  markup.setObjects(JSON.parse(markupHistory.stack[markupHistory.index]));
+  scheduleAutosave();
+  updateAnnoUndo();
+}
+
+function redoMarkup() {
+  if (markupHistory.index >= markupHistory.stack.length - 1) return;
+  markupHistory.index++;
+  markup.setObjects(JSON.parse(markupHistory.stack[markupHistory.index]));
+  scheduleAutosave();
+  updateAnnoUndo();
+}
+
+function updateAnnoUndo() {
+  const btn = document.getElementById('annoUndo');
+  if (btn) btn.disabled = markupHistory.index <= 0;
+}
+
 /* ─────────────────────────── UI helpers ─────────────────────────── */
 
 let modalUrl = null;
@@ -346,6 +411,7 @@ async function renderCurrent() {
 
   const vp = page.getViewport({ scale });
   state.viewport = vp;
+  markup.attachViewport(vp);
 
   const oldW = els.stage.offsetWidth;
   const oldH = els.stage.offsetHeight;
@@ -660,6 +726,8 @@ function renderOverlay() {
     }
     els.overlay.appendChild(d);
   }
+
+  markup.render();
 
   // Blocs modifiés / ajoutés (le bloc en cours d'édition est rendu par l'éditeur)
   for (const e of pageEdits) {
@@ -1106,7 +1174,7 @@ function deleteActiveEdit() {
   updateTextPanel();
   scheduleAutosave();
   if (!a.isNew) {
-    toast('Bloc supprimé.', 'info', {
+    toast(t('msg.blockDeleted'), 'info', {
       action: 'Annuler',
       onAction: () => {
         state.edits.push(removed);
@@ -1144,7 +1212,7 @@ function startAddText() {
   state.addMode = true;
   els.stage.classList.add('placing');
   updateHint();
-  toast('Touchez la page à l’endroit où placer le texte.', 'info', { duration: 3000 });
+  toast(t('msg.tapToPlace'), 'info', { duration: 3000 });
 }
 
 function cancelAddMode() {
@@ -1207,11 +1275,11 @@ function undoEdits() {
   closeActive();
   const previous = state.history.undo(state.edits);
   if (previous == null) {
-    toast('Rien à annuler.', 'info', { duration: 1800 });
+    toast(t('msg.nothingUndo'), 'info', { duration: 1800 });
     return;
   }
   applyEditsSnapshot(previous);
-  toast('Modification annulée.', 'info', { duration: 1800 });
+  toast(t('msg.undone'), 'info', { duration: 1800 });
 }
 
 function redoEdits() {
@@ -1219,11 +1287,11 @@ function redoEdits() {
   closeActive();
   const next = state.history.redo(state.edits);
   if (next == null) {
-    toast('Rien à rétablir.', 'info', { duration: 1800 });
+    toast(t('msg.nothingRedo'), 'info', { duration: 1800 });
     return;
   }
   applyEditsSnapshot(next);
-  toast('Modification rétablie.', 'info', { duration: 1800 });
+  toast(t('msg.redone'), 'info', { duration: 1800 });
 }
 
 /* ── Sauvegarde / restauration de session (IndexedDB) ─────────────── */
@@ -1240,6 +1308,7 @@ function scheduleAutosave(now = false) {
   const run = () => {
     const payload = {
       name: state.fileName,
+      size: state.bytes?.byteLength || 0,
       numPages: state.numPages,
       edits: state.edits,
       ocrPages: collectOcrForSession(),
@@ -1313,7 +1382,7 @@ async function maybeRestoreSession() {
     renderEditList();
     updateExportUi();
     updatePanelsForPage();
-    toast('Session restaurée.', 'success', { duration: 2600 });
+    toast(t('msg.sessionRestored'), 'success', { duration: 2600 });
   } finally {
     state.restoring = false;
   }
@@ -1343,7 +1412,7 @@ function deleteEditById(id) {
   renderEditList();
   updateExportUi();
   updateTextPanel();
-  toast('Modification supprimée.', 'info', {
+  toast(t('msg.editDeleted'), 'info', {
     action: 'Annuler',
     onAction: () => {
       state.edits.push(removed);
@@ -1368,7 +1437,7 @@ function clearAllEdits() {
   renderEditList();
   updateExportUi();
   updateTextPanel();
-  toast('Toutes les modifications ont été retirées.', 'info', {
+  toast(t('msg.allCleared'), 'info', {
     action: 'Annuler',
     onAction: () => {
       state.edits = snapshot;
@@ -1543,7 +1612,7 @@ async function runOcr(pageNumbers) {
   updateOcrButtons();
   const langs = [...els.ocrLang.querySelectorAll('input[type="checkbox"]:checked')].map((i) => i.value);
   if (!langs.length) {
-    toast('Sélectionnez au moins une langue pour l’OCR.', 'warn');
+    toast(t('msg.pickOcrLang'), 'warn');
     state.ocr.running = false;
     updateOcrButtons();
     return;
@@ -1585,7 +1654,7 @@ async function runOcr(pageNumbers) {
       pd.ocrStatus = 'error';
       failed++;
       const msg = err?.message || String(err);
-      toast(`OCR impossible sur la page ${n} : ${msg}`, 'error');
+      toast(t('msg.ocrPageFailed', { n, msg }), 'error');
       if (/fetch|network|importScripts|Failed to load|NetworkError/i.test(msg)) break;
     }
   }
@@ -1608,7 +1677,7 @@ async function runOcr(pageNumbers) {
   updateExportUi();
   updateHint();
   renderOverlay();
-  if (done) toast(`OCR terminé sur ${done} page${done > 1 ? 's' : ''}.`, 'success');
+  if (done) toast(t('msg.ocrDone', { n: done }), 'success');
   if (state.search.query) performSearch(state.search.query);
 }
 
@@ -1888,7 +1957,7 @@ function closeSearch() {
 /* ─────────────────────────── Import / démo ─────────────────────────── */
 
 async function openPdfBytes(bytes, name, password = '') {
-  pushLoading('Ouverture du document…');
+  pushLoading(t('msg.opening'));
   const attempt = ++state.loadToken;
   let passwordPrompt = null;
   try {
@@ -1926,6 +1995,9 @@ async function openPdfBytes(bytes, name, password = '') {
     updateHistoryButtons();
     state.formFields = [];
     state.formValues = {};
+    markup.setObjects([]);
+    markupHistory.stack = [];
+    markupHistory.index = -1;
     if (els.tabForm) els.tabForm.hidden = true;
     if (els.formFields) els.formFields.innerHTML = '';
     els.stage.classList.remove('placing');
@@ -1957,7 +2029,7 @@ async function openPdfBytes(bytes, name, password = '') {
     els.canvasScroll.scrollTo({ top: 0, left: 0 });
     updatePanelsForPage();
     ensureAllLines().catch(() => {}); // indexation en arrière-plan
-    toast(`« ${state.fileName} » ouvert${state.numPages > 1 ? ` — ${state.numPages} pages` : ''}.`, 'success', {
+    toast(t('msg.opened', { name: state.fileName, n: state.numPages }), 'success', {
       duration: 2600,
     });
 
@@ -1978,6 +2050,8 @@ async function openPdfBytes(bytes, name, password = '') {
       .then((hash) => {
         if (docToken !== state.docToken) return;
         state.hash = hash;
+        // Conserve le document pour l'écran « Fichiers » (IndexedDB).
+        Session.saveBytes?.(hash, bytes, { name: state.fileName }).catch(() => {});
         return maybeRestoreSession();
       })
       .catch(() => {});
@@ -1997,7 +2071,7 @@ async function openPdfBytes(bytes, name, password = '') {
           : err?.name === 'MissingPDFException'
             ? 'fichier introuvable.'
             : err?.message || String(err);
-      toast(`Impossible d’ouvrir le PDF — ${msg}`, 'error', { duration: 8000 });
+      toast(t('msg.openFailed', { msg }), 'error', { duration: 8000 });
     }
   } finally {
     popLoading();
@@ -2013,17 +2087,17 @@ async function openPdfBytes(bytes, name, password = '') {
 async function handleFile(file) {
   if (!file) return;
   if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) {
-    toast('Merci de choisir un fichier PDF.', 'warn');
+    toast(t('msg.notPdf'), 'warn');
     return;
   }
   const MB = 1024 * 1024;
   if (!file.size) {
-    toast('Ce fichier est vide.', 'error');
+    toast(t('msg.emptyFile'), 'error');
     return;
   }
   if (file.size > 200 * MB) {
     toast(
-      `Fichier trop lourd (${Math.round(file.size / MB)} Mo). La limite est de 200 Mo ; découpez le PDF ou compressez-le.`,
+      t('msg.tooBig', { n: Math.round(file.size / MB) }),
       'error',
       { duration: 9000 }
     );
@@ -2031,25 +2105,25 @@ async function handleFile(file) {
   }
   if (file.size > 60 * MB) {
     toast(
-      `PDF volumineux (${Math.round(file.size / MB)} Mo) : l’ouverture peut prendre plusieurs secondes.`,
+      t('msg.bigFile', { n: Math.round(file.size / MB) }),
       'warn',
       { duration: 5000 }
     );
   }
   try {
-    pushLoading('Lecture du fichier…');
+    pushLoading(t('msg.reading'));
     const buf = await file.arrayBuffer();
     popLoading();
     await openPdfBytes(new Uint8Array(buf), file.name);
   } catch (err) {
     popLoading();
     console.error(err);
-    toast('Lecture du fichier impossible.', 'error');
+    toast(t('msg.readFailed'), 'error');
   }
 }
 
 async function openDemo(kind) {
-  pushLoading(kind === 'scan' ? 'Création du scan d’exemple…' : 'Création du PDF d’exemple…');
+  pushLoading(kind === 'scan' ? t('msg.demoScan') : t('msg.demoText'));
   try {
     const bytes = kind === 'scan' ? await buildSampleScanPdf() : await buildSampleTextPdf();
     popLoading();
@@ -2057,7 +2131,7 @@ async function openDemo(kind) {
   } catch (err) {
     popLoading();
     console.error(err);
-    toast('Impossible de créer l’exemple.', 'error');
+    toast(t('msg.demoFailed'), 'error');
   }
 }
 
@@ -2095,6 +2169,7 @@ async function handleSave() {
       ocrPages,
       redactMode: 'stream',
       renderPage: null,
+      objects: markup.objects,
     });
     const name = 'fichier-modifie.pdf';
     const blob = new Blob([result.bytes], { type: 'application/pdf' });
@@ -2118,11 +2193,11 @@ async function handleSave() {
 async function showExportModal({ kind, filename, blob, text }) {
   const token = ++modalToken;
   els.exportModal.hidden = false;
-  els.exportModalTitle.textContent = kind === 'pdf' ? 'PDF généré' : 'Texte extrait';
+  els.exportModalTitle.textContent = kind === 'pdf' ? t('modal.pdfTitle') : t('modal.textTitle');
   els.exportKind.textContent = kind === 'pdf' ? 'PDF' : 'TXT';
   els.exportFileName.textContent = filename;
   els.exportFileMeta.textContent = `${U.formatBytes(blob.size)}${
-    kind === 'pdf' ? ' · prêt à télécharger' : ' · texte brut UTF-8'
+    kind === 'pdf' ? ` · ${t('modal.ready')}` : ` · ${t('modal.rawText')}`
   }`;
   if (modalUrl) URL.revokeObjectURL(modalUrl);
   modalUrl = URL.createObjectURL(blob);
@@ -2133,7 +2208,7 @@ async function showExportModal({ kind, filename, blob, text }) {
   els.exportPreviewWrap.hidden = kind !== 'pdf';
   const content = els.exportModal.querySelector('.modal-content');
   if (content) content.classList.toggle('single', kind !== 'pdf');
-  els.exportCopyText.innerHTML = `${icon('copy', 16)}<span>Copier le texte</span>`;
+  els.exportCopyText.innerHTML = `${icon('copy', 16)}<span>${t('modal.copy')}</span>`;
   const canShare = !!navigator.canShare?.({ files: [new File([blob], filename, { type: blob.type })] });
   els.exportShare.hidden = !canShare;
   els.exportShare.onclick = () => shareBlob(blob, filename);
@@ -2179,7 +2254,7 @@ function fileNameSuffix(includeEdits, includeOcr) {
 function saveBytes(bytes, name, mime = 'application/pdf') {
   const blob = new Blob([bytes], { type: mime });
   U.downloadBlob(blob, name);
-  toast(`« ${name} » généré.`, 'success', { duration: 6000 });
+  toast(t('msg.generated', { name }), 'success', { duration: 6000 });
   showExportModal({ kind: mime === 'application/pdf' ? 'pdf' : 'txt', filename: name, blob });
 }
 
@@ -2203,7 +2278,7 @@ async function handleExportPdf(options = {}) {
   const includeEdits = els.expEdits.checked;
   const includeOcr = els.expOcr.checked;
   if (!includeEdits && !includeOcr) {
-    toast('Sélectionnez au moins une option à exporter.', 'warn');
+    toast(t('msg.pickOption'), 'warn');
     return;
   }
   closeActive();
@@ -2213,7 +2288,7 @@ async function handleExportPdf(options = {}) {
   const edits = includeEdits ? state.edits : [];
   const redactMode = els.expRedact?.value || 'stream';
 
-  pushLoading('Génération du PDF…');
+  pushLoading(t('msg.exporting'));
   try {
     // Import paresseux : pdf-lib et fontkit ne pèsent pas sur le bundle initial.
     const { exportPdf, analyzeExport } = await import('./exporter.js');
@@ -2237,6 +2312,7 @@ async function handleExportPdf(options = {}) {
       redactMode,
       renderPage: redactMode === 'raster' ? renderPageForExport : null,
       rasterQuality: Number(els.expQuality?.value || 1),
+      objects: markup.objects,
     });
     const bytes = result.bytes;
     const suffix =
@@ -2245,7 +2321,7 @@ async function handleExportPdf(options = {}) {
     saveBytes(bytes, name);
     if (redactMode === 'stream' && result.stats?.removedPages?.length) {
       toast(
-        `Texte d'origine retiré du flux sur ${result.stats.removedPages.length} page(s).`,
+        t('msg.redacted', { n: result.stats.removedPages.length }),
         'success',
         { duration: 3800 }
       );
@@ -2253,7 +2329,7 @@ async function handleExportPdf(options = {}) {
     closeExportMenu();
   } catch (err) {
     console.error(err);
-    toast(`Export impossible — ${err?.message || err}`, 'error');
+    toast(t('msg.exportFailed', { msg: err?.message || err }), 'error');
   } finally {
     popLoading();
   }
@@ -2265,7 +2341,7 @@ async function handleExportPdf(options = {}) {
  */
 async function handleExportImage(format) {
   if (!state.engine) return;
-  pushLoading('Rendu de la page…');
+  pushLoading(t('msg.rendering'));
   try {
     const n = state.pageIndex + 1;
     const size = await state.engine.getPageSize(n);
@@ -2278,13 +2354,13 @@ async function handleExportImage(format) {
     if (!blob) throw new Error('Rendu impossible');
     const name = `${U.baseName(state.fileName)}-page-${n}.${format}`;
     U.downloadBlob(blob, name);
-    toast(`Image ${format.toUpperCase()} exportée (${U.formatBytes(blob.size)}).`, 'success', {
+    toast(t('msg.imageExported', { fmt: format.toUpperCase(), size: U.formatBytes(blob.size) }), 'success', {
       duration: 4500,
     });
     closeExportMenu();
   } catch (err) {
     console.error(err);
-    toast(`Export de l’image impossible — ${err?.message || err}`, 'error');
+    toast(t('msg.imageFailed', { msg: err?.message || err }), 'error');
   } finally {
     popLoading();
   }
@@ -2292,7 +2368,7 @@ async function handleExportImage(format) {
 
 async function handleExportText() {
   if (!state.engine) return;
-  pushLoading('Préparation du texte…');
+  pushLoading(t('msg.preparingText'));
   try {
     await ensureAllLines();
     const parts = [];
@@ -2301,18 +2377,18 @@ async function handleExportText() {
       if (text.trim()) parts.push(`— Page ${n} —\n${text.trim()}`);
     }
     if (!parts.length) {
-      toast('Aucun texte à exporter. Lancez l’OCR sur les pages scannées.', 'warn');
+      toast(t('msg.noText'), 'warn');
       return;
     }
     const blob = new Blob([parts.join('\n\n')], { type: 'text/plain;charset=utf-8' });
     const name = `${U.baseName(state.fileName)}.txt`;
     U.downloadBlob(blob, name);
-    toast('Texte exporté (.txt).', 'success');
+    toast(t('msg.textExported'), 'success');
     showExportModal({ kind: 'txt', filename: name, blob, text: parts.join('\n\n') });
     closeExportMenu();
   } catch (err) {
     console.error(err);
-    toast('Export du texte impossible.', 'error');
+    toast(t('msg.textFailed'), 'error');
   } finally {
     popLoading();
   }
@@ -2323,7 +2399,7 @@ async function handleExportText() {
 function renderFormPanel() {
   if (!els.formFields) return;
   if (!state.formFields.length) {
-    els.formFields.innerHTML = '<p class="form-empty">Aucun champ AcroForm détecté.</p>';
+    els.formFields.innerHTML = `<p class="form-empty">${t('form.none')}</p>`;
     return;
   }
   els.formFields.innerHTML = state.formFields
@@ -2379,10 +2455,10 @@ function bindFormTools() {
       });
       const name = `${U.baseName(state.fileName)}-formulaire.pdf`;
       saveBytes(bytes, name);
-      toast('Formulaire exporté.', 'success', { duration: 4500 });
+      toast(t('msg.formExported'), 'success', { duration: 4500 });
     } catch (err) {
       console.error(err);
-      toast(`Export du formulaire impossible — ${err?.message || err}`, 'error');
+      toast(t('msg.formFailed', { msg: err?.message || err }), 'error');
     } finally {
       popLoading();
     }
@@ -2431,7 +2507,7 @@ async function applyPageOp(label, operation, targetPage) {
     }
   } catch (err) {
     console.error(err);
-    toast(`Opération impossible — ${err?.message || err}`, 'error');
+    toast(t('msg.opFailed', { msg: err?.message || err }), 'error');
   } finally {
     popLoading();
   }
@@ -2470,7 +2546,7 @@ function bindPageTools() {
     if (!state.engine) return;
     const pages = PageOps.parsePageRanges(els.pgRange.value, state.numPages);
     if (!pages.length) {
-      toast('Indiquez des pages valides (ex. 1-3,5).', 'warn');
+      toast(t('msg.badRange'), 'warn');
       return;
     }
     pushLoading('Extraction des pages…');
@@ -2479,10 +2555,10 @@ function bindPageTools() {
       const blob = new Blob([bytes], { type: 'application/pdf' });
       const name = `${U.baseName(state.fileName)}-pages-${pages[0]}${pages.length > 1 ? `-${pages[pages.length - 1]}` : ''}.pdf`;
       U.downloadBlob(blob, name);
-      toast(`${pages.length} page(s) extraite(s) dans « ${name} ».`, 'success', { duration: 5000 });
+      toast(t('msg.extracted', { n: pages.length, name }), 'success', { duration: 5000 });
     } catch (err) {
       console.error(err);
-      toast('Extraction impossible.', 'error');
+      toast(t('msg.extractFailed'), 'error');
     } finally {
       popLoading();
     }
@@ -2492,7 +2568,7 @@ function bindPageTools() {
     if (!state.engine) return;
     const n = currentPageNo();
     if (n < 1 || n >= state.numPages) {
-      toast('Placez-vous sur une page intermédiaire pour diviser le document.', 'warn');
+      toast(t('msg.splitHint'), 'warn');
       return;
     }
     pushLoading('Division du document…');
@@ -2506,10 +2582,10 @@ function bindPageTools() {
       const base = U.baseName(state.fileName);
       U.downloadBlob(new Blob([a], { type: 'application/pdf' }), `${base}-partie-1.pdf`);
       setTimeout(() => U.downloadBlob(new Blob([b], { type: 'application/pdf' }), `${base}-partie-2.pdf`), 600);
-      toast('Document divisé en deux fichiers.', 'success', { duration: 5000 });
+      toast(t('msg.splitDone'), 'success', { duration: 5000 });
     } catch (err) {
       console.error(err);
-      toast('Division impossible.', 'error');
+      toast(t('msg.splitFailed'), 'error');
     } finally {
       popLoading();
     }
@@ -2525,22 +2601,580 @@ function bindPageTools() {
       const other = new Uint8Array(await file.arrayBuffer());
       popLoading();
       await applyPageOp('Fusion des documents…', () => PageOps.mergePdfs(state.bytes, other));
-      toast(`« ${file.name} » ajouté au document.`, 'success', { duration: 4500 });
+      toast(t('msg.merged', { name: file.name }), 'success', { duration: 4500 });
     } catch (err) {
       popLoading();
       console.error(err);
-      toast('Fusion impossible.', 'error');
+      toast(t('msg.mergeFailed'), 'error');
     }
   });
 }
 
 /* ─────────────────────────── Événements ─────────────────────────── */
 
+/* ───────────────────────── Annotations (calque d'objets) ───────────────────────── */
+
+const ANNO_TOOLS = [
+  { id: 'highlight', icon: 'highlight', label: 'anno.highlight', color: true },
+  { id: 'underline', icon: 'minus', label: 'anno.underline' },
+  { id: 'strike', icon: 'strike', label: 'anno.strike' },
+  { id: 'ink', icon: 'pen', label: 'anno.ink' },
+  { id: 'note', icon: 'note', label: 'anno.note' },
+  { id: 'rect', icon: 'square', label: 'anno.rect' },
+  { id: 'ellipse', icon: 'circle', label: 'anno.ellipse' },
+  { id: 'arrow', icon: 'arrowUpRight', label: 'anno.arrow' },
+  { id: 'eraser', icon: 'eraser', label: 'anno.eraser', danger: true },
+];
+
+let annoColor = HIGHLIGHT_COLORS[0];
+let annoInkColor = '#e11d48';
+let annoInkWidth = 2.5;
+
+function buildAnnoBar() {
+  if (!els.annoTools) return;
+  els.annoTools.innerHTML = ANNO_TOOLS.map((tool) => {
+    const swatch =
+      tool.id === 'highlight'
+        ? `<span class="anno-swatch" style="background:${annoColor}"></span>`
+        : icon(tool.icon, 19);
+    return `<button class="anno-btn ${tool.danger ? 'danger' : ''}" data-anno-tool="${tool.id}" type="button">
+      ${swatch}<span>${t(tool.label)}</span>
+    </button>`;
+  }).join('') +
+    `<button class="anno-btn" data-anno-insert="image" type="button">${icon('image', 19)}<span>${t('anno.image')}</span></button>
+     <button class="anno-btn" data-anno-insert="camera" type="button">${icon('camera', 19)}<span>${t('anno.photo')}</span></button>
+     <button class="anno-btn" data-anno-insert="check" type="button">${icon('check', 19)}<span>${t('anno.check')}</span></button>
+     <button class="anno-btn" data-anno-insert="cross" type="button">${icon('x', 19)}<span>${t('anno.cross')}</span></button>
+     <button class="anno-btn" data-anno-insert="date" type="button">${icon('clock', 19)}<span>${t('anno.date')}</span></button>
+     <button class="anno-btn" data-anno-insert="sign" type="button">${icon('signature', 19)}<span>${t('tool.sign')}</span></button>
+     <button class="anno-btn" data-anno-insert="stamp" type="button">${icon('stamp', 19)}<span>${t('tool.stamp')}</span></button>
+     <button class="anno-btn" id="annoUndo" type="button">${icon('undo', 19)}<span>${t('common.undo')}</span></button>
+     <button class="anno-btn" id="annoClear" type="button">${icon('trash', 19)}<span>${t('anno.clear')}</span></button>
+     <button class="anno-btn" id="annoDone" type="button">${icon('check', 19)}<span>${t('common.done')}</span></button>`;
+  els.annoTools.querySelectorAll('[data-anno-tool]').forEach((btn) => {
+    btn.addEventListener('click', () => activateAnnoTool(btn.dataset.annoTool));
+  });
+  els.annoTools.querySelectorAll('[data-anno-insert]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const kind = btn.dataset.annoInsert;
+      if (kind === 'image') return openImageTool(false);
+      if (kind === 'camera') return openImageTool(true);
+      if (kind === 'check') return insertMark('check');
+      if (kind === 'cross') return insertMark('cross');
+      if (kind === 'date') return insertToday();
+      if (kind === 'sign') return openSignTool();
+      if (kind === 'stamp') return openStampTool();
+    });
+  });
+  document.getElementById('annoUndo')?.addEventListener('click', undoMarkup);
+  document.getElementById('annoClear')?.addEventListener('click', () => {
+    markup.clearPage();
+    toast(t('anno.cleared'), 'info', { duration: 2200 });
+  });
+  document.getElementById('annoDone')?.addEventListener('click', closeAnnotate);
+  updateAnnoUndo();
+}
+
+function paintAnnoSub(tool) {
+  if (!els.annoSub) return;
+  if (tool === 'highlight') {
+    els.annoSub.hidden = false;
+    els.annoSub.innerHTML = HIGHLIGHT_COLORS.map(
+      (c) => `<button class="color-dot" data-anno-color="${c}" style="background:${c}" type="button" aria-label="${c}"></button>`,
+    ).join('');
+    els.annoSub.querySelectorAll('[data-anno-color]').forEach((dot) => {
+      dot.addEventListener('click', () => {
+        annoColor = dot.dataset.annoColor;
+        markup.setColor(annoColor);
+        buildAnnoBar();
+        activateAnnoTool('highlight');
+      });
+    });
+    return;
+  }
+  if (tool === 'ink') {
+    els.annoSub.hidden = false;
+    els.annoSub.innerHTML = `
+      <span class="muted">${t('anno.color')}</span>
+      ${['#e11d48', '#2563eb', '#059669', '#111827'].map(
+        (c) =>
+          `<button class="color-dot" data-ink-color="${c}" style="background:${c}" type="button" aria-label="${c}"></button>`,
+      ).join('')}
+      <span class="muted">${t('anno.width')}</span>
+      <input type="range" min="1" max="8" step="0.5" value="${annoInkWidth}" id="annoWidth" />`;
+    els.annoSub.querySelectorAll('[data-ink-color]').forEach((dot) => {
+      dot.addEventListener('click', () => {
+        annoInkColor = dot.dataset.inkColor;
+        markup.setInk({ color: annoInkColor });
+      });
+    });
+    const range = document.getElementById('annoWidth');
+    range?.addEventListener('input', () => {
+      annoInkWidth = Number(range.value);
+      markup.setInk({ width: annoInkWidth });
+    });
+    return;
+  }
+  els.annoSub.hidden = true;
+  els.annoSub.innerHTML = '';
+}
+
+function activateAnnoTool(tool) {
+  markup.setColor(annoColor);
+  markup.setTool(tool);
+  els.annoTools?.querySelectorAll('[data-anno-tool]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.annoTool === tool);
+  });
+  paintAnnoSub(tool);
+  updateHint();
+}
+
+function openAnnotate() {
+  routeTo('doc');
+  if (!state.engine) return;
+  closeActive();
+  buildAnnoBar();
+  els.annobar.hidden = false;
+  document.body.classList.add('annotating');
+  activateAnnoTool('highlight');
+  if (!markupHistory.stack.length) pushMarkupHistory();
+}
+
+function closeAnnotate() {
+  markup.setTool(null);
+  els.annobar.hidden = true;
+  els.annoSub.hidden = true;
+  els.annoTools?.querySelectorAll('.anno-btn').forEach((b) => b.classList.remove('active'));
+  document.body.classList.remove('annotating');
+  scheduleAutosave();
+}
+
+let noteTarget = null;
+function editNote(obj) {
+  noteTarget = obj;
+  const value = window.prompt(t('anno.notePrompt'), obj.text || '');
+  if (value == null) return;
+  markup.update(obj.id, { text: value });
+  toast(t('anno.noteSaved'), 'success', { duration: 2000 });
+}
+
+/* ───────────────────────── Signatures et tampons ───────────────────────── */
+
+/** Décalage en cascade pour que les objets insérés ne se superposent pas. */
+let insertCount = 0;
+function cascadeOffset() {
+  const dx = (insertCount % 3) * 18;
+  const dy = Math.floor(insertCount / 3) * 22;
+  insertCount++;
+  return { dx, dy };
+}
+
+/** Ajoute une image (signature, photo, tampon) centrée sur la page. */
+function addImageObject(src, { ratio = 3, label = '', type = 'image' } = {}) {
+  const vp = state.viewport;
+  const pageW = vp ? vp.width : 595;
+  const pageH = vp ? vp.height : 842;
+  const scale = state.scale || 1;
+  const width = Math.min(pageW * 0.34, 150 / scale);
+  const height = width / Math.max(0.2, ratio);
+  const { dx, dy } = cascadeOffset();
+  const bbox = {
+    x: pageW / 2 - width / 2 + dx,
+    y: pageH / 2 - height / 2 - dy,
+    w: width,
+    h: height,
+  };
+  const obj = markup.add({ type, src, bbox, label, rotation: 0, opacity: 1 });
+  markup.setTool(null);
+  markup.select?.(obj.id);
+  return obj;
+}
+
+function openSignTool() {
+  routeTo('doc');
+  if (!state.engine) return;
+  const body = openSheet({ title: t('tool.sign'), html: signatureSheetHtml(), size: 'tall' });
+  if (!body) return;
+
+  const padCanvas = body.querySelector('#sigPad');
+  const pad = padCanvas ? createSignaturePad(padCanvas) : null;
+  requestAnimationFrame(() => pad?.resize());
+
+  body.querySelectorAll('[data-sig-tab]').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      body.querySelectorAll('[data-sig-tab]').forEach((x) => x.classList.toggle('active', x === tab));
+      body.querySelectorAll('[data-sig-pane]').forEach((pane) => {
+        pane.hidden = pane.dataset.sigPane !== tab.dataset.sigTab;
+      });
+      if (tab.dataset.sigTab === 'draw') requestAnimationFrame(() => pad?.resize());
+    });
+  });
+
+  body.querySelector('#sigClear')?.addEventListener('click', () => pad?.clear());
+
+  body.querySelector('#sigSaveDraw')?.addEventListener('click', () => {
+    if (!pad || pad.isEmpty()) {
+      toast(t('sign.empty'), 'warn');
+      return;
+    }
+    const src = pad.toDataURL();
+    const ratio = padCanvas.width / Math.max(1, padCanvas.height);
+    saveSignature({ src, ratio, kind: 'draw' });
+    closeSheet();
+    addImageObject(src, { ratio, type: 'signature', label: t('sign.label') });
+    toast(t('sign.placed'), 'success');
+  });
+
+  let font = SIGNATURE_FONTS[0];
+  const textInput = body.querySelector('#sigText');
+  const preview = body.querySelector('#sigPreview');
+  textInput?.addEventListener('input', () => {
+    preview.textContent = textInput.value;
+  });
+  body.querySelectorAll('[data-sig-font]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      font = SIGNATURE_FONTS.find((f) => f.id === btn.dataset.sigFont) || SIGNATURE_FONTS[0];
+      body.querySelectorAll('[data-sig-font]').forEach((b) => b.classList.toggle('active', b === btn));
+      preview.style.fontFamily = font.css;
+    });
+  });
+  body.querySelector('#sigSaveType')?.addEventListener('click', () => {
+    const value = textInput?.value?.trim();
+    if (!value) {
+      toast(t('sign.empty'), 'warn');
+      return;
+    }
+    const printed = typedSignature(value, font.css);
+    saveSignature({ src: printed.src, ratio: printed.ratio, kind: 'type' });
+    closeSheet();
+    addImageObject(printed.src, { ratio: printed.ratio, type: 'signature', label: value });
+    toast(t('sign.placed'), 'success');
+  });
+
+  const file = body.querySelector('#sigFile');
+  body.querySelector('#sigPickImage')?.addEventListener('click', () => file?.click());
+  file?.addEventListener('change', async () => {
+    const chosen = file.files?.[0];
+    if (!chosen) return;
+    const dataUrl = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsDataURL(chosen);
+    });
+    const trim = body.querySelector('#sigTrim')?.checked;
+    const src = trim ? await removeLightBackground(dataUrl) : dataUrl;
+    const img = new Image();
+    img.src = src;
+    await new Promise((r) => {
+      img.onload = r;
+      img.onerror = r;
+    });
+    const ratio = (img.naturalWidth || 3) / Math.max(1, img.naturalHeight || 1);
+    if (chosen.size < 400000) saveSignature({ src, ratio, kind: 'image' });
+    closeSheet();
+    addImageObject(src, { ratio, type: 'signature', label: chosen.name });
+    toast(t('sign.placed'), 'success');
+  });
+
+  body.querySelectorAll('[data-sig-use]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const entry = loadSignatures().find((s) => s.id === btn.dataset.sigUse);
+      if (!entry) return;
+      closeSheet();
+      addImageObject(entry.src, { ratio: entry.ratio || 3, type: 'signature', label: t('sign.label') });
+      toast(t('sign.placed'), 'success');
+    });
+  });
+  body.querySelectorAll('[data-sig-del]').forEach((el) => {
+    el.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      deleteSignature(el.dataset.sigDel);
+      openSignTool();
+    });
+  });
+}
+
+function openStampTool() {
+  routeTo('doc');
+  if (!state.engine) return;
+  const today = new Date().toLocaleDateString(undefined, { day: '2-digit', month: 'long', year: 'numeric' });
+  const html = `
+    <div class="stamp-grid">
+      ${STAMP_PRESETS.map(
+        (st) =>
+          `<button class="stamp-preset" data-stamp="${st.id}" type="button" style="color:${st.color};border-color:${st.color}">${st.text}</button>`,
+      ).join('')}
+      <button class="stamp-preset date" data-stamp="date" type="button">${icon('clock', 15)} ${today}</button>
+    </div>
+    <div class="stamp-custom">
+      <h4>${t('stamp.custom')}</h4>
+      <input id="stampText" placeholder="${t('stamp.text')}" value="" />
+      <div class="stamp-row">
+        <input type="color" id="stampColor" value="#059669" />
+        <button class="btn primary small" id="stampAdd" type="button">${icon('plus', 15)}<span>${t('stamp.add')}</span></button>
+      </div>
+    </div>`;
+  const body = openSheet({ title: t('tool.stamp'), html });
+  if (!body) return;
+
+  const place = (obj) => {
+    closeSheet();
+    markup.setTool(null);
+    markup.select?.(obj.id);
+  };
+
+  body.querySelectorAll('[data-stamp]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.stamp;
+      if (id === 'date') {
+        const obj = markup.add({
+          type: 'date',
+          text: today,
+          fontSize: Math.max(8, 18 / (state.scale || 1)),
+          bbox: { x: 60, y: 80, w: 120, h: 18 },
+          color: '#111827',
+        });
+        place(obj);
+        return;
+      }
+      const preset = STAMP_PRESETS.find((s) => s.id === id);
+      if (!preset) return;
+      const vp = state.viewport;
+      const scale = state.scale || 1;
+      const width = Math.min(190, (vp?.width || 595) * 0.5);
+      const obj = markup.add({
+        type: 'stamp',
+        text: preset.text,
+        color: preset.color,
+        borderColor: preset.color,
+        bbox: { x: (vp?.width || 595) / 2 - width / 2, y: (vp?.height || 842) / 2 - 22, w: width, h: 44 },
+        rotation: 0,
+        opacity: 0.95,
+        fontSize: Math.max(9, Math.min(30, 22 / scale)),
+      });
+      place(obj);
+    });
+  });
+
+  body.querySelector('#stampAdd')?.addEventListener('click', () => {
+    const text = body.querySelector('#stampText')?.value?.trim();
+    if (!text) {
+      toast(t('stamp.needText'), 'warn');
+      return;
+    }
+    const color = body.querySelector('#stampColor')?.value || '#059669';
+    const vp = state.viewport;
+    const obj = markup.add({
+      type: 'stamp',
+      text,
+      color,
+      borderColor: color,
+      bbox: { x: (vp?.width || 595) / 2 - 90, y: (vp?.height || 842) / 2 - 22, w: 180, h: 44 },
+      rotation: 0,
+      opacity: 0.95,
+      fontSize: Math.max(9, Math.min(30, 22 / (state.scale || 1))),
+    });
+    place(obj);
+  });
+}
+
+/** Insère une image / photo (appareil photo sur mobile). */
+function openImageTool(capture = false) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  if (capture) input.capture = 'environment';
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const dataUrl = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsDataURL(file);
+    });
+    const img = new Image();
+    img.src = dataUrl;
+    await new Promise((r) => {
+      img.onload = r;
+      img.onerror = r;
+    });
+    const ratio = (img.naturalWidth || 1) / Math.max(1, img.naturalHeight || 1);
+    addImageObject(dataUrl, { ratio, type: 'image', label: file.name });
+    toast(t('image.placed'), 'success');
+  });
+  input.click();
+}
+
+function insertMark(symbol) {
+  const scale = state.scale || 1;
+  const size = Math.max(14, 28 / scale);
+  const vp = state.viewport;
+  const { dx, dy } = cascadeOffset();
+  const obj = markup.add({
+    type: 'check',
+    mark: symbol,
+    color: symbol === 'cross' ? '#dc2626' : '#059669',
+    bbox: {
+      x: (vp?.width || 595) / 2 - size / 2 + dx,
+      y: (vp?.height || 842) / 2 - size / 2 - dy,
+      w: size,
+      h: size,
+    },
+  });
+  markup.select?.(obj.id);
+}
+
+function insertToday() {
+  const today = new Date().toLocaleDateString();
+  const scale = state.scale || 1;
+  const vp = state.viewport;
+  const { dx, dy } = cascadeOffset();
+  const obj = markup.add({
+    type: 'date',
+    text: today,
+    fontSize: Math.max(8, 16 / scale),
+    color: '#111827',
+    bbox: { x: (vp?.width || 595) / 2 - 40 + dx, y: (vp?.height || 842) / 2 - 9 - dy, w: 90, h: 18 },
+  });
+  markup.select?.(obj.id);
+}
+
+/* ───────────────────────── Écran Fichiers (IndexedDB) ───────────────────────── */
+
+let filesCache = [];
+
+function fileDateLabel(ts) {
+  if (!ts) return '';
+  try {
+    return new Date(ts).toLocaleString(undefined, {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
+}
+
+/** Liste les documents récents : sessions enregistrées + document courant. */
+async function loadFiles() {
+  const items = [];
+  try {
+    const sessions = await Session.listSessions?.();
+    for (const entry of sessions || []) {
+      items.push({
+        key: entry.key,
+        name: entry.name || 'document.pdf',
+        size: entry.size || 0,
+        updatedAt: entry.updatedAt || 0,
+        edits: entry.edits || 0,
+        ocr: entry.ocr || 0,
+        hasBytes: !!entry.bytes,
+      });
+    }
+  } catch {
+    /* IndexedDB indisponible */
+  }
+  return items;
+}
+
+async function renderFilesScreen() {
+  if (!els.filesList) return;
+  els.filesList.innerHTML = `<p class="muted small">${t('files.loading')}</p>`;
+  filesCache = await loadFiles();
+  els.filesCount.textContent = String(filesCache.length);
+  els.filesEmpty.hidden = filesCache.length > 0;
+  els.filesList.hidden = filesCache.length === 0;
+  els.filesList.innerHTML = filesCache
+    .map(
+      (f) => `<div class="file-row" data-key="${U.escapeHtml(f.key)}">
+        <span class="file-thumb-icon">${icon('fileText', 20)}</span>
+        <div class="file-main" data-open="${U.escapeHtml(f.key)}">
+          <strong>${U.escapeHtml(f.name)}</strong>
+          <span>${fileDateLabel(f.updatedAt)} · ${t('files.summary', { e: f.edits, o: f.ocr })}</span>
+        </div>
+        <div class="file-actions">
+          <button class="icon-btn tiny" data-rename="${U.escapeHtml(f.key)}" data-i18n-title="files.rename" data-icon="edit" aria-label="${t('files.rename')}"></button>
+          <button class="icon-btn tiny" data-remove="${U.escapeHtml(f.key)}" data-i18n-title="files.delete" data-icon="trash" aria-label="${t('files.delete')}"></button>
+        </div>
+      </div>`,
+    )
+    .join('');
+  hydrateIcons(els.filesList);
+  els.filesList.querySelectorAll('[data-remove]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await Session.deleteSession(btn.dataset.remove).catch(() => {});
+      toast(t('files.deleted'), 'success');
+      renderFilesScreen();
+    });
+  });
+  els.filesList.querySelectorAll('[data-rename]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const item = filesCache.find((f) => f.key === btn.dataset.rename);
+      const name = window.prompt(t('files.renamePrompt'), item?.name || '');
+      if (!name) return;
+      await Session.renameSession?.(btn.dataset.rename, name).catch(() => {});
+      renderFilesScreen();
+    });
+  });
+  els.filesList.querySelectorAll('[data-open]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      const item = filesCache.find((f) => f.key === el.dataset.open);
+      if (!item) return;
+      if (!item.hasBytes) {
+        toast(t('files.needFile'), 'warn');
+        return;
+      }
+      const bytes = await Session.loadBytes?.(item.key);
+      if (!bytes) {
+        toast(t('files.needFile'), 'warn');
+        return;
+      }
+      await openPdfBytes(bytes, item.name);
+    });
+  });
+}
+
+/** Routes des outils : ouvre le document si nécessaire, puis l'outil. */
+async function openTool(id) {
+  if (id === 'compress' || id === 'protect' || id === 'convert') {
+    openDocumentToolsSheet(id);
+    return;
+  }
+  if (!state.engine) {
+    toast(t('tool.needDoc'), 'warn', { duration: 4200 });
+    els.fileInput.click();
+    return;
+  }
+  if (id === 'edit') {
+    routeTo('doc');
+    if (!state.edits.length && !state.addMode) startAddText();
+    else toast(t('tool.editHint'), 'info', { duration: 3600 });
+    return;
+  }
+  if (id === 'annotate') return openAnnotate();
+  if (id === 'sign') return openSignTool();
+  if (id === 'stamp') return openStampTool();
+  if (id === 'pages') {
+    routeTo('doc');
+    return openPanelsSheet('pages');
+  }
+  if (id === 'ocr') {
+    routeTo('doc');
+    return openPanelsSheet('ocr');
+  }
+}
+
 const PANEL_LABELS = { pages: 'tab.pages', ocr: 'tab.ocr', form: 'tab.form', text: 'tab.text' };
 const PANEL_ICONS = { pages: 'layers', ocr: 'scan', form: 'edit', text: 'text' };
 
 /** Feuille listant les panneaux disponibles (mobile). */
-function openPanelsSheet() {
+function openPanelsSheet(direct = null) {
+  if (direct) {
+    openPanelSheet(direct);
+    return;
+  }
   const rows = ['pages', 'ocr', 'form', 'text']
     .filter((name) => name !== 'form' || state.formFields.length)
     .map(
@@ -2655,7 +3289,7 @@ function bindEvents() {
   });
   els.exportCopyText.addEventListener('click', async () => {
     const ok = await U.copyText(els.exportTextPreview.value || '');
-    toast(ok ? 'Texte copié.' : 'Copie impossible.', ok ? 'success' : 'error', { duration: 2400 });
+    toast(ok ? t('msg.copied') : t('msg.copyFailed'), ok ? 'success' : 'error', { duration: 2400 });
   });
   document.addEventListener('click', (e) => {
     if (!els.exportMenu.hidden && !e.target.closest('.export-wrap')) closeExportMenu();
@@ -2786,12 +3420,12 @@ function bindEvents() {
   });
   els.btnCopyOcr.addEventListener('click', async () => {
     const ok = await U.copyText(els.ocrText.value || '');
-    toast(ok ? 'Texte copié.' : 'Copie impossible.', ok ? 'success' : 'error', { duration: 2500 });
+    toast(ok ? t('msg.copied') : t('msg.copyFailed'), ok ? 'success' : 'error', { duration: 2500 });
   });
   els.btnOcrFix.addEventListener('click', () => {
     const pd = getPageData(state.pageIndex + 1);
     if (!pd.ocr?.lines.length) {
-      toast('Aucun bloc OCR sur cette page.', 'warn');
+      toast(t('msg.noOcrBlock'), 'warn');
       return;
     }
     setTab('edit');
@@ -2806,7 +3440,7 @@ function bindEvents() {
   // Texte
   els.btnCopyPageText.addEventListener('click', async () => {
     const ok = await U.copyText(els.pageText.value || '');
-    toast(ok ? 'Texte de la page copié.' : 'Copie impossible.', ok ? 'success' : 'error', { duration: 2500 });
+    toast(ok ? t('msg.pageCopied') : t('msg.copyFailed'), ok ? 'success' : 'error', { duration: 2500 });
   });
   els.btnDownloadText.addEventListener('click', handleExportText);
 
@@ -2984,8 +3618,8 @@ let installPromptEvent = null;
 window.addEventListener('beforeinstallprompt', (event) => {
   event.preventDefault();
   installPromptEvent = event;
-  toast('PDF Studio peut être installé sur votre appareil.', 'info', {
-    action: 'Installer',
+  toast(t('msg.install'), 'info', {
+    action: t('msg.installAction'),
     duration: 9000,
     onAction: async () => {
       if (!installPromptEvent) return;
@@ -3026,6 +3660,7 @@ function initLanguage() {
     els.langSelect.addEventListener('change', () => {
       const next = els.langSelect.value;
       applyLanguage(next);
+      renderTools();
       try {
         localStorage.setItem('pdf-studio-lang', next);
       } catch {
@@ -3058,7 +3693,9 @@ function init() {
         return;
       }
       els.homeResume.hidden = !state.engine;
+      if (name === 'files') renderFilesScreen();
     },
+    onTool: (id) => openTool(id),
   });
   if (!state.engine) routeTo('home');
   bindPinchZoom();
@@ -3073,6 +3710,7 @@ init();
 // Exposé pour les tests automatisés
 window.__pdfStudio = {
   state,
+  markup,
   openPdfBytes,
   getPageText,
   exportPdf: (...args) => import('./exporter.js').then((m) => m.exportPdf(...args)),

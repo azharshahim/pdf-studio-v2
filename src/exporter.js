@@ -11,7 +11,7 @@
  *  - `mask` : ancien comportement (rectangle de couleur), conservé en option.
  */
 
-import { PDFDocument, PDFName, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument, PDFName, StandardFonts, rgb, degrees } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import { ArabicShaper } from 'arabic-persian-reshaper';
 import bidiFactory from 'bidi-js';
@@ -296,6 +296,7 @@ export async function exportPdf({
   redactMode = 'stream',
   renderPage = null,
   rasterQuality = 1,
+  objects = [],
 }) {
   const pdfDoc = await PDFDocument.load(sourceBytes, {
     ignoreEncryption: true,
@@ -543,6 +544,196 @@ export async function exportPdf({
     }
   }
 
+  // 4. Annotations, signatures, tampons et images posés sur la page
+  if (objects.length) {
+    try {
+      await drawObjects(pdfDoc, pages, objects);
+      stats.markup = objects.length;
+    } catch (err) {
+      console.warn('[exporter] annotations non dessinées', err);
+    }
+  }
+
   const bytes = await pdfDoc.save();
   return { bytes, stats, missingChars: [...missingChars] };
+}
+
+
+/* ─────────────── Annotations, signatures, tampons, images ─────────────── */
+
+function dataUrlBytes(src) {
+  const match = /^data:([^;]+);base64,(.*)$/.exec(src || '');
+  if (!match) return null;
+  const binary = atob(match[2]);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return { mime: match[1], bytes };
+}
+
+/** Convertit un tracé de points PDF en chemin SVG (repère PDF, y vers le haut). */
+export function pointsToSvgPath(points = []) {
+  if (!points.length) return '';
+  return points
+    .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)} ${p.y.toFixed(2)}`)
+    .join(' ');
+}
+
+/**
+ * Dessine les objets (annotations, signatures, tampons, images) sur le PDF.
+ * Les bbox sont exprimées en points PDF avec l'origine en bas à gauche.
+ */
+export async function drawObjects(pdfDoc, pages, objects) {
+  const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const imageCache = new Map();
+
+  const embedImage = async (src) => {
+    if (imageCache.has(src)) return imageCache.get(src);
+    const data = dataUrlBytes(src);
+    if (!data) return null;
+    const image = data.mime.includes('jpeg') || data.mime.includes('jpg')
+      ? await pdfDoc.embedJpg(data.bytes)
+      : await pdfDoc.embedPng(data.bytes);
+    imageCache.set(src, image);
+    return image;
+  };
+
+  for (const obj of objects) {
+    const page = pages[(obj.page || 1) - 1];
+    if (!page) continue;
+    // Les tracés libres n'ont pas de bbox : on la déduit des points.
+    if (!obj.bbox && obj.type === 'ink' && obj.points?.length) {
+      const xs = obj.points.map((p) => p.x);
+      const ys = obj.points.map((p) => p.y);
+      const minX = Math.min(...xs);
+      const minY = Math.min(...ys);
+      obj.bbox = { x: minX, y: minY, w: Math.max(...xs) - minX, h: Math.max(...ys) - minY };
+    }
+    if (!obj.bbox) continue;
+    const { x, y, w, h } = obj.bbox;
+    const { r, g, b } = hexToRgb01(obj.color || '#111827', { r: 0, g: 0, b: 0 });
+    const color = rgb(r, g, b);
+
+    if (obj.type === 'highlight') {
+      page.drawRectangle({ x, y, width: w, height: h, color, opacity: 0.38, borderWidth: 0 });
+    } else if (obj.type === 'underline') {
+      page.drawRectangle({ x, y, width: w, height: Math.max(1, h * 0.16), color });
+    } else if (obj.type === 'strike') {
+      const thickness = Math.max(1, h * 0.14);
+      page.drawRectangle({ x, y: y + h / 2 - thickness / 2, width: w, height: thickness, color });
+    } else if (obj.type === 'ink') {
+      const points = obj.points || [];
+      const thickness = Math.max(0.6, obj.width || 2);
+      for (let i = 1; i < points.length; i++) {
+        page.drawLine({
+          start: { x: points[i - 1].x, y: points[i - 1].y },
+          end: { x: points[i].x, y: points[i].y },
+          color,
+          thickness,
+          lineCap: 1,
+        });
+      }
+    } else if (obj.type === 'rect') {
+      page.drawRectangle({
+        x,
+        y,
+        width: w,
+        height: h,
+        borderColor: color,
+        borderWidth: Math.max(0.8, obj.width || 2),
+        borderOpacity: obj.opacity ?? 1,
+      });
+    } else if (obj.type === 'ellipse') {
+      page.drawEllipse({
+        x: x + w / 2,
+        y: y + h / 2,
+        xScale: Math.max(0.5, w / 2),
+        yScale: Math.max(0.5, h / 2),
+        borderColor: color,
+        borderWidth: Math.max(0.8, obj.width || 2),
+        borderOpacity: obj.opacity ?? 1,
+      });
+    } else if (obj.type === 'arrow') {
+      page.drawLine({
+        start: { x, y },
+        end: { x: x + w, y: y + h },
+        color,
+        thickness: Math.max(0.8, obj.width || 2),
+      });
+      const head = Math.max(4, Math.min(w, h) * 0.28);
+      page.drawLine({ start: { x: x + w - head, y: y + h }, end: { x: x + w, y: y + h }, color, thickness: Math.max(0.8, obj.width || 2) });
+      page.drawLine({ start: { x: x + w, y: y + h - head }, end: { x: x + w, y: y + h }, color, thickness: Math.max(0.8, obj.width || 2) });
+    } else if (obj.type === 'note') {
+      page.drawEllipse({
+        x: x + w / 2,
+        y: y + h / 2,
+        xScale: Math.max(2, w / 2),
+        yScale: Math.max(2, h / 2),
+        color,
+        opacity: 0.9,
+        borderColor: rgb(0.1, 0.12, 0.16),
+        borderWidth: 0.8,
+      });
+      if (obj.text) {
+        page.drawText(obj.text.slice(0, 120), {
+          x: x + w + 4,
+          y: y + h / 2 - 3,
+          size: Math.max(6, Math.min(9, h * 0.8)),
+          font,
+          color: rgb(0.1, 0.12, 0.16),
+          maxWidth: 160,
+        });
+      }
+    } else if (obj.type === 'image' || obj.type === 'signature' || obj.type === 'photo') {
+      const image = await embedImage(obj.src);
+      if (image) {
+        page.drawImage(image, {
+          x,
+          y,
+          width: w,
+          height: h,
+          opacity: obj.opacity ?? 1,
+          rotate: degrees(obj.rotation || 0),
+        });
+      }
+    } else if (obj.type === 'stamp') {
+      const size = obj.fontSize || Math.max(8, Math.min(h * 0.62, 34));
+      const text = obj.text || '';
+      const textWidth = font.widthOfTextAtSize(text, size);
+      const boxW = Math.min(w || textWidth + 18, textWidth + 18);
+      const boxH = Math.max(h, size + 10);
+      page.drawRectangle({
+        x,
+        y,
+        width: boxW,
+        height: boxH,
+        borderColor: color,
+        borderWidth: Math.max(1, size * 0.09),
+        opacity: 0,
+        borderOpacity: obj.opacity ?? 0.9,
+        rotate: degrees(obj.rotation || 0),
+      });
+      page.drawText(text, {
+        x: x + (boxW - textWidth) / 2,
+        y: y + (boxH - size * 0.72) / 2,
+        size,
+        font,
+        color,
+        opacity: obj.opacity ?? 0.9,
+        rotate: degrees(obj.rotation || 0),
+      });
+    } else if (obj.type === 'check') {
+      const size = Math.max(6, Math.min(w, h));
+      if (obj.mark === 'cross') {
+        page.drawLine({ start: { x, y }, end: { x: x + size, y: y + size }, color, thickness: Math.max(1, size * 0.12) });
+        page.drawLine({ start: { x, y: y + size }, end: { x: x + size, y }, color, thickness: Math.max(1, size * 0.12) });
+      } else {
+        const thickness = Math.max(1, size * 0.13);
+        page.drawLine({ start: { x, y: y + size * 0.45 }, end: { x: x + size * 0.32, y: y + size * 0.12 }, color, thickness, lineCap: 1 });
+        page.drawLine({ start: { x: x + size * 0.32, y: y + size * 0.12 }, end: { x: x + size, y: y + size * 0.82 }, color, thickness, lineCap: 1 });
+      }
+    } else if (obj.type === 'date') {
+      const size = obj.fontSize || Math.max(7, Math.min(h * 0.9, 16));
+      page.drawText(obj.text || '', { x, y, size, font, color });
+    }
+  }
 }
