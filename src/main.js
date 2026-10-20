@@ -50,6 +50,14 @@ const els = {
   glyphContinue: $('glyphContinue'),
   expOcrCount: $('expOcrCount'),
   btnExportPdf: $('btnExportPdf'),
+  btnSave: $('btnSave'),
+  editSave: $('editSave'),
+  saveAsPdf: $('saveAsPdf'),
+  saveAsOcr: $('saveAsOcr'),
+  saveAsText: $('saveAsText'),
+  saveAsPng: $('saveAsPng'),
+  saveAsJpg: $('saveAsJpg'),
+  exportShare: $('exportShare'),
   btnExportText: $('btnExportText'),
   searchbar: $('searchbar'),
   searchInput: $('searchInput'),
@@ -1226,10 +1234,10 @@ function collectOcrForSession() {
     .map(([pageNo, p]) => ({ pageNo, ocr: p.ocr }));
 }
 
-function scheduleAutosave() {
+function scheduleAutosave(now = false) {
   if (!state.hash || state.restoring) return;
   clearTimeout(state.autosaveTimer);
-  state.autosaveTimer = setTimeout(() => {
+  const run = () => {
     const payload = {
       name: state.fileName,
       numPages: state.numPages,
@@ -1237,8 +1245,10 @@ function scheduleAutosave() {
       ocrPages: collectOcrForSession(),
     };
     if (!payload.edits.length && !payload.ocrPages.length) return;
-    Session.saveSession(state.hash, payload).catch(() => {});
-  }, 900);
+    return Session.saveSession(state.hash, payload).catch(() => {});
+  };
+  if (now) return run();
+  state.autosaveTimer = setTimeout(run, 900);
 }
 
 /**
@@ -1735,6 +1745,7 @@ function updateExportUi() {
   els.expOcr.disabled = ocrPages === 0;
   if (!ocrPages) els.expOcr.checked = false;
   els.btnExport.disabled = !state.engine;
+  if (els.btnSave) els.btnSave.disabled = !state.engine;
   els.btnSearch.disabled = !state.engine;
 }
 
@@ -2052,6 +2063,58 @@ async function openDemo(kind) {
 
 /* ─────────────────────────── Aperçu d'export ─────────────────────────── */
 
+/** Partage un fichier via l'API Web Share (mobile) ou téléchargement sinon. */
+async function shareBlob(blob, name) {
+  const file = new File([blob], name, { type: blob.type || 'application/pdf' });
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: name });
+      return true;
+    } catch (err) {
+      if (err?.name === 'AbortError') return false;
+    }
+  }
+  U.downloadBlob(blob, name);
+  toast(t('save.shareFallback'), 'info');
+  return false;
+}
+
+let lastSaved = null; // { blob, name }
+
+/** Valide le bloc en cours puis télécharge le PDF modifié. */
+async function handleSave() {
+  if (!state.engine) return;
+  closeActive();
+  const ocrPages = collectOcrForSession();
+  pushLoading(t('save.working'));
+  try {
+    const { exportPdf } = await import('./exporter.js');
+    const result = await exportPdf({
+      sourceBytes: state.bytes,
+      edits: state.edits,
+      ocrPages,
+      redactMode: 'stream',
+      renderPage: null,
+    });
+    const name = 'fichier-modifie.pdf';
+    const blob = new Blob([result.bytes], { type: 'application/pdf' });
+    lastSaved = { blob, name };
+    U.downloadBlob(blob, name);
+    await scheduleAutosave(true);
+    const canShare = !!navigator.canShare?.({ files: [new File([blob], name, { type: 'application/pdf' })] });
+    toast(t('save.done'), 'success', {
+      duration: 6500,
+      action: canShare ? t('common.share') : undefined,
+      onAction: () => shareBlob(blob, name),
+    });
+  } catch (err) {
+    console.error(err);
+    toast(t('save.error'), 'error');
+  } finally {
+    popLoading();
+  }
+}
+
 async function showExportModal({ kind, filename, blob, text }) {
   const token = ++modalToken;
   els.exportModal.hidden = false;
@@ -2071,6 +2134,9 @@ async function showExportModal({ kind, filename, blob, text }) {
   const content = els.exportModal.querySelector('.modal-content');
   if (content) content.classList.toggle('single', kind !== 'pdf');
   els.exportCopyText.innerHTML = `${icon('copy', 16)}<span>Copier le texte</span>`;
+  const canShare = !!navigator.canShare?.({ files: [new File([blob], filename, { type: blob.type })] });
+  els.exportShare.hidden = !canShare;
+  els.exportShare.onclick = () => shareBlob(blob, filename);
 
   if (kind === 'pdf') {
     els.exportTextPreview.value = '';
@@ -2132,7 +2198,7 @@ async function renderPageForExport(pageNo) {
   return canvas;
 }
 
-async function handleExportPdf() {
+async function handleExportPdf(options = {}) {
   if (!state.engine) return;
   const includeEdits = els.expEdits.checked;
   const includeOcr = els.expOcr.checked;
@@ -2173,7 +2239,8 @@ async function handleExportPdf() {
       rasterQuality: Number(els.expQuality?.value || 1),
     });
     const bytes = result.bytes;
-    const suffix = fileNameSuffix(includeEdits, includeOcr);
+    const suffix =
+      typeof options?.suffix === 'string' ? options.suffix : fileNameSuffix(includeEdits, includeOcr);
     const name = `${U.baseName(state.fileName)}-${suffix}.pdf`;
     saveBytes(bytes, name);
     if (redactMode === 'stream' && result.stats?.removedPages?.length) {
@@ -2515,8 +2582,8 @@ function bindEvents() {
   });
   bindPageTools();
   bindFormTools();
-  els.btnExportPng.addEventListener('click', () => handleExportImage('png'));
-  els.btnExportJpg.addEventListener('click', () => handleExportImage('jpg'));
+  els.btnExportPng?.addEventListener('click', () => handleExportImage('png'));
+  els.btnExportJpg?.addEventListener('click', () => handleExportImage('jpg'));
   els.btnUndo.addEventListener('click', undoEdits);
   els.btnRedo.addEventListener('click', redoEdits);
   els.btnDemoText.addEventListener('click', () => openDemo('text'));
@@ -2566,7 +2633,22 @@ function bindEvents() {
   });
   els.exportClose.addEventListener('click', closeExportMenu);
   els.btnExportPdf.addEventListener('click', handleExportPdf);
-  els.btnExportText.addEventListener('click', handleExportText);
+  els.btnSave?.addEventListener('click', handleSave);
+  els.editSave?.addEventListener('click', handleSave);
+  els.saveAsPdf?.addEventListener('click', () => {
+    els.expEdits.checked = true;
+    els.expOcr.checked = false;
+    handleExportPdf({ suffix: 'modifie' });
+  });
+  els.saveAsOcr?.addEventListener('click', () => {
+    els.expEdits.checked = true;
+    els.expOcr.checked = true;
+    handleExportPdf({ suffix: 'modifie-ocr' });
+  });
+  els.saveAsText?.addEventListener('click', handleExportText);
+  els.saveAsPng?.addEventListener('click', () => handleExportImage('png'));
+  els.saveAsJpg?.addEventListener('click', () => handleExportImage('jpg'));
+  els.btnExportText?.addEventListener('click', handleExportText);
   els.exportModalClose.addEventListener('click', closeExportModal);
   els.exportModal.addEventListener('click', (e) => {
     if (e.target === els.exportModal) closeExportModal();
@@ -2960,6 +3042,7 @@ function init() {
   bindEvents();
   els.btnSearch.disabled = true;
   els.btnExport.disabled = true;
+  if (els.btnSave) els.btnSave.disabled = true;
   updatePageNav();
   updateZoomLabel();
   hideEditingUi();

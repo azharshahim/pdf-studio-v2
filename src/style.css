@@ -3368,3 +3368,86 @@ body.sheet-open .toasts {
     font-size: 11px;
   }
 }
+
+/* Bouton Enregistrer + « Enregistrer sous… » */
+.save-btn {
+  gap: 7px;
+}
+.save-as {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+.save-as h4 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.save-as-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.save-as-grid .btn {
+  justify-content: flex-start;
+  gap: 7px;
+  font-size: 12px;
+  padding: 8px 10px;
+}
+@media (max-width: 900px) {
+  #btnSave span[data-i18n],
+  #editSave span[data-i18n],
+  #btnOpen span[data-i18n] {
+    display: none;
+  }
+  .save-btn {
+    padding: 0 12px;
+  }
+  #editSave {
+    height: 36px;
+  }
+}
+
+/* Barre du haut compacte sur téléphone */
+@media (max-width: 900px) {
+  .topbar {
+    gap: 4px;
+    padding: 0 8px;
+  }
+  .topbar .brand-mark svg {
+    width: 28px;
+    height: 28px;
+  }
+  .topbar .brand-text {
+    display: none;
+  }
+  .topbar .lang-wrap select {
+    max-width: 82px;
+    padding: 6px 2px;
+    font-size: 12px;
+  }
+  .topbar .icon-btn {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+  }
+  .topbar .btn {
+    height: 38px;
+    padding: 0 10px;
+    border-radius: 11px;
+  }
+  .file-chip {
+    display: none !important;
+  }
+  .hintbar {
+    display: none !important;
+  }
+  .fab {
+    bottom: calc(72px + env(safe-area-inset-bottom));
+    height: 42px;
+    font-size: 13px;
+  }
+}

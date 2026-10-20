@@ -53,6 +53,9 @@
         <button class="icon-btn" id="btnTheme" title="Mode sombre / clair" aria-label="Changer de thème" data-i18n-title="top.theme" data-icon="moon"></button>
         <button class="icon-btn" id="btnSearch" title="Rechercher dans le document (Ctrl+F)" data-i18n-title="top.search" data-icon="search"></button>
         <button class="btn ghost" id="btnOpen"><span data-icon="folder"></span><span data-i18n="top.open">Ouvrir un PDF</span></button>
+        <button class="btn primary save-btn" id="btnSave" disabled>
+          <span data-icon="save"></span><span data-i18n="top.save">Enregistrer</span>
+        </button>
 
         <div class="export-wrap">
           <button class="btn primary" id="btnExport" disabled>
@@ -88,12 +91,17 @@
               </select>
             </label>
             <button class="btn primary wide" id="btnExportPdf"><span data-icon="download"></span><span data-i18n="export.download">Télécharger le PDF</span></button>
-            <div class="popover-divider"></div>
-            <button class="btn ghost wide" id="btnExportText"><span data-icon="fileText"></span><span data-i18n="export.txt">Texte extrait (.txt)</span></button>
-            <div class="image-export-row">
-              <button class="btn ghost small" id="btnExportPng"><span data-icon="image"></span><span data-i18n="export.png">Page en PNG</span></button>
-              <button class="btn ghost small" id="btnExportJpg"><span data-icon="image"></span><span data-i18n="export.jpg">Page en JPG</span></button>
+            <div class="save-as">
+              <h4 data-i18n="save.as">Enregistrer sous…</h4>
+              <div class="save-as-grid">
+                <button class="btn ghost small" id="saveAsPdf" type="button"><span data-icon="file"></span><span data-i18n="save.asPdf">PDF modifié</span></button>
+                <button class="btn ghost small" id="saveAsOcr" type="button"><span data-icon="scan"></span><span data-i18n="save.asOcr">PDF + couche OCR</span></button>
+                <button class="btn ghost small" id="saveAsText" type="button"><span data-icon="fileText"></span><span data-i18n="save.asText">Texte (.txt)</span></button>
+                <button class="btn ghost small" id="saveAsPng" type="button"><span data-icon="image"></span><span data-i18n="save.asPng">Page en PNG</span></button>
+                <button class="btn ghost small" id="saveAsJpg" type="button"><span data-icon="image"></span><span data-i18n="save.asJpg">Page en JPG</span></button>
+              </div>
             </div>
+            <div class="popover-divider"></div>
             <p class="muted xsmall"><span data-i18n="export.local">Traitement 100 % local — vos fichiers ne quittent pas votre navigateur.</span></p>
           </div>
         </div>
@@ -105,6 +113,7 @@
         <div class="editbar-title" id="editTitle" data-i18n="editbar.title">Modifier un PDF</div>
         <div class="editbar-actions">
           <span class="editbar-count" id="editbarCount" hidden>0</span>
+          <button class="btn primary small save-btn" id="editSave"><span data-icon="save"></span><span data-i18n="top.save">Enregistrer</span></button>
           <button class="icon-btn" id="editUndo" aria-label="Annuler" data-i18n-title="common.undo" data-icon="undo"></button>
           <button class="icon-btn" id="editRedo" aria-label="Rétablir" data-i18n-title="common.redo" data-icon="redo"></button>
         </div>
@@ -583,6 +592,7 @@
               <textarea id="exportTextPreview" readonly rows="10"></textarea>
             </label>
             <a class="btn primary wide" id="exportDownload" download><span data-icon="download"></span>Télécharger le fichier</a>
+            <button class="btn ghost wide" id="exportShare" hidden><span data-icon="share"></span><span data-i18n="common.share">Partager</span></button>
             <button class="btn ghost wide" id="exportCopyText" hidden><span data-icon="copy"></span>Copier le texte</button>
             <p class="muted xsmall">Si le téléchargement ne démarre pas (aperçu intégré), ouvrez l’application dans un nouvel onglet.</p>
           </div>
