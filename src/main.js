@@ -4,7 +4,7 @@ import { PdfEngine, pdfRectToViewportRect, fontTraits } from './pdfEngine.js';
 import { recognizeCanvas, terminateOcr } from './ocrEngine.js';
 import { enhanceContrast, deskewCanvas } from './imagePrep.js';
 import * as PageOps from './pageOps.js';
-import { readFormFields, fillFormFields } from './forms.js';
+import { readFormFields, readFormWidgetsFromPage, fillFormFields, detectFillAreas } from './forms.js';
 import { findMatch } from './search.js';
 import { createHistory } from './history.js';
 import { createUi } from './ui.js';
@@ -736,6 +736,7 @@ function renderOverlay() {
   }
 
   markup.render();
+  renderFormOverlay();
 
   // Blocs modifiés / ajoutés (le bloc en cours d'édition est rendu par l'éditeur)
   for (const e of pageEdits) {
@@ -3047,6 +3048,164 @@ function insertToday() {
   markup.select?.(obj.id);
 }
 
+/* ─────────────────── Remplir un formulaire sur la page ─────────────────── */
+
+const formOverlay = { fields: [], areas: [], active: false };
+
+async function loadFormWidgets() {
+  try {
+    const pageProxy = await state.engine.getPage(state.pageIndex + 1);
+    const widgets = await readFormWidgetsFromPage(pageProxy, state.pageIndex + 1);
+    formOverlay.fields = widgets.map((w) => ({ ...w, value: state.formValues[w.name] ?? '' }));
+  } catch (err) {
+    console.warn('[forms] widgets', err);
+    formOverlay.fields = [];
+  }
+  if (!formOverlay.fields.length) {
+    try {
+      await ensureLines(state.pageIndex + 1);
+      const lines = editLinesForPage(state.pageIndex + 1);
+      formOverlay.areas = detectFillAreas(lines);
+    } catch {
+      formOverlay.areas = [];
+    }
+  } else {
+    formOverlay.areas = [];
+  }
+}
+
+function renderFormOverlay() {
+  els.overlay.querySelectorAll('.form-widget').forEach((n) => n.remove());
+  if (!formOverlay.active || !state.viewport) return;
+  for (const field of formOverlay.fields) {
+    const r = pdfRectToViewportRect(field.rect, state.viewport);
+    const input =
+      field.type === 'checkbox'
+        ? `<input type="checkbox" data-form-field="${U.escapeHtml(field.name)}" ${field.value === 'true' ? 'checked' : ''} />`
+        : `<input type="text" data-form-field="${U.escapeHtml(field.name)}" value="${U.escapeHtml(field.value || '')}" placeholder="${U.escapeHtml(field.name)}" />`;
+    const wrap = document.createElement('label');
+    wrap.className = `form-widget ${field.type === 'checkbox' ? 'is-check' : ''}`;
+    wrap.style.left = `${r.left}px`;
+    wrap.style.top = `${r.top}px`;
+    wrap.style.width = `${Math.max(24, r.width)}px`;
+    wrap.style.height = `${Math.max(16, r.height)}px`;
+    wrap.innerHTML = input;
+    els.overlay.appendChild(wrap);
+  }
+  for (const area of formOverlay.areas) {
+    const r = pdfRectToViewportRect(area.bbox, state.viewport);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'form-area';
+    btn.style.left = `${r.left}px`;
+    btn.style.top = `${r.top}px`;
+    btn.style.width = `${Math.max(40, r.width)}px`;
+    btn.style.height = `${Math.max(18, r.height + 6)}px`;
+    btn.textContent = area.kind === 'signature' ? t('form.signHere') : '';
+    btn.addEventListener('click', () => useFillArea(area));
+    els.overlay.appendChild(btn);
+  }
+}
+
+function useFillArea(area) {
+  if (area.kind === 'signature') {
+    openSignTool();
+    return;
+  }
+  if (area.kind === 'checkbox') {
+    insertMark('check');
+    return;
+  }
+  // Champ texte : crée un bloc éditable vierge à l'emplacement détecté.
+  const edit = {
+    id: U.uid('edit'),
+    page: state.pageIndex + 1,
+    kind: 'add',
+    bbox: { ...area.bbox },
+    baseline: area.bbox.y + area.bbox.h * 0.24,
+    originalText: '',
+    text: '',
+    font: 'Helvetica',
+    size: Math.max(8, Math.round(area.bbox.h * 0.8)),
+    bold: false,
+    italic: false,
+    underline: false,
+    align: 'left',
+    lineHeight: 1.16,
+    color: '#111827',
+    bg: null,
+    fit: false,
+  };
+  state.edits.push(edit);
+  state.active = { edit, before: U.clone(state.edits), isNew: true };
+  renderOverlay();
+  inline.open(edit, { isNew: true });
+  showEditingUi();
+  syncFormatbar();
+}
+
+async function openFormTool() {
+  routeTo('doc');
+  if (!state.engine) return;
+  formOverlay.active = true;
+  await loadFormWidgets();
+  renderOverlay();
+  const count = formOverlay.fields.length + formOverlay.areas.length;
+  if (!count) {
+    toast(t('form.noneFound'), 'info', { duration: 4200 });
+    formOverlay.active = false;
+    return;
+  }
+  toast(
+    formOverlay.fields.length
+      ? t('form.fillOnPage', { n: formOverlay.fields.length })
+      : t('form.detected', { n: formOverlay.areas.length }),
+    'success',
+    { duration: 4200 },
+  );
+  showFormBar();
+}
+
+function showFormBar() {
+  els.annobar.hidden = false;
+  els.annoSub.hidden = true;
+  els.annoTools.innerHTML = `
+    <button class="anno-btn" id="formValidate" type="button">${icon('check', 19)}<span>${t('form.validate')}</span></button>
+    <button class="anno-btn" id="formClose" type="button">${icon('x', 19)}<span>${t('common.close')}</span></button>`;
+  document.getElementById('formValidate')?.addEventListener('click', () => applyFormValues());
+  document.getElementById('formClose')?.addEventListener('click', () => closeFormTool());
+}
+
+function closeFormTool() {
+  formOverlay.active = false;
+  els.overlay.querySelectorAll('.form-widget, .form-area').forEach((n) => n.remove());
+  els.annobar.hidden = true;
+  renderOverlay();
+}
+
+async function applyFormValues() {
+  const widgets = els.overlay.querySelectorAll('[data-form-field]');
+  widgets.forEach((input) => {
+    state.formValues[input.dataset.formField] =
+      input.type === 'checkbox' ? (input.checked ? 'true' : '') : input.value;
+  });
+  if (state.formFields.length) renderFormPanel();
+  closeFormTool();
+  pushLoading(t('form.applying'));
+  try {
+    const bytes = await fillFormFields(state.bytes, state.formValues);
+    state.bytes = new Uint8Array(bytes);
+    await renderCurrent();
+    scheduleAutosave();
+    toast(t('form.applied'), 'success');
+  } catch (err) {
+    console.error(err);
+    toast(t('msg.opFailed', { msg: err?.message || err }), 'error');
+  } finally {
+    popLoading();
+  }
+}
+
 /* ─────────────── Zoom de vignette pour la grille de pages ─────────────── */
 
 async function pageThumbDataUrl(n) {
@@ -3521,6 +3680,7 @@ async function openTool(id) {
   }
   if (id === 'annotate') return openAnnotate();
   if (id === 'sign') return openSignTool();
+  if (id === 'form') return openFormTool();
   if (id === 'stamp') return openStampTool();
 }
 

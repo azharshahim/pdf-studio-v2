@@ -80,3 +80,81 @@ export async function fillFormFields(bytes, values = {}, { flatten = false } = {
   if (flatten) form.flatten();
   return doc.save();
 }
+
+/**
+ * Lit les champs **avec leur position** à partir des annotations du lecteur PDF.
+ * Les rectangles restent en coordonnées PDF (origine en bas à gauche).
+ * @param {any} pageProxy page pdf.js déjà chargée
+ * @param {number} pageNo numéro de page (1-indexé)
+ */
+export async function readFormWidgetsFromPage(pageProxy, pageNo = 1) {
+  const annotations = await pageProxy.getAnnotations();
+  const out = [];
+  for (const annot of annotations) {
+    if (annot.subtype !== 'Widget') continue;
+    const rect = annot.rect;
+    if (!Array.isArray(rect) || rect.length < 4) continue;
+    const [x1, y1, x2, y2] = rect.map(Number);
+    const type = annot.fieldType === 'Tx'
+      ? 'text'
+      : annot.fieldType === 'Btn'
+        ? annot.checkBox
+          ? 'checkbox'
+          : 'radio'
+        : annot.fieldType === 'Ch'
+          ? 'select'
+          : 'text';
+    out.push({
+      name: annot.fieldName || `field-${out.length + 1}`,
+      type,
+      options: annot.options?.map((o) => o.displayValue || o.exportValue) || [],
+      page: pageNo,
+      rect: {
+        x: Math.min(x1, x2),
+        y: Math.min(y1, y2),
+        w: Math.abs(x2 - x1),
+        h: Math.abs(y2 - y1),
+      },
+    });
+  }
+  return out;
+}
+
+/**
+ * Détecte les zones à remplir d'un PDF sans champs : rectangles vides,
+ * traits de signature et cases à cocher dessinés dans le contenu.
+ * (Heuristique sur la géométrie du texte détecté par le lecteur PDF.)
+ * @param {Array<{id:string,text:string,bbox:{x:number,y:number,w:number,h:number}}>} lines
+ */
+export function detectFillAreas(lines = []) {
+  const areas = [];
+  const underlineRe = /[_.]{4,}|_{3,}/;
+  lines.forEach((line, index) => {
+    const text = (line.text || '').trim();
+    if (!text) return;
+    if (underlineRe.test(text)) {
+      areas.push({
+        id: `area-${index}`,
+        kind: 'field',
+        page: null,
+        bbox: { ...line.bbox },
+        label: text.replace(/[_.]+/g, '').trim() || `Champ ${index + 1}`,
+      });
+    } else if (/(signature|signé|signature\s*:)/i.test(text)) {
+      areas.push({
+        id: `area-${index}`,
+        kind: 'signature',
+        bbox: { ...line.bbox },
+        label: text,
+      });
+    } else if (/\[?\s*\]/.test(text)) {
+      areas.push({
+        id: `area-${index}`,
+        kind: 'checkbox',
+        bbox: { ...line.bbox },
+        label: text.replace(/\[?\s*\]/g, '').trim() || `Case ${index + 1}`,
+      });
+    }
+  });
+  return areas;
+}
