@@ -14,6 +14,7 @@ import { buildSampleTextPdf, buildSampleScanPdf } from './samples.js';
 import { icon, hydrateIcons } from './icons.js';
 import { applyLanguage, t } from './i18n.js';
 import * as U from './utils.js';
+import { initShell, routeTo, openSheet, closeSheet, isSheetOpen, isMobile } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -150,6 +151,17 @@ const els = {
   loadingLabel: $('loadingLabel'),
   dropOverlay: $('dropOverlay'),
   fileInput: $('fileInput'),
+  homeOpen: $('homeOpen'),
+  homeResume: $('homeResume'),
+  homeDemoText: $('homeDemoText'),
+  homeDemoScan: $('homeDemoScan'),
+  homeRecent: $('homeRecent'),
+  homeRecentWrap: $('homeRecentWrap'),
+  filesOpen: $('filesOpen'),
+  filesRefresh: $('filesRefresh'),
+  filesList: $('filesList'),
+  filesCount: $('filesCount'),
+  filesEmpty: $('filesEmpty'),
   exportModal: $('exportModal'),
   exportModalTitle: $('exportModalTitle'),
   exportModalClose: $('exportModalClose'),
@@ -311,11 +323,15 @@ async function renderCurrent() {
   if (token !== state.renderToken) return;
 
   const base = page.getViewport({ scale: 1 });
-  const availW = Math.max(280, els.canvasScroll.clientWidth - 56);
-  const availH = Math.max(240, els.canvasScroll.clientHeight - 56);
+  const narrow = window.matchMedia('(max-width: 900px)').matches;
+  const gutter = narrow ? 16 : 56;
+  const availW = Math.max(280, els.canvasScroll.clientWidth - gutter);
+  const availH = Math.max(240, els.canvasScroll.clientHeight - gutter);
   let scale =
     state.zoom == null
-      ? Math.min(availW / base.width, availH / base.height, 1.6)
+      ? narrow
+        ? Math.min(availW / base.width, 2)
+        : Math.min(availW / base.width, availH / base.height, 1.6)
       : state.zoom;
   scale = U.clamp(scale, 0.15, 6);
   state.scale = scale;
@@ -984,10 +1000,24 @@ function makeEditFromLine(line, pageNo) {
   };
 }
 
-function selectLine(lineId) {
+/** Sur téléphone, zoome sur la ligne touchée pour la rendre lisible. */
+async function zoomForLine(line) {
+  if (!isMobile() || !state.scale) return;
+  const size = Number(line.fontSize) || 12;
+  if (size * state.scale >= 16 && line.bbox.w * state.scale <= els.canvasScroll.clientWidth - 24) return;
+  const readable = U.clamp(17 / size, state.scale, 3);
+  const maxFit = (els.canvasScroll.clientWidth - 24) / Math.max(40, line.bbox.w);
+  const target = U.clamp(Math.min(readable, Math.max(state.scale, maxFit)), 0.15, 3);
+  if (target <= state.scale * 1.02) return;
+  state.zoom = target;
+  await renderCurrent();
+}
+
+async function selectLine(lineId) {
   const pageNo = state.pageIndex + 1;
   const line = editLinesForPage(pageNo).find((l) => l.id === lineId);
   if (!line) return;
+  await zoomForLine(line);
   closeActive();
   const before = U.clone(state.edits);
   const edit = makeEditFromLine(line, pageNo);
@@ -1895,6 +1925,7 @@ async function openPdfBytes(bytes, name, password = '') {
     closeExportMenu();
     document.title = `${U.baseName(state.fileName)} — PDF Studio`;
     document.body.classList.remove('no-doc');
+    routeTo('doc');
     els.emptyState.hidden = true;
     els.stage.hidden = false;
     els.fileChip.hidden = false;
@@ -2438,6 +2469,42 @@ function bindPageTools() {
 
 /* ─────────────────────────── Événements ─────────────────────────── */
 
+const PANEL_LABELS = { pages: 'tab.pages', ocr: 'tab.ocr', form: 'tab.form', text: 'tab.text' };
+const PANEL_ICONS = { pages: 'layers', ocr: 'scan', form: 'edit', text: 'text' };
+
+/** Feuille listant les panneaux disponibles (mobile). */
+function openPanelsSheet() {
+  const rows = ['pages', 'ocr', 'form', 'text']
+    .filter((name) => name !== 'form' || state.formFields.length)
+    .map(
+      (name) => `<button class="sheet-row" data-panel-open="${name}" type="button">
+        <span class="sheet-row-icon">${icon(PANEL_ICONS[name], 19)}</span>
+        <span class="sheet-row-text"><strong>${t(PANEL_LABELS[name])}</strong>
+        <span>${t(`panel.${name}Hint`)}</span></span>
+        ${icon('chevronRight', 16)}
+      </button>`,
+    )
+    .join('');
+  const body = openSheet({
+    title: t('panel.title'),
+    html: `<div class="sheet-list">${rows}</div>`,
+    className: 'panel-menu',
+  });
+  body?.querySelectorAll('[data-panel-open]').forEach((btn) => {
+    btn.addEventListener('click', () => openPanelSheet(btn.dataset.panelOpen));
+  });
+}
+
+/** Ouvre un panneau existant dans une feuille. */
+function openPanelSheet(name) {
+  const panel = document.querySelector(`.panel[data-panel="${name}"]`);
+  if (!panel) return;
+  setTab(name);
+  updatePanelsForPage();
+  hydrateIcons(panel);
+  openSheet({ title: t(PANEL_LABELS[name]), node: panel, className: `panel-sheet panel-${name}` });
+}
+
 function bindEvents() {
   // Fichier
   [els.btnOpen, els.btnEmptyOpen].forEach((b) => b.addEventListener('click', () => els.fileInput.click()));
@@ -2488,6 +2555,12 @@ function bindEvents() {
   els.btnExport.addEventListener('click', (e) => {
     e.stopPropagation();
     if (!state.engine) return;
+    if (isMobile()) {
+      updateExportUi();
+      openSheet({ title: t('export.title'), node: els.exportMenu, onClose: closeExportMenu });
+      els.exportMenu.hidden = false;
+      return;
+    }
     els.exportMenu.hidden = !els.exportMenu.hidden;
     updateExportUi();
   });
@@ -2572,7 +2645,20 @@ function bindEvents() {
   document.querySelectorAll('.tab').forEach((t) => {
     t.addEventListener('click', () => setTab(t.dataset.tab));
   });
-  els.btnInspectorToggle.addEventListener('click', () => els.inspector.classList.toggle('open'));
+  els.btnInspectorToggle.addEventListener('click', () => {
+    if (isMobile()) {
+      openPanelsSheet();
+      return;
+    }
+    els.inspector.classList.toggle('open');
+  });
+
+  // Écrans
+  els.homeOpen?.addEventListener('click', () => els.fileInput.click());
+  els.filesOpen?.addEventListener('click', () => els.fileInput.click());
+  els.homeDemoText?.addEventListener('click', () => openDemo('text'));
+  els.homeDemoScan?.addEventListener('click', () => openDemo('scan'));
+  els.homeResume?.addEventListener('click', () => routeTo('doc'));
 
   // Édition directe sur la page
   els.btnAddText?.addEventListener('click', startAddText);
@@ -2882,6 +2968,16 @@ function init() {
   updateHistoryButtons();
   registerServiceWorker();
   initTheme();
+  initShell({
+    onRoute: (name) => {
+      if (name === 'doc' && !state.engine) {
+        routeTo('home');
+        return;
+      }
+      els.homeResume.hidden = !state.engine;
+    },
+  });
+  if (!state.engine) routeTo('home');
   bindPinchZoom();
   bindTabsKeyboard();
   updateKeyboardInset();

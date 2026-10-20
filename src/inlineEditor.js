@@ -164,13 +164,23 @@ export function createInlineEditor({
 
   function scrollIntoView() {
     if (!shell?.isConnected) return;
+    const scroller = document.getElementById('canvasScroll');
+    if (!scroller) return;
     const vv = window.visualViewport;
     const keyboard = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+    const bar = keyboard + 74;
     const rect = shell.getBoundingClientRect();
-    const visibleBottom = window.innerHeight - keyboard - 96;
-    if (rect.bottom > visibleBottom || rect.top < 8) {
-      shell.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
-    }
+    const view = scroller.getBoundingClientRect();
+    const centerY = view.top + Math.max(60, view.height - bar) / 2;
+    const centerX = view.left + view.width / 2;
+    const dx = rect.left + rect.width / 2 - centerX;
+    const dy = rect.top + rect.height / 2 - centerY;
+    if (Math.abs(dx) < 2 && Math.abs(dy) < 2) return;
+    scroller.scrollTo({
+      left: scroller.scrollLeft + dx,
+      top: scroller.scrollTop + dy,
+      behavior: 'smooth',
+    });
   }
 
   function placeCaret({ selectAll = false, atEnd = true } = {}) {
@@ -266,6 +276,14 @@ export function createInlineEditor({
       }
     }, 80);
   }
+
+  // Quand le clavier apparaît, on garde la ligne visible au-dessus de la barre.
+  function onViewportResize() {
+    if (!isOpen()) return;
+    clearTimeout(onViewportResize._t);
+    onViewportResize._t = setTimeout(() => scrollIntoView(), 120);
+  }
+  window.visualViewport?.addEventListener('resize', onViewportResize);
 
   function close() {
     if (shell) shell.remove();

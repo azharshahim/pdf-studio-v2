@@ -14,6 +14,7 @@
   </head>
   <body class="no-doc">
     <div class="app" id="app">
+      <div class="doc-view" id="docView">
       <!-- ══════════════ TOP BAR ══════════════ -->
       <header class="topbar">
         <div class="brand">
@@ -401,7 +402,88 @@
           </div>
         </aside>
       </div>
+      </div><!-- /doc-view -->
+
+      <!-- ══════════════ ÉCRAN ACCUEIL ══════════════ -->
+      <section class="screen" id="screenHome" aria-label="Accueil" hidden>
+        <div class="screen-inner">
+          <div class="home-hero">
+            <div class="home-eyebrow"><span data-icon="shield"></span><span data-i18n="home.local">100 % local — rien ne quitte votre appareil</span></div>
+            <h1 data-i18n="home.title">Vos PDF, modifiés sur place.</h1>
+            <p class="muted" data-i18n="home.subtitle">Texte, annotations, signatures, tampons et OCR — directement dans le navigateur.</p>
+            <div class="home-actions">
+              <button class="btn primary lg" id="homeOpen"><span data-icon="folder"></span><span data-i18n="home.open">Ouvrir un PDF</span></button>
+              <button class="btn ghost lg" id="homeResume" hidden><span data-icon="fileText"></span><span data-i18n="home.resume">Revenir au document</span></button>
+            </div>
+            <div class="home-demos">
+              <button class="linkbtn" id="homeDemoText" data-i18n="empty.text">Essayer un PDF d'exemple</button>
+              <span class="demo-sep">·</span>
+              <button class="linkbtn" id="homeDemoScan" data-i18n="empty.scan">Essayer un scan à OCRiser</button>
+            </div>
+          </div>
+
+          <div class="home-section" id="homeRecentWrap" hidden>
+            <div class="section-head">
+              <h2 data-i18n="home.recent">Récents</h2>
+              <button class="linkbtn" data-goto="files" data-i18n="home.seeAll">Tout voir</button>
+            </div>
+            <div class="recent-grid" id="homeRecent"></div>
+          </div>
+
+          <div class="home-section">
+            <div class="section-head">
+              <h2 data-i18n="home.quick">Accès rapide</h2>
+              <button class="linkbtn" data-goto="tools" data-i18n="home.allTools">Tous les outils</button>
+            </div>
+            <div class="tool-grid" id="homeTools"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════ ÉCRAN FICHIERS ══════════════ -->
+      <section class="screen" id="screenFiles" aria-label="Fichiers" hidden>
+        <div class="screen-inner">
+          <header class="screen-head">
+            <h1 data-i18n="files.title">Fichiers</h1>
+            <span class="badge" id="filesCount">0</span>
+            <button class="icon-btn" id="filesRefresh" data-i18n-title="files.refresh" data-icon="redo" aria-label="Rafraîchir"></button>
+          </header>
+          <p class="muted small" data-i18n="files.note">Documents récents et sessions enregistrés dans votre navigateur (IndexedDB). Rien n'est envoyé sur un serveur.</p>
+          <div class="files-list" id="filesList"></div>
+          <div class="empty-inline" id="filesEmpty" hidden>
+            <span data-icon="folder"></span>
+            <p data-i18n="files.empty">Aucun document enregistré pour l'instant.</p>
+            <button class="btn soft" id="filesOpen"><span data-icon="plus"></span><span data-i18n="home.open">Ouvrir un PDF</span></button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════ ÉCRAN OUTILS ══════════════ -->
+      <section class="screen" id="screenTools" aria-label="Outils" hidden>
+        <div class="screen-inner">
+          <header class="screen-head"><h1 data-i18n="tools.title">Outils</h1></header>
+          <div class="tool-grid tools-full" id="toolsGrid"></div>
+        </div>
+      </section>
+
+      <!-- ══════════════ NAVIGATION BASSE ══════════════ -->
+      <nav class="tabbar" id="tabbar" aria-label="Navigation principale">
+        <button class="tabitem" data-route="home"><span data-icon="home"></span><span data-i18n="nav.home">Accueil</span></button>
+        <button class="tabitem" data-route="files"><span data-icon="folder"></span><span data-i18n="nav.files">Fichiers</span></button>
+        <button class="tabitem" data-route="tools"><span data-icon="grid"></span><span data-i18n="nav.tools">Outils</span></button>
+      </nav>
     </div>
+
+    <!-- ══════════════ FEUILLE DU BAS (mobile) ══════════════ -->
+    <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
+    <section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" hidden>
+      <header class="sheet-head">
+        <span class="sheet-grip" aria-hidden="true"></span>
+        <h2 id="sheetTitle"></h2>
+        <button class="icon-btn" id="sheetClose" aria-label="Fermer" data-icon="x"></button>
+      </header>
+      <div class="sheet-body" id="sheetBody"></div>
+    </section>
 
     <!-- ══════════════ BARRE DE MISE EN FORME (au-dessus du clavier) ══════════════ -->
     <div class="formatbar" id="formatbar" role="toolbar" aria-label="Mise en forme" hidden>
