@@ -2386,7 +2386,8 @@ kbd {
 .editbar {
   position: relative;
   z-index: 70;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   height: 60px;
@@ -2409,24 +2410,31 @@ body.editing .topbar {
   background: var(--accent-2);
   color: #fff;
 }
+.editbar-start {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+/* Colonne centrale : le titre occupe tout l'espace libre entre la coche et les
+   boutons, se centre dedans et se tronque par des points de suspension. */
 .editbar-title {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  min-width: 0;
+  padding: 0 2px;
   font-weight: 650;
   font-size: 15px;
   letter-spacing: -0.01em;
   color: var(--ink);
+  text-align: center;
   white-space: nowrap;
-  max-width: 54vw;
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
 }
 .editbar-actions {
-  margin-left: auto;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 4px;
 }
 .editbar-count {
@@ -2581,7 +2589,6 @@ body.editing .fab {
   }
   .editbar-title {
     font-size: 14px;
-    max-width: 48vw;
   }
   body.editing .canvas-scroll {
     padding: 6px 4px calc(12px + env(safe-area-inset-bottom));
