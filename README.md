@@ -1,4 +1,4 @@
-# PDF Studio — OCR & édition de PDF · V2
+# PDF Studio — OCR & édition de PDF · V2.1
 
 Application web **100 % locale** : ouvrez un PDF, cliquez sur un texte pour le corriger, lancez
 l'OCR sur les pages scannées (français + anglais) puis exportez un PDF modifié et/ou une couche de
@@ -41,19 +41,39 @@ entièrement dans le navigateur.
   - vignettes de pages (rendu paresseux), zoom, navigation clavier ;
   - interface responsive (panneau latéral escamotable sur mobile).
 
+## Nouveautés de la V2.1
+
+- **Outils de pages** (onglet Pages) : rotation ±90°, déplacement (boutons ou glisser-déposer des
+  vignettes), suppression, insertion d'une page vierge, extraction d'une sélection (`1-3,5`),
+  division et fusion avec un autre PDF.
+- **Formulaires AcroForm** : détection automatique des champs (texte, case à cocher, liste, boutons
+  radio), remplissage dans le panneau Formulaire, export avec ou sans aplatissement.
+- **OCR étendu** : français, anglais, espagnol, allemand et arabe ; amélioration du contraste et
+  redressement automatique avant reconnaissance ; score de confiance affiché.
+- **Export image** : page courante en PNG ou JPEG (qualité réglable), utile pour les aperçus.
+- **Thème sombre** (bouton soleil/lune, détection du système, mémorisation), **ARIA** sur les
+  onglets (navigation aux flèches, `aria-selected`) et cibles tactiles de 44 px.
+- **PWA** : installable et utilisable hors ligne — service worker, manifeste et 4 icônes.
+- **Interface trilingue** français / anglais / arabe (RTL), sélecteur dans la barre supérieure.
+- **Zoom par pincement** sur écran tactile.
+
 ---
 
 ## Tests
 
 ```bash
-npm test          # Vitest : utilitaires, recherche, assainissement, export PDF
+npm test          # Vitest — 39 tests
 ```
 
 Les tests couvrent notamment :
 - la recherche insensible à la casse/aux accents (index d'origine, ligatures œ/æ) ;
 - `sanitizePdfText` et la couverture WinAnsi ;
 - l'export : PDF valide, texte réellement remplacé (extrait avec pdf.js), couche OCR
-  extractible, mode masque conservant l'ancien texte.
+  extractible, mode masque conservant l'ancien texte ;
+- `pageOps` : analyse des plages (`1-3,5`), rotation, suppression, déplacement (contenu préservé),
+  insertion, extraction, fusion ;
+- `forms` : lecture des champs AcroForm, remplissage puis relecture, aplatissement ;
+- `imagePrep` : étirement du contraste et estimation d'inclinaison sur un canvas simulé.
 
 La CI GitHub Actions exécute `npm test` puis `npm run build` avant chaque déploiement.
 
@@ -106,6 +126,12 @@ fonctionner aussi bien à la racine que dans un sous-dossier.
    reconnus apparaissent en pointillés sur la page et deviennent éditables comme le texte natif.
 4. **Exporter** : bouton Exporter → cocher « Appliquer les modifications » et/ou « Ajouter la
    couche OCR » → Télécharger le PDF. L'aperçu confirme le résultat.
+5. **Pages** : onglet Pages → pivoter, déplacer (ou glisser-déposer une vignette), supprimer,
+   insérer une page vierge, extraire une plage, diviser ou fusionner un autre PDF.
+6. **Formulaire** : les champs AcroForm apparaissent dans leur onglet dès l'ouverture ; remplissez,
+   choisissez d'aplatir ou non, puis « Exporter le PDF rempli ».
+7. **Apparence et langue** : bouton lune/soleil pour le thème sombre, sélecteur de langue
+   (français, anglais, arabe) dans la barre du haut.
 
 ### Raccourcis
 
@@ -134,6 +160,10 @@ pdf-studio/
 │   ├── ocrEngine.js      # worker Tesseract partagé, parsing des blocs
 │   ├── exporter.js       # pdf-lib : suppression du texte, Noto, couche OCR invisible
 │   ├── textRemoval.js    # réécriture des opérateurs Tj/TJ dans les flux de contenu
+│   ├── pageOps.js        # rotation, suppression, déplacement, extraction, fusion de pages
+│   ├── forms.js          # lecture et remplissage des champs AcroForm
+│   ├── imagePrep.js      # contraste et redressement (deskew) avant OCR
+│   ├── i18n.js           # interface français / anglais / arabe (RTL)
 │   ├── search.js         # recherche sans accents + extraits surlignés
 │   ├── history.js        # piles annuler / rétablir
 │   ├── session.js        # sauvegarde IndexedDB (empreinte SHA-256 du PDF)
@@ -157,7 +187,9 @@ pdf-studio/
 - l'**historique** à `history.js` ;
 - la **persistance de session** à `session.js` ;
 - les **composants d'interface** (toasts, chargement, dialogues) à `ui.js` ;
-- les **moteurs** à `pdfEngine.js`, `ocrEngine.js`, `exporter.js`, `textRemoval.js`.
+- les **moteurs** à `pdfEngine.js`, `ocrEngine.js`, `exporter.js`, `textRemoval.js` ;
+- les **opérations document** à `pageOps.js` (pages) et `forms.js` (formulaires) ;
+- le **prétraitement d'image** à `imagePrep.js` et les **traductions** à `i18n.js`.
 
 ### Pipeline d'édition
 
@@ -218,12 +250,12 @@ embarquées dans `public/fonts/` et intégrées avec `@pdf-lib/fontkit` :
 
 ## Personnaliser les langues OCR
 
-Les modèles se trouvent dans `public/tessdata/` (`fra.traineddata.gz`, `eng.traineddata.gz`).
-Pour ajouter une langue :
+Les modèles fournis dans `public/tessdata/` couvrent le **français, l'anglais, l'espagnol,
+l'allemand et l'arabe** (`fra`, `eng`, `spa`, `deu`, `ara`). Pour ajouter une langue :
 
 1. déposer `<lang>.traineddata.gz` dans `public/tessdata/` ;
-2. ajouter la langue dans `LANG_MAP` (`src/ocrEngine.js`) et une option dans le sélecteur
-   (`index.html`).
+2. ajouter la langue dans `SUPPORTED_LANGS` / `LANG_MAP` (`src/ocrEngine.js`) et une case dans
+   `#ocrLang` (`index.html`).
 
 Les modèles fournis sont les **best_int** de tessdata (bon compromis taille / précision).
 

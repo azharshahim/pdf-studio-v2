@@ -2,12 +2,16 @@ import './polyfills.js';
 import './style.css';
 import { PdfEngine, pdfRectToViewportRect, fontTraits } from './pdfEngine.js';
 import { recognizeCanvas, terminateOcr } from './ocrEngine.js';
+import { enhanceContrast, deskewCanvas } from './imagePrep.js';
+import * as PageOps from './pageOps.js';
+import { readFormFields, fillFormFields } from './forms.js';
 import { findMatch } from './search.js';
 import { createHistory } from './history.js';
 import { createUi } from './ui.js';
 import * as Session from './session.js';
 import { buildSampleTextPdf, buildSampleScanPdf } from './samples.js';
 import { icon, hydrateIcons } from './icons.js';
+import { applyLanguage } from './i18n.js';
 import * as U from './utils.js';
 
 const $ = (id) => document.getElementById(id);
@@ -24,6 +28,9 @@ const els = {
   expOcr: $('expOcr'),
   expEditsCount: $('expEditsCount'),
   expRedact: $('expRedact'),
+  expQuality: $('expQuality'),
+  btnExportPng: $('btnExportPng'),
+  btnExportJpg: $('btnExportJpg'),
   btnUndo: $('btnUndo'),
   btnRedo: $('btnRedo'),
   resumeDialog: $('resumeDialog'),
@@ -62,7 +69,9 @@ const els = {
   ocrHint: $('ocrHint'),
   btnAddTextTop: $('btnAddTextTop'),
   btnInspectorToggle: $('btnInspectorToggle'),
+  langSelect: $('langSelect'),
   canvasScroll: $('canvasScroll'),
+  btnTheme: $('btnTheme'),
   stage: $('stage'),
   pdfCanvas: $('pdfCanvas'),
   overlay: $('overlay'),
@@ -98,6 +107,29 @@ const els = {
   efApply: $('efApply'),
   efReset: $('efReset'),
   ocrLang: $('ocrLang'),
+  ocrContrast: $('ocrContrast'),
+  ocrDeskew: $('ocrDeskew'),
+  efConfidence: $('efConfidence'),
+  pgCurrent: $('pgCurrent'),
+  pgTotal: $('pgTotal'),
+  pgRange: $('pgRange'),
+  btnRotateLeft: $('btnRotateLeft'),
+  btnRotateRight: $('btnRotateRight'),
+  btnMoveUp: $('btnMoveUp'),
+  btnMoveDown: $('btnMoveDown'),
+  btnDeletePage: $('btnDeletePage'),
+  btnInsertBlank: $('btnInsertBlank'),
+  btnExtractPages: $('btnExtractPages'),
+  btnSplitPages: $('btnSplitPages'),
+  btnMergePdf: $('btnMergePdf'),
+  mergeInput: $('mergeInput'),
+  tabForm: $('tabForm'),
+  formFields: $('formFields'),
+  formFlatten: $('formFlatten'),
+  btnFillExport: $('btnFillExport'),
+  discardDialog: $('discardDialog'),
+  discardOk: $('discardOk'),
+  discardCancel: $('discardCancel'),
   btnOcrPage: $('btnOcrPage'),
   btnOcrAll: $('btnOcrAll'),
   ocrProgress: $('ocrProgress'),
@@ -163,6 +195,8 @@ const state = {
   hash: null,
   autosaveTimer: null,
   restoring: false,
+  formFields: [],
+  formValues: {},
 };
 
 /* ─────────────────────────── UI helpers ─────────────────────────── */
@@ -172,8 +206,17 @@ let modalToken = 0;
 
 
 function setTab(name) {
-  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
-  document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.dataset.panel === name));
+  document.querySelectorAll('.tab').forEach((t) => {
+    const active = t.dataset.tab === name;
+    t.classList.toggle('active', active);
+    t.setAttribute('aria-selected', active ? 'true' : 'false');
+    t.tabIndex = active ? 0 : -1;
+  });
+  document.querySelectorAll('.panel').forEach((p) => {
+    const active = p.dataset.panel === name;
+    p.classList.toggle('active', active);
+    p.setAttribute('aria-hidden', active ? 'false' : 'true');
+  });
 }
 
 function openInspectorOnMobile() {
@@ -363,6 +406,8 @@ function updatePageNav() {
   els.btnPrev.disabled = !has || state.pageIndex <= 0;
   els.btnNext.disabled = !has || state.pageIndex >= state.numPages - 1;
   els.pageInput.disabled = !has;
+  if (els.pgCurrent) els.pgCurrent.textContent = has ? state.pageIndex + 1 : 0;
+  if (els.pgTotal) els.pgTotal.textContent = has ? state.numPages : 0;
 }
 
 function updateThumbActive() {
@@ -392,6 +437,28 @@ async function buildThumbnails(token) {
     btn.className = 'thumb';
     btn.dataset.page = String(n);
     btn.innerHTML = `<div class="thumb-frame"></div><span class="thumb-num">${n}</span>`;
+    btn.draggable = true;
+    btn.addEventListener('dragstart', (e) => {
+      btn.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(n));
+    });
+    btn.addEventListener('dragend', () => {
+      btn.classList.remove('dragging');
+      els.thumbs.querySelectorAll('.drop-target').forEach((el) => el.classList.remove('drop-target'));
+    });
+    btn.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      btn.classList.add('drop-target');
+    });
+    btn.addEventListener('dragleave', () => btn.classList.remove('drop-target'));
+    btn.addEventListener('drop', (e) => {
+      e.preventDefault();
+      btn.classList.remove('drop-target');
+      const from = Number(e.dataTransfer.getData('text/plain'));
+      if (!from || from === n) return;
+      applyPageOp('Réorganisation des pages…', () => PageOps.movePage(state.bytes, from, n), n);
+    });
     els.thumbs.appendChild(btn);
   }
   updateThumbActive();
@@ -421,7 +488,10 @@ async function renderThumbnail(btn, token) {
     const frame = btn.querySelector('.thumb-frame');
     frame.style.aspectRatio = `${size.width} / ${size.height}`;
     const canvas = document.createElement('canvas');
-    await state.engine.renderToCanvas(n, canvas, 132 / size.width);
+    // rendu à la taille réelle du cadre (netteté sur écrans HiDPI)
+    const targetW = Math.max(120, frame.clientWidth || 172);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    await state.engine.renderToCanvas(n, canvas, targetW / size.width, dpr);
     if (token !== state.docToken) return;
     btn.dataset.rendered = '1';
     frame.innerHTML = '';
@@ -652,6 +722,16 @@ function hideForm() {
 }
 
 function fillForm(e) {
+  const conf = els.efConfidence;
+  if (conf) {
+    if (typeof e.confidence === 'number' && e.source === 'ocr') {
+      conf.hidden = false;
+      conf.textContent = `Confiance ${Math.round(e.confidence)} %`;
+    } else {
+      conf.hidden = true;
+      conf.textContent = '';
+    }
+  }
   showForm();
   els.efPage.textContent = `Page ${e.page}`;
   els.efSource.textContent = e.kind === 'add' ? 'Nouveau bloc' : e.source === 'ocr' ? 'Bloc OCR' : 'Texte PDF';
@@ -706,6 +786,7 @@ function makeEditFromLine(line, pageNo) {
     color: fg,
     bg,
     fit: false,
+    confidence: typeof line.confidence === 'number' ? line.confidence : undefined,
   };
 }
 
@@ -1195,7 +1276,12 @@ async function runOcrOnPage(n, langs, onProgress) {
   const ctx = canvas.getContext('2d');
   await page.render({ canvasContext: ctx, viewport: vp, background: '#ffffff' }).promise;
 
-  const res = await recognizeCanvas(canvas, langs, onProgress);
+  // Prétraitement optionnel : contraste puis redressement
+  let prepared = canvas;
+  if (els.ocrContrast?.checked) prepared = enhanceContrast(prepared);
+  if (els.ocrDeskew?.checked) prepared = deskewCanvas(prepared);
+
+  const res = await recognizeCanvas(prepared, langs, onProgress);
 
   const mapBox = (b) => {
     const [x1, y1] = vp.convertToPdfPoint(b.x0, b.y0);
@@ -1245,7 +1331,13 @@ async function runOcr(pageNumbers) {
   state.ocr.running = true;
   state.ocr.cancel = false;
   updateOcrButtons();
-  const langs = els.ocrLang.value;
+  const langs = [...els.ocrLang.querySelectorAll('input[type="checkbox"]:checked')].map((i) => i.value);
+  if (!langs.length) {
+    toast('Sélectionnez au moins une langue pour l’OCR.', 'warn');
+    state.ocr.running = false;
+    updateOcrButtons();
+    return;
+  }
   const total = pageNumbers.length;
   setOcrProgress(0, 'Préparation de la reconnaissance…');
   let done = 0;
@@ -1621,6 +1713,10 @@ async function openPdfBytes(bytes, name, password = '') {
     state.hash = null;
     state.history.clear();
     updateHistoryButtons();
+    state.formFields = [];
+    state.formValues = {};
+    if (els.tabForm) els.tabForm.hidden = true;
+    if (els.formFields) els.formFields.innerHTML = '';
     els.stage.classList.remove('placing');
     els.searchbar.hidden = true;
     els.searchResults.hidden = true;
@@ -1648,6 +1744,17 @@ async function openPdfBytes(bytes, name, password = '') {
     toast(`« ${state.fileName} » ouvert${state.numPages > 1 ? ` — ${state.numPages} pages` : ''}.`, 'success', {
       duration: 2600,
     });
+
+    // Détection des champs AcroForm (sans bloquer le rendu)
+    readFormFields(bytes)
+      .then((fields) => {
+        if (docToken !== state.docToken || !fields.length) return;
+        state.formFields = fields;
+        state.formValues = Object.fromEntries(fields.map((f) => [f.name, f.value || '']));
+        els.tabForm.hidden = false;
+        renderFormPanel();
+      })
+      .catch(() => {});
 
     // Empreinte + session éventuelle (sans bloquer le rendu)
     const docToken = state.docToken;
@@ -1858,6 +1965,7 @@ async function handleExportPdf() {
       ocrPages,
       redactMode,
       renderPage: redactMode === 'raster' ? renderPageForExport : null,
+      rasterQuality: Number(els.expQuality?.value || 1),
     });
     const bytes = result.bytes;
     const suffix = fileNameSuffix(includeEdits, includeOcr);
@@ -1874,6 +1982,37 @@ async function handleExportPdf() {
   } catch (err) {
     console.error(err);
     toast(`Export impossible — ${err?.message || err}`, 'error');
+  } finally {
+    popLoading();
+  }
+}
+
+/**
+ * Exporte la page courante en image PNG ou JPEG.
+ * @param {'png'|'jpg'} format
+ */
+async function handleExportImage(format) {
+  if (!state.engine) return;
+  pushLoading('Rendu de la page…');
+  try {
+    const n = state.pageIndex + 1;
+    const size = await state.engine.getPageSize(n);
+    const scale = Math.min(3, 2200 / Math.max(1, size.width));
+    const canvas = document.createElement('canvas');
+    await state.engine.renderToCanvas(n, canvas, Math.max(1, scale));
+    const type = format === 'jpg' ? 'image/jpeg' : 'image/png';
+    const quality = format === 'jpg' ? Number(els.expQuality?.value || 0.82) || 0.82 : 1;
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+    if (!blob) throw new Error('Rendu impossible');
+    const name = `${U.baseName(state.fileName)}-page-${n}.${format}`;
+    U.downloadBlob(blob, name);
+    toast(`Image ${format.toUpperCase()} exportée (${U.formatBytes(blob.size)}).`, 'success', {
+      duration: 4500,
+    });
+    closeExportMenu();
+  } catch (err) {
+    console.error(err);
+    toast(`Export de l’image impossible — ${err?.message || err}`, 'error');
   } finally {
     popLoading();
   }
@@ -1907,6 +2046,222 @@ async function handleExportText() {
   }
 }
 
+/* ─────────────────────────── Formulaires AcroForm ─────────────────────────── */
+
+function renderFormPanel() {
+  if (!els.formFields) return;
+  if (!state.formFields.length) {
+    els.formFields.innerHTML = '<p class="form-empty">Aucun champ AcroForm détecté.</p>';
+    return;
+  }
+  els.formFields.innerHTML = state.formFields
+    .map((field, index) => {
+      const id = `form-field-${index}`;
+      const value = state.formValues[field.name] ?? '';
+      if (field.type === 'checkbox') {
+        return `<div class="form-field">
+          <label for="${id}"><input type="checkbox" id="${id}" data-field="${U.escapeHtml(field.name)}" ${
+            value === 'true' ? 'checked' : ''
+          } /> ${U.escapeHtml(field.name)}</label>
+        </div>`;
+      }
+      if (field.type === 'select' || field.type === 'radio') {
+        const options = field.options
+          .map(
+            (opt) =>
+              `<option value="${U.escapeHtml(opt)}" ${opt === value ? 'selected' : ''}>${U.escapeHtml(opt)}</option>`
+          )
+          .join('');
+        return `<div class="form-field">
+          <label for="${id}">${U.escapeHtml(field.name)}</label>
+          <select id="${id}" data-field="${U.escapeHtml(field.name)}">
+            <option value="">—</option>${options}
+          </select>
+        </div>`;
+      }
+      if (field.type === 'button') return '';
+      return `<div class="form-field">
+        <label for="${id}">${U.escapeHtml(field.name)}</label>
+        <input type="text" id="${id}" data-field="${U.escapeHtml(field.name)}" value="${U.escapeHtml(
+        value
+      )}" />
+      </div>`;
+    })
+    .join('');
+}
+
+function bindFormTools() {
+  if (!els.formFields) return;
+  els.formFields.addEventListener('input', (e) => {
+    const target = e.target.closest('[data-field]');
+    if (!target) return;
+    const name = target.dataset.field;
+    state.formValues[name] = target.type === 'checkbox' ? (target.checked ? 'true' : '') : target.value;
+  });
+  els.btnFillExport?.addEventListener('click', async () => {
+    if (!state.engine) return;
+    pushLoading('Remplissage du formulaire…');
+    try {
+      const bytes = await fillFormFields(state.bytes, state.formValues, {
+        flatten: !!els.formFlatten?.checked,
+      });
+      const name = `${U.baseName(state.fileName)}-formulaire.pdf`;
+      saveBytes(bytes, name);
+      toast('Formulaire exporté.', 'success', { duration: 4500 });
+    } catch (err) {
+      console.error(err);
+      toast(`Export du formulaire impossible — ${err?.message || err}`, 'error');
+    } finally {
+      popLoading();
+    }
+  });
+}
+
+/* ─────────────────────────── Outils de pages ─────────────────────────── */
+
+/** Confirmation avant de perdre les modifications en cours. */
+function confirmDiscard() {
+  if (!state.edits.length && ![...state.pages.values()].some((p) => p.ocr)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const finish = (value) => {
+      els.discardOk.removeEventListener('click', onOk);
+      els.discardCancel.removeEventListener('click', onCancel);
+      els.discardDialog.removeEventListener('close', onCancel);
+      if (els.discardDialog.open) els.discardDialog.close();
+      resolve(value);
+    };
+    const onOk = () => finish(true);
+    const onCancel = () => finish(false);
+    els.discardOk.addEventListener('click', onOk);
+    els.discardCancel.addEventListener('click', onCancel);
+    els.discardDialog.addEventListener('close', onCancel);
+    els.discardDialog.showModal();
+  });
+}
+
+/**
+ * Applique une opération de page puis recharge le document.
+ * @param {string} label libellé du chargement
+ * @param {() => Promise<Uint8Array>} operation
+ * @param {number} [targetPage] page à afficher après rechargement
+ */
+async function applyPageOp(label, operation, targetPage) {
+  if (!state.engine) return;
+  if (!(await confirmDiscard())) return;
+  pushLoading(label);
+  try {
+    const bytes = await operation();
+    const name = state.fileName;
+    await openPdfBytes(bytes, name);
+    setTab('pages');
+    if (targetPage && targetPage > 1) {
+      await goToPage(Math.min(targetPage, state.numPages));
+    }
+  } catch (err) {
+    console.error(err);
+    toast(`Opération impossible — ${err?.message || err}`, 'error');
+  } finally {
+    popLoading();
+  }
+}
+
+function currentPageNo() {
+  return state.pageIndex + 1;
+}
+
+function bindPageTools() {
+  els.btnRotateLeft.addEventListener('click', () =>
+    applyPageOp('Rotation de la page…', () => PageOps.rotatePage(state.bytes, currentPageNo(), -90), currentPageNo())
+  );
+  els.btnRotateRight.addEventListener('click', () =>
+    applyPageOp('Rotation de la page…', () => PageOps.rotatePage(state.bytes, currentPageNo(), 90), currentPageNo())
+  );
+  els.btnMoveUp.addEventListener('click', () => {
+    const n = currentPageNo();
+    if (n <= 1) return;
+    applyPageOp('Déplacement de la page…', () => PageOps.movePage(state.bytes, n, n - 1), n - 1);
+  });
+  els.btnMoveDown.addEventListener('click', () => {
+    const n = currentPageNo();
+    if (n >= state.numPages) return;
+    applyPageOp('Déplacement de la page…', () => PageOps.movePage(state.bytes, n, n + 1), n + 1);
+  });
+  els.btnDeletePage.addEventListener('click', () => {
+    const n = currentPageNo();
+    applyPageOp('Suppression de la page…', () => PageOps.deletePage(state.bytes, n), Math.min(n, state.numPages - 1) || 1);
+  });
+  els.btnInsertBlank.addEventListener('click', () =>
+    applyPageOp('Insertion d’une page…', () => PageOps.insertBlankPage(state.bytes, currentPageNo() + 1), currentPageNo() + 1)
+  );
+
+  els.btnExtractPages.addEventListener('click', async () => {
+    if (!state.engine) return;
+    const pages = PageOps.parsePageRanges(els.pgRange.value, state.numPages);
+    if (!pages.length) {
+      toast('Indiquez des pages valides (ex. 1-3,5).', 'warn');
+      return;
+    }
+    pushLoading('Extraction des pages…');
+    try {
+      const bytes = await PageOps.extractPages(state.bytes, pages);
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const name = `${U.baseName(state.fileName)}-pages-${pages[0]}${pages.length > 1 ? `-${pages[pages.length - 1]}` : ''}.pdf`;
+      U.downloadBlob(blob, name);
+      toast(`${pages.length} page(s) extraite(s) dans « ${name} ».`, 'success', { duration: 5000 });
+    } catch (err) {
+      console.error(err);
+      toast('Extraction impossible.', 'error');
+    } finally {
+      popLoading();
+    }
+  });
+
+  els.btnSplitPages.addEventListener('click', async () => {
+    if (!state.engine) return;
+    const n = currentPageNo();
+    if (n < 1 || n >= state.numPages) {
+      toast('Placez-vous sur une page intermédiaire pour diviser le document.', 'warn');
+      return;
+    }
+    pushLoading('Division du document…');
+    try {
+      const before = PageOps.parsePageRanges(`1-${n}`, state.numPages);
+      const after = PageOps.parsePageRanges(`${n + 1}-${state.numPages}`, state.numPages);
+      const [a, b] = await Promise.all([
+        PageOps.extractPages(state.bytes, before),
+        PageOps.extractPages(state.bytes, after),
+      ]);
+      const base = U.baseName(state.fileName);
+      U.downloadBlob(new Blob([a], { type: 'application/pdf' }), `${base}-partie-1.pdf`);
+      setTimeout(() => U.downloadBlob(new Blob([b], { type: 'application/pdf' }), `${base}-partie-2.pdf`), 600);
+      toast('Document divisé en deux fichiers.', 'success', { duration: 5000 });
+    } catch (err) {
+      console.error(err);
+      toast('Division impossible.', 'error');
+    } finally {
+      popLoading();
+    }
+  });
+
+  els.btnMergePdf.addEventListener('click', () => els.mergeInput.click());
+  els.mergeInput.addEventListener('change', async () => {
+    const file = els.mergeInput.files?.[0];
+    els.mergeInput.value = '';
+    if (!file) return;
+    pushLoading('Lecture du PDF à fusionner…');
+    try {
+      const other = new Uint8Array(await file.arrayBuffer());
+      popLoading();
+      await applyPageOp('Fusion des documents…', () => PageOps.mergePdfs(state.bytes, other));
+      toast(`« ${file.name} » ajouté au document.`, 'success', { duration: 4500 });
+    } catch (err) {
+      popLoading();
+      console.error(err);
+      toast('Fusion impossible.', 'error');
+    }
+  });
+}
+
 /* ─────────────────────────── Événements ─────────────────────────── */
 
 function bindEvents() {
@@ -1917,6 +2272,10 @@ function bindEvents() {
     els.fileInput.value = '';
     if (file) handleFile(file);
   });
+  bindPageTools();
+  bindFormTools();
+  els.btnExportPng.addEventListener('click', () => handleExportImage('png'));
+  els.btnExportJpg.addEventListener('click', () => handleExportImage('jpg'));
   els.btnUndo.addEventListener('click', undoEdits);
   els.btnRedo.addEventListener('click', redoEdits);
   els.btnDemoText.addEventListener('click', () => openDemo('text'));
@@ -2180,7 +2539,179 @@ function bindEvents() {
 
 /* ─────────────────────────── Démarrage ─────────────────────────── */
 
+/* ── Thème clair / sombre ─────────────────────────────────────────── */
+
+function applyTheme(preference) {
+  const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const effective = preference === 'auto' ? (systemDark ? 'dark' : 'light') : preference;
+  if (preference === 'auto') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.dataset.theme = preference;
+  if (els.btnTheme) {
+    els.btnTheme.innerHTML = icon(effective === 'dark' ? 'sun' : 'moon', 18);
+    els.btnTheme.setAttribute(
+      'aria-label',
+      effective === 'dark' ? 'Passer au mode clair' : 'Passer au mode sombre'
+    );
+    els.btnTheme.title = effective === 'dark' ? 'Mode clair' : 'Mode sombre';
+  }
+}
+
+function initTheme() {
+  let saved = null;
+  try {
+    saved = localStorage.getItem('pdf-studio-theme');
+  } catch {
+    /* stockage indisponible */
+  }
+  applyTheme(saved || 'auto');
+  els.btnTheme?.addEventListener('click', () => {
+    const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const currentAttr = document.documentElement.dataset.theme;
+    const effective = currentAttr || (systemDark ? 'dark' : 'light');
+    const next = effective === 'dark' ? 'light' : 'dark';
+    try {
+      localStorage.setItem('pdf-studio-theme', next);
+    } catch {
+      /* ignoré */
+    }
+    applyTheme(next);
+  });
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+    if (!document.documentElement.dataset.theme) applyTheme('auto');
+  });
+}
+
+/* ── Zoom par pincement (mobile) ──────────────────────────────────── */
+
+function bindPinchZoom() {
+  const el = els.canvasScroll;
+  if (!el) return;
+  let pinching = false;
+  let startDistance = 0;
+  let startZoom = 1;
+  let factor = 1;
+
+  const distance = (touches) =>
+    Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+
+  el.addEventListener(
+    'touchstart',
+    (e) => {
+      if (e.touches.length !== 2 || !state.engine) return;
+      pinching = true;
+      factor = 1;
+      startDistance = distance(e.touches) || 1;
+      startZoom = state.zoom ?? state.scale;
+      els.stage.classList.add('pinching');
+    },
+    { passive: true }
+  );
+
+  el.addEventListener(
+    'touchmove',
+    (e) => {
+      if (!pinching || e.touches.length !== 2) return;
+      e.preventDefault();
+      factor = U.clamp(distance(e.touches) / startDistance, 0.3, 4);
+      els.stage.style.transform = `scale(${factor})`;
+    },
+    { passive: false }
+  );
+
+  const end = () => {
+    if (!pinching) return;
+    pinching = false;
+    els.stage.classList.remove('pinching');
+    els.stage.style.transform = '';
+    state.zoom = U.clamp(startZoom * factor, 0.2, 6);
+    renderCurrent();
+  };
+  el.addEventListener('touchend', end);
+  el.addEventListener('touchcancel', end);
+}
+
+/* ── Navigation clavier dans les onglets ──────────────────────────── */
+
+function bindTabsKeyboard() {
+  const tabs = Array.from(document.querySelectorAll('.tab'));
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('keydown', (e) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+      e.preventDefault();
+      let next = index;
+      if (e.key === 'ArrowRight') next = (index + 1) % tabs.length;
+      else if (e.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+      else if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = tabs.length - 1;
+      const target = tabs[next];
+      if (target.hidden) return;
+      target.focus();
+      setTab(target.dataset.tab);
+    });
+  });
+}
+
+/* ── PWA : service worker + invitation à installer ─────────────────── */
+
+let installPromptEvent = null;
+
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  installPromptEvent = event;
+  toast('PDF Studio peut être installé sur votre appareil.', 'info', {
+    action: 'Installer',
+    duration: 9000,
+    onAction: async () => {
+      if (!installPromptEvent) return;
+      installPromptEvent.prompt();
+      try {
+        await installPromptEvent.userChoice;
+      } catch {
+        /* ignoré */
+      }
+      installPromptEvent = null;
+    },
+  });
+});
+
+function registerServiceWorker() {
+  if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return;
+  const swUrl = U.assetUrl('sw.js');
+  navigator.serviceWorker
+    .register(swUrl, { scope: new URL(import.meta.env.BASE_URL, location.href).pathname })
+    .catch((err) => console.warn('[pwa] service worker non enregistré', err));
+}
+
+function initLanguage() {
+  const supported = ['fr', 'en', 'ar'];
+  let lang = 'fr';
+  try {
+    const saved = localStorage.getItem('pdf-studio-lang');
+    if (saved && supported.includes(saved)) lang = saved;
+    else {
+      const nav = (navigator.language || 'fr').slice(0, 2).toLowerCase();
+      if (supported.includes(nav)) lang = nav;
+    }
+  } catch {
+    /* stockage indisponible */
+  }
+  if (els.langSelect) {
+    els.langSelect.value = lang;
+    els.langSelect.addEventListener('change', () => {
+      const next = els.langSelect.value;
+      applyLanguage(next);
+      try {
+        localStorage.setItem('pdf-studio-lang', next);
+      } catch {
+        /* ignoré */
+      }
+    });
+  }
+  applyLanguage(lang);
+}
+
 function init() {
+  initLanguage();
   hydrateIcons();
   bindEvents();
   els.btnSearch.disabled = true;
@@ -2191,6 +2722,10 @@ function init() {
   updateOcrButtons();
   renderEditList();
   updateHistoryButtons();
+  registerServiceWorker();
+  initTheme();
+  bindPinchZoom();
+  bindTabsKeyboard();
 }
 
 init();

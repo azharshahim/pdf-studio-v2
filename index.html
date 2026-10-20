@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="PDF Studio — lisez, océrisez et modifiez le texte de vos PDF directement dans le navigateur." />
     <title>PDF Studio — OCR & édition de PDF</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <meta name="theme-color" content="#4f46e5" />
+    <link rel="apple-touch-icon" href="./icons/icon-180.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%234f46e5'/%3E%3Cpath d='M20 12h16l10 10v30a4 4 0 0 1-4 4H20a4 4 0 0 1-4-4V16a4 4 0 0 1 4-4z' fill='%23fff'/%3E%3Cpath d='M36 12v10h10' fill='%23c7d2fe'/%3E%3Cg stroke='%234f46e5' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M24 32h16M24 39h16M24 46h10'/%3E%3C/g%3E%3C/svg%3E" />
   </head>
   <body class="no-doc">
@@ -31,7 +36,7 @@
           </div>
           <div class="brand-text">
             <strong>PDF Studio</strong>
-            <span>OCR &amp; édition</span>
+            <span data-i18n="app.tagline">OCR &amp; édition</span>
           </div>
         </div>
 
@@ -43,38 +48,52 @@
 
         <div class="topbar-spacer"></div>
 
-        <button class="icon-btn" id="btnSearch" title="Rechercher dans le document (Ctrl+F)" data-icon="search"></button>
-        <button class="btn ghost" id="btnOpen"><span data-icon="folder"></span><span>Ouvrir un PDF</span></button>
+        <label class="lang-wrap"><select id="langSelect" aria-label="Langue de l’interface"><option value="fr">Français</option><option value="en">English</option><option value="ar">العربية</option></select></label>
+        <button class="icon-btn" id="btnTheme" title="Mode sombre / clair" aria-label="Changer de thème" data-i18n-title="top.theme" data-icon="moon"></button>
+        <button class="icon-btn" id="btnSearch" title="Rechercher dans le document (Ctrl+F)" data-i18n-title="top.search" data-icon="search"></button>
+        <button class="btn ghost" id="btnOpen"><span data-icon="folder"></span><span data-i18n="top.open">Ouvrir un PDF</span></button>
 
         <div class="export-wrap">
           <button class="btn primary" id="btnExport" disabled>
-            <span data-icon="download"></span><span>Exporter</span><span class="caret" data-icon="chevronDown"></span>
+            <span data-icon="download"></span><span data-i18n="top.export">Exporter</span><span class="caret" data-icon="chevronDown"></span>
           </button>
           <div class="popover export-menu" id="exportMenu" hidden>
             <div class="popover-head">
-              <h4>Exporter le document</h4>
+              <h4 data-i18n="export.head">Exporter le document</h4>
               <button class="icon-btn tiny" id="exportClose" aria-label="Fermer" data-icon="x"></button>
             </div>
             <label class="check">
               <input type="checkbox" id="expEdits" checked />
-              <span>Appliquer les modifications <b class="count" id="expEditsCount">(0)</b></span>
+              <span><span data-i18n="export.edits">Appliquer les modifications</span> <b class="count" id="expEditsCount">(0)</b></span>
             </label>
             <label class="check">
               <input type="checkbox" id="expOcr" checked />
-              <span>Ajouter la couche OCR <b class="count" id="expOcrCount">(0)</b></span>
+              <span><span data-i18n="export.ocr">Ajouter la couche OCR</span> <b class="count" id="expOcrCount">(0)</b></span>
             </label>
             <label class="field-inline export-redact">
-              <span>Texte d'origine</span>
+              <span data-i18n="export.redact">Texte d'origine</span>
               <select id="expRedact" title="Traitement appliqué au texte remplacé">
-                <option value="stream">Retiré du flux (recommandé)</option>
-                <option value="raster">Caviardé (page rastérisée)</option>
-                <option value="mask">Masqué seulement</option>
+                <option value="stream" data-i18n="export.stream">Retiré du flux (recommandé)</option>
+                <option value="raster" data-i18n="export.raster">Caviardé (page rastérisée)</option>
+                <option value="mask" data-i18n="export.mask">Masqué seulement</option>
               </select>
             </label>
-            <button class="btn primary wide" id="btnExportPdf"><span data-icon="download"></span>Télécharger le PDF</button>
+            <label class="field-inline export-redact">
+              <span data-i18n="export.quality">Qualité d'image (caviardage)</span>
+              <select id="expQuality">
+                <option value="1" data-i18n="export.qhigh">Haute (PNG, sans perte)</option>
+                <option value="0.82" data-i18n="export.qmed">Équilibrée (JPEG 82 %)</option>
+                <option value="0.6" data-i18n="export.qlow">Compacte (JPEG 60 %)</option>
+              </select>
+            </label>
+            <button class="btn primary wide" id="btnExportPdf"><span data-icon="download"></span><span data-i18n="export.download">Télécharger le PDF</span></button>
             <div class="popover-divider"></div>
-            <button class="btn ghost wide" id="btnExportText"><span data-icon="fileText"></span>Texte extrait (.txt)</button>
-            <p class="muted xsmall">Traitement 100 % local — vos fichiers ne quittent pas votre navigateur.</p>
+            <button class="btn ghost wide" id="btnExportText"><span data-icon="fileText"></span><span data-i18n="export.txt">Texte extrait (.txt)</span></button>
+            <div class="image-export-row">
+              <button class="btn ghost small" id="btnExportPng"><span data-icon="image"></span><span data-i18n="export.png">Page en PNG</span></button>
+              <button class="btn ghost small" id="btnExportJpg"><span data-icon="image"></span><span data-i18n="export.jpg">Page en JPG</span></button>
+            </div>
+            <p class="muted xsmall"><span data-i18n="export.local">Traitement 100 % local — vos fichiers ne quittent pas votre navigateur.</span></p>
           </div>
         </div>
       </header>
@@ -83,7 +102,7 @@
       <div class="searchbar" id="searchbar" hidden>
         <div class="search-inner">
           <span class="search-ico" data-icon="search"></span>
-          <input id="searchInput" type="search" placeholder="Rechercher dans le document…" autocomplete="off" spellcheck="false" />
+          <input id="searchInput" type="search" data-i18n-placeholder="search.placeholder" placeholder="Rechercher dans le document…" autocomplete="off" spellcheck="false" />
           <span class="search-count" id="searchCount"></span>
           <button class="icon-btn tiny" id="searchPrev" title="Résultat précédent" data-icon="chevronUp"></button>
           <button class="icon-btn tiny" id="searchNext" title="Résultat suivant" data-icon="chevronDown"></button>
@@ -184,24 +203,24 @@
                     <path d="M60 176c14 5 30 6 44 3" stroke="#c7d2fe" stroke-width="3" stroke-linecap="round" fill="none" />
                   </svg>
                 </div>
-                <h1>Modifiez le texte de vos PDF,<br /><em>même les scans.</em></h1>
+                <h1 data-i18n="empty.title" data-i18n-html>Modifiez le texte de vos PDF,<br /><em>même les scans.</em></h1>
                 <p class="lead">
                   Ouvrez un document, cliquez sur un texte pour le corriger, puis lancez l'OCR sur les pages
                   numérisées. Rien ne quitte votre navigateur.
                 </p>
                 <div class="empty-actions">
-                  <button class="btn primary lg" id="btnEmptyOpen"><span data-icon="folder"></span>Choisir un PDF</button>
+                  <button class="btn primary lg" id="btnEmptyOpen"><span data-icon="folder"></span><span data-i18n="top.open">Choisir un PDF</span></button>
                 </div>
                 <div class="demo-row">
-                  <span class="demo-label">Pas de fichier sous la main ?</span>
-                  <button class="linkbtn" id="btnDemoText">Essayer un PDF d'exemple</button>
+                  <span class="demo-label" data-i18n="empty.noFile">Pas de fichier sous la main ?</span>
+                  <button class="linkbtn" id="btnDemoText" data-i18n="empty.text">Essayer un PDF d'exemple</button>
                   <span class="demo-sep">·</span>
-                  <button class="linkbtn" id="btnDemoScan">Essayer un scan à OCRiser</button>
+                  <button class="linkbtn" id="btnDemoScan" data-i18n="empty.scan">Essayer un scan à OCRiser</button>
                 </div>
                 <div class="feature-chips">
-                  <span><i data-icon="scan"></i>OCR français &amp; anglais</span>
-                  <span><i data-icon="edit"></i>Édition du texte</span>
-                  <span><i data-icon="shield"></i>100 % local</span>
+                  <span><i data-icon="scan"></i><span data-i18n="chip.ocr">OCR français &amp; anglais</span></span>
+                  <span><i data-icon="edit"></i><span data-i18n="chip.edit">Édition du texte</span></span>
+                  <span><i data-icon="shield"></i><span data-i18n="chip.local">100 % local</span></span>
                 </div>
               </div>
             </div>
@@ -209,16 +228,18 @@
 
           <div class="hintbar" id="hintbar" hidden>
             <span class="hint-dot"></span>
-            <span id="hintText">Cliquez sur un texte pour le modifier</span>
+            <span id="hintText" data-i18n="hint.edit">Cliquez sur un texte pour le modifier</span>
             <button class="linkbtn" id="hintCancel" hidden>Annuler</button>
           </div>
         </main>
 
         <aside class="inspector" id="inspector">
-          <div class="tabs" role="tablist">
-            <button class="tab active" data-tab="edit" role="tab"><span data-icon="edit"></span>Éditer<span class="tab-badge" id="editCount">0</span></button>
-            <button class="tab" data-tab="ocr" role="tab"><span data-icon="scan"></span>OCR</button>
-            <button class="tab" data-tab="text" role="tab"><span data-icon="text"></span>Texte</button>
+          <div class="tabs" role="tablist" aria-label="Panneaux">
+            <button class="tab active" data-tab="edit" role="tab" aria-selected="true"><span data-icon="edit"></span><span data-i18n="tab.edit">Éditer</span><span class="tab-badge" id="editCount">0</span></button>
+            <button class="tab" data-tab="ocr" role="tab" aria-selected="false"><span data-icon="scan"></span><span data-i18n="tab.ocr">OCR</span></button>
+            <button class="tab" data-tab="pages" role="tab" aria-selected="false"><span data-icon="file"></span><span data-i18n="tab.pages">Pages</span></button>
+            <button class="tab" data-tab="form" id="tabForm" role="tab" hidden><span data-icon="edit"></span><span data-i18n="tab.form">Formulaire</span></button>
+            <button class="tab" data-tab="text" role="tab" aria-selected="false"><span data-icon="text"></span><span data-i18n="tab.text">Texte</span></button>
           </div>
 
           <div class="panels">
@@ -228,18 +249,18 @@
                 <div id="editEmpty">
                   <div class="callout">
                     <div class="callout-icon" data-icon="edit"></div>
-                    <h3>Corriger un texte</h3>
-                    <p>Cliquez sur n'importe quelle ligne du document pour la réécrire, ajuster sa police, sa taille ou sa couleur.</p>
-                    <button class="btn soft wide" id="btnAddText"><span data-icon="plus"></span>Ajouter un bloc de texte</button>
+                    <h3 data-i18n="edit.title">Corriger un texte</h3>
+                    <p data-i18n="edit.desc">Cliquez sur n'importe quelle ligne du document pour la réécrire, ajuster sa police, sa taille ou sa couleur.</p>
+                    <button class="btn soft wide" id="btnAddText"><span data-icon="plus"></span><span data-i18n="edit.addblock">Ajouter un bloc de texte</span></button>
                   </div>
                   <div class="panel-section">
                     <div class="section-head">
-                      <h4>Modifications</h4>
+                      <h4 data-i18n="edit.changes">Modifications</h4>
                       <span class="badge" id="editCountList">0</span>
-                      <button class="linkbtn push" id="btnClearEdits">Tout effacer</button>
+                      <button class="linkbtn push" id="btnClearEdits"><span data-i18n="edit.clearall">Tout effacer</span></button>
                     </div>
                     <div class="edit-list" id="editList"></div>
-                    <p class="muted small" id="editListEmpty">Aucune modification pour l'instant.</p>
+                    <p class="muted small" id="editListEmpty" data-i18n="edit.none">Aucune modification pour l'instant.</p>
                   </div>
                 </div>
 
@@ -248,141 +269,209 @@
                     <div class="form-head-badges">
                       <span class="badge" id="efPage">Page 1</span>
                       <span class="badge outline" id="efSource">Texte PDF</span>
+                      <span class="badge confidence" id="efConfidence" hidden></span>
                     </div>
                     <button class="icon-btn tiny" id="efClose" title="Fermer" data-icon="x"></button>
                   </div>
 
                   <div class="original" id="efOriginalWrap">
-                    <span>Texte d'origine</span>
+                    <span data-i18n="edit.original">Texte d'origine</span>
                     <p id="efOriginal"></p>
                   </div>
 
                   <label class="field">
-                    <span>Nouveau texte</span>
-                    <textarea id="efText" rows="3" placeholder="Saisissez le texte…"></textarea>
+                    <span data-i18n="edit.newtext">Nouveau texte</span>
+                    <textarea id="efText" rows="3" data-i18n-placeholder="edit.newplaceholder" placeholder="Saisissez le texte…"></textarea>
                   </label>
 
                   <div class="field-grid">
                     <label class="field">
-                      <span>Police</span>
+                      <span data-i18n="edit.font">Police</span>
                       <select id="efFont">
-                        <option value="Helvetica">Sans-serif (Helvetica)</option>
-                        <option value="Times">Serif (Times)</option>
-                        <option value="Courier">Monospace (Courier)</option>
+                        <option value="Helvetica" data-i18n="edit.fontSans">Sans-serif (Helvetica)</option>
+                        <option value="Times" data-i18n="edit.fontSerif">Serif (Times)</option>
+                        <option value="Courier" data-i18n="edit.fontMono">Monospace (Courier)</option>
                       </select>
                     </label>
                     <label class="field">
-                      <span>Taille</span>
+                      <span data-i18n="edit.size">Taille</span>
                       <input id="efSize" type="number" min="4" max="200" step="0.5" />
                     </label>
                   </div>
 
                   <div class="field-grid three">
                     <div class="field">
-                      <span>Style</span>
+                      <span data-i18n="edit.style">Style</span>
                       <div class="style-toggle">
                         <button id="efBold" class="toggle-btn" title="Gras">B</button>
                         <button id="efItalic" class="toggle-btn" title="Italique">I</button>
                       </div>
                     </div>
                     <label class="field">
-                      <span>Texte</span>
+                      <span data-i18n="edit.textcolor">Texte</span>
                       <input id="efColor" type="color" />
                     </label>
                     <label class="field">
-                      <span>Fond</span>
+                      <span data-i18n="edit.bg">Fond</span>
                       <input id="efBg" type="color" />
                     </label>
                   </div>
 
                   <label class="check">
                     <input type="checkbox" id="efFit" />
-                    <span>Ajuster la taille à la zone</span>
+                    <span data-i18n="edit.fit">Ajuster la taille à la zone</span>
                   </label>
 
                   <div class="form-actions">
-                    <button class="btn primary wide" id="efApply"><span data-icon="check"></span>Valider</button>
-                    <button class="btn ghost" id="efReset"><span data-icon="undo"></span>Rétablir l'original</button>
+                    <button class="btn primary wide" id="efApply"><span data-icon="check"></span><span data-i18n="edit.apply">Valider</span></button>
+                    <button class="btn ghost" id="efReset"><span data-icon="undo"></span><span data-i18n="edit.restore">Rétablir l'original</span></button>
                   </div>
-                  <p class="muted xsmall">Le fond masque le texte d'origine. Choisissez une couleur proche du papier pour un rendu invisible.</p>
+                  <p class="muted xsmall" data-i18n="edit.help">Le fond masque le texte d'origine. Choisissez une couleur proche du papier pour un rendu invisible.</p>
                 </div>
               </div>
             </section>
 
             <!-- ───── OCR PANEL ───── -->
-            <section class="panel" data-panel="ocr">
+            <section class="panel" data-panel="ocr" role="tabpanel" aria-label="OCR">
               <div class="panel-scroll">
                 <div class="callout">
                   <div class="callout-icon scan" data-icon="scan"></div>
-                  <h3>Lire un document scanné</h3>
-                  <p>L'OCR extrait le texte des images pour le rendre lisible, copiable et recherchable — et vous permet de le corriger.</p>
+                  <h3 data-i18n="ocr.title">Lire un document scanné</h3>
+                  <p data-i18n="ocr.desc">L'OCR extrait le texte des images pour le rendre lisible, copiable et recherchable — et vous permet de le corriger.</p>
 
-                  <label class="field">
-                    <span>Langue des documents</span>
-                    <select id="ocrLang">
-                      <option value="fra+eng" selected>Français + anglais</option>
-                      <option value="fra">Français</option>
-                      <option value="eng">Anglais</option>
-                    </select>
+                  <div class="field">
+                    <span data-i18n="ocr.langs">Langues des documents</span>
+                    <div class="lang-grid" id="ocrLang" role="group" aria-label="Langues OCR">
+                      <label class="lang-check"><input type="checkbox" value="fra" checked /><span data-i18n="ocr.fr">Français</span></label>
+                      <label class="lang-check"><input type="checkbox" value="eng" checked /><span data-i18n="ocr.en">Anglais</span></label>
+                      <label class="lang-check"><input type="checkbox" value="spa" /><span data-i18n="ocr.es">Espagnol</span></label>
+                      <label class="lang-check"><input type="checkbox" value="deu" /><span data-i18n="ocr.de">Allemand</span></label>
+                      <label class="lang-check"><input type="checkbox" value="ara" /><span data-i18n="ocr.ar">Arabe</span></label>
+                    </div>
+                  </div>
+
+                  <label class="check compact">
+                    <input type="checkbox" id="ocrContrast" checked />
+                    <span data-i18n="ocr.contrast">Améliorer le contraste (niveaux de gris)</span>
+                  </label>
+                  <label class="check compact">
+                    <input type="checkbox" id="ocrDeskew" />
+                    <span data-i18n="ocr.deskew">Redresser automatiquement la page</span>
                   </label>
 
                   <div class="btn-row">
-                    <button class="btn primary" id="btnOcrPage"><span data-icon="scan"></span>Cette page</button>
-                    <button class="btn soft" id="btnOcrAll">Tout le PDF</button>
+                    <button class="btn primary" id="btnOcrPage"><span data-icon="scan"></span><span data-i18n="ocr.page">Cette page</span></button>
+                    <button class="btn soft" id="btnOcrAll"><span data-i18n="ocr.all">Tout le PDF</span></button>
                   </div>
 
                   <div class="progress-box" id="ocrProgress" hidden>
                     <div class="progress-track"><div class="progress-fill" id="ocrProgressFill"></div></div>
                     <div class="progress-meta">
-                      <span id="ocrStatus">Initialisation…</span>
-                      <button class="linkbtn" id="btnOcrCancel">Annuler</button>
+                      <span id="ocrStatus" data-i18n="ocr.init">Initialisation…</span>
+                      <button class="linkbtn" id="btnOcrCancel" data-i18n="ocr.cancel">Annuler</button>
                     </div>
                   </div>
 
-                  <p class="muted xsmall">L'OCR s'exécute localement. Les documents nets et droits donnent les meilleurs résultats.</p>
+                  <p class="muted xsmall" data-i18n="ocr.note">L'OCR s'exécute localement. Les documents nets et droits donnent les meilleurs résultats.</p>
                 </div>
 
                 <div class="panel-section">
                   <div class="section-head">
-                    <h4>Texte reconnu</h4>
+                    <h4 data-i18n="ocr.recognized">Texte reconnu</h4>
                     <span class="badge ok" id="ocrConf" hidden></span>
                   </div>
                   <div id="ocrResultBox" hidden>
                     <textarea id="ocrText" readonly rows="8"></textarea>
                     <div class="btn-row">
-                      <button class="btn ghost small" id="btnCopyOcr"><span data-icon="copy"></span>Copier</button>
-                      <button class="btn ghost small" id="btnOcrFix"><span data-icon="edit"></span>Corriger sur la page</button>
+                      <button class="btn ghost small" id="btnCopyOcr"><span data-icon="copy"></span><span data-i18n="ocr.copy">Copier</span></button>
+                      <button class="btn ghost small" id="btnOcrFix"><span data-icon="edit"></span><span data-i18n="ocr.fix">Corriger sur la page</span></button>
                     </div>
                   </div>
-                  <p class="muted small" id="ocrNoResult">Aucune page analysée pour l'instant. Lancez l'OCR pour voir le texte reconnu apparaître ici.</p>
+                  <p class="muted small" id="ocrNoResult" data-i18n="ocr.none">Aucune page analysée pour l'instant. Lancez l'OCR pour voir le texte reconnu apparaître ici.</p>
                 </div>
 
                 <div class="panel-section">
-                  <div class="section-head"><h4>Pages analysées</h4></div>
+                  <div class="section-head"><h4 data-i18n="ocr.pages">Pages analysées</h4></div>
                   <div class="chip-list" id="ocrPageChips"><span class="muted small">—</span></div>
                 </div>
               </div>
             </section>
 
             <!-- ───── TEXT PANEL ───── -->
-            <section class="panel" data-panel="text">
+            <!-- ───── PAGES PANEL ───── -->
+            <section class="panel" data-panel="pages" role="tabpanel" aria-label="Pages">
+              <div class="panel-scroll">
+                <div class="callout">
+                  <div class="callout-icon" data-icon="file"></div>
+                  <h3 data-i18n="pages.title">Organiser les pages</h3>
+                  <p data-i18n="pages.desc">Pivotez, déplacez, supprimez ou insérez des pages. Les vignettes se réordonnent par glisser-déposer.</p>
+                </div>
+
+                <div class="page-summary">Page <b id="pgCurrent">1</b> sur <b id="pgTotal">0</b></div>
+
+                <div class="btn-row wrap">
+                  <button class="btn soft" id="btnRotateLeft" title="Pivoter de 90° vers la gauche"><span aria-hidden="true">↺</span> <span data-i18n="pages.left">Gauche</span></button>
+                  <button class="btn soft" id="btnRotateRight" title="Pivoter de 90° vers la droite"><span aria-hidden="true">↻</span> <span data-i18n="pages.right">Droite</span></button>
+                </div>
+                <div class="btn-row wrap">
+                  <button class="btn ghost" id="btnMoveUp" title="Monter la page"><span data-icon="chevronUp"></span><span data-i18n="pages.up">Monter</span></button>
+                  <button class="btn ghost" id="btnMoveDown" title="Descendre la page"><span data-icon="chevronDown"></span><span data-i18n="pages.down">Descendre</span></button>
+                  <button class="btn ghost danger" id="btnDeletePage" title="Supprimer la page"><span data-icon="trash"></span><span data-i18n="pages.delete">Supprimer</span></button>
+                </div>
+                <button class="btn ghost wide" id="btnInsertBlank"><span data-icon="plus"></span><span data-i18n="pages.insert">Insérer une page vierge après</span></button>
+
+                <div class="panel-divider"></div>
+                <label class="field">
+                  <span data-i18n="pages.range">Pages à extraire (ex. 1-3,5)</span>
+                  <input id="pgRange" type="text" inputmode="numeric" placeholder="1-3,5" />
+                </label>
+                <div class="btn-row">
+                  <button class="btn soft" id="btnExtractPages"><span data-icon="download"></span><span data-i18n="pages.extract">Extraire</span></button>
+                  <button class="btn ghost" id="btnSplitPages"><span data-i18n="pages.split">Diviser ici</span></button>
+                </div>
+
+                <div class="panel-divider"></div>
+                <button class="btn ghost wide" id="btnMergePdf"><span data-icon="plus"></span><span data-i18n="pages.merge">Fusionner avec un PDF…</span></button>
+                <input type="file" id="mergeInput" accept="application/pdf" hidden />
+                <p class="muted xsmall" data-i18n="pages.note">Ces opérations recréent le document : les modifications de texte en cours et l'OCR seront réinitialisés après confirmation.</p>
+              </div>
+            </section>
+
+            <!-- ───── FORM PANEL ───── -->
+            <section class="panel" data-panel="form" role="tabpanel" aria-label="Formulaire">
+              <div class="panel-scroll">
+                <div class="callout">
+                  <div class="callout-icon" data-icon="edit"></div>
+                  <h3 data-i18n="form.title">Remplir le formulaire</h3>
+                  <p data-i18n="form.desc">Les champs AcroForm détectés dans le PDF peuvent être complétés ici, puis exportés (avec ou sans aplatissement).</p>
+                </div>
+                <div id="formFields" class="form-fields"></div>
+                <label class="check compact">
+                  <input type="checkbox" id="formFlatten" />
+                  <span data-i18n="form.flatten">Aplatir les champs dans le PDF exporté</span>
+                </label>
+                <button class="btn primary wide" id="btnFillExport"><span data-icon="download"></span><span data-i18n="form.export">Exporter le PDF rempli</span></button>
+              </div>
+            </section>
+
+            <section class="panel" data-panel="text" role="tabpanel" aria-label="Texte">
               <div class="panel-scroll">
                 <div class="section-head">
-                  <h4>Texte de la page</h4>
+                  <h4 data-i18n="text.title">Texte de la page</h4>
                   <span class="badge" id="textSource">—</span>
                 </div>
                 <textarea id="pageText" readonly rows="14" placeholder="Aucun texte détecté sur cette page."></textarea>
                 <div class="btn-row">
-                  <button class="btn ghost small" id="btnCopyPageText"><span data-icon="copy"></span>Copier la page</button>
-                  <button class="btn ghost small" id="btnDownloadText"><span data-icon="download"></span>Tout en .txt</button>
+                  <button class="btn ghost small" id="btnCopyPageText"><span data-icon="copy"></span><span data-i18n="text.copy">Copier la page</span></button>
+                  <button class="btn ghost small" id="btnDownloadText"><span data-icon="download"></span><span data-i18n="text.alltxt">Tout en .txt</span></button>
                 </div>
-                <p class="muted small">Le texte affiché inclut vos modifications. Pour une page scannée sans texte natif, lancez d'abord l'OCR.</p>
+                <p class="muted small" data-i18n="text.note">Le texte affiché inclut vos modifications. Pour une page scannée sans texte natif, lancez d'abord l'OCR.</p>
                 <div class="panel-section tips">
-                  <h4>Astuces</h4>
+                  <h4 data-i18n="text.tips">Astuces</h4>
                   <ul class="muted small">
-                    <li>Recherchez un mot avec <kbd>Ctrl</kbd>+<kbd>F</kbd> — les pages OCRisées sont incluses.</li>
-                    <li>Double-cliquez sur un bloc pour le corriger depuis l'onglet Éditer.</li>
-                    <li>Exportez le PDF avec la couche OCR pour un document recherchable.</li>
+                    <li data-i18n="text.tip1">Recherchez un mot avec Ctrl+F — les pages OCRisées sont incluses.</li>
+                    <li data-i18n="text.tip2">Double-cliquez sur un bloc pour le corriger depuis l'onglet Éditer.</li>
+                    <li data-i18n="text.tip3">Exportez le PDF avec la couche OCR pour un document recherchable.</li>
                   </ul>
                 </div>
               </div>
@@ -395,8 +484,8 @@
     <div class="drop-overlay" id="dropOverlay" hidden>
       <div class="drop-card">
         <div class="drop-icon" data-icon="file"></div>
-        <h2>Déposez votre PDF ici</h2>
-        <p>Relâchez pour l'ouvrir — le fichier reste sur votre appareil.</p>
+        <h2 data-i18n="drop.title">Déposez votre PDF ici</h2>
+        <p data-i18n="drop.desc">Relâchez pour l'ouvrir — le fichier reste sur votre appareil.</p>
       </div>
     </div>
 
@@ -449,6 +538,15 @@
     <div class="dialog-actions">
       <button class="btn ghost" id="glyphCancel" type="button">Annuler</button>
       <button class="btn primary" id="glyphContinue" type="button">Exporter quand même</button>
+    </div>
+  </dialog>
+
+  <dialog class="dialog" id="discardDialog" aria-labelledby="discardTitle">
+    <h3 id="discardTitle">Réinitialiser le travail en cours ?</h3>
+    <p class="dialog-text">Cette opération de page recrée le PDF. Les modifications de texte et les résultats OCR non exportés seront perdus.</p>
+    <div class="dialog-actions">
+      <button class="btn ghost" id="discardCancel" type="button">Annuler</button>
+      <button class="btn primary" id="discardOk" type="button">Continuer</button>
     </div>
   </dialog>
 

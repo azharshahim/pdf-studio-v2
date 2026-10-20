@@ -1,10 +1,6 @@
 import { assetUrl } from './utils.js';
 
-const LANG_MAP = {
-  'fra+eng': ['fra', 'eng'],
-  fra: ['fra'],
-  eng: ['eng'],
-};
+export const SUPPORTED_LANGS = ['fra', 'eng', 'spa', 'deu', 'ara'];
 
 const VERSION = '1';
 
@@ -19,7 +15,15 @@ let lastUsed = 0;
  * localement depuis `public/tesseract`, `public/tesseract-core` et
  * `public/tessdata`, avec des URL construites à partir de BASE_URL.
  */
-async function ensureWorker(langsKey) {
+function normalizeLangs(langs) {
+  const list = Array.isArray(langs) ? langs : String(langs).split('+');
+  const clean = [...new Set(list.map((l) => String(l).trim()).filter((l) => SUPPORTED_LANGS.includes(l)))];
+  return clean.length ? clean : ['fra'];
+}
+
+async function ensureWorker(langsInput) {
+  const langList = normalizeLangs(langsInput);
+  const langsKey = langList.join('+');
   workerLangs = workerLangs || langsKey;
   if (worker && workerLangs === langsKey) return worker;
 
@@ -37,7 +41,7 @@ async function ensureWorker(langsKey) {
   workerLangs = langsKey;
   // Import paresseux : Tesseract n'est chargé qu'au premier lancement d'un OCR.
   const { createWorker, OEM } = await import('tesseract.js');
-  initPromise = createWorker(LANG_MAP[langsKey] || ['fra', 'eng'], OEM.LSTM_ONLY, {
+  initPromise = createWorker(langList, OEM.LSTM_ONLY, {
     workerPath: `${assetUrl('tesseract/worker.min.js')}?v=${VERSION}`,
     corePath: assetUrl('tesseract-core'),
     langPath: assetUrl('tessdata'),
@@ -95,7 +99,7 @@ function parseBlocks(data) {
 /**
  * Lance l'OCR sur un canvas déjà rendu.
  * @param {HTMLCanvasElement} canvas
- * @param {'fra'|'eng'|'fra+eng'} langsKey
+ * @param {string[]|string} langsKey langues Tesseract (ex. ['fra','eng'])
  * @param {(m: {status: string, progress: number}) => void} onProgress
  */
 export async function recognizeCanvas(canvas, langsKey, onProgress) {
@@ -110,7 +114,7 @@ export async function recognizeCanvas(canvas, langsKey, onProgress) {
     confidence: data.confidence || 0,
     lines,
     words,
-    langs: langsKey,
+    langs: normalizeLangs(langsKey),
     at: Date.now(),
   };
 }

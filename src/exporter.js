@@ -273,10 +273,11 @@ function overlaps(cx, cy, b) {
   return cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h;
 }
 
-async function canvasToPngBytes(canvas) {
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+async function canvasToImageBytes(canvas, quality = 1) {
+  const type = quality >= 1 ? 'image/png' : 'image/jpeg';
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, type, quality));
   if (!blob) throw new Error('rastérisation impossible');
-  return new Uint8Array(await blob.arrayBuffer());
+  return { bytes: new Uint8Array(await blob.arrayBuffer()), type };
 }
 
 /**
@@ -294,6 +295,7 @@ export async function exportPdf({
   ocrPages = [],
   redactMode = 'stream',
   renderPage = null,
+  rasterQuality = 1,
 }) {
   const pdfDoc = await PDFDocument.load(sourceBytes, {
     ignoreEncryption: true,
@@ -378,8 +380,11 @@ export async function exportPdf({
             (e.bbox.h + padY * 2) * scale
           );
         }
-        const png = await canvasToPngBytes(canvas);
-        const image = await pdfDoc.embedPng(png);
+        const encoded = await canvasToImageBytes(canvas, rasterQuality);
+        const image =
+          encoded.type === 'image/jpeg'
+            ? await pdfDoc.embedJpg(encoded.bytes)
+            : await pdfDoc.embedPng(encoded.bytes);
         page.node.delete(PDFName.of('Contents'));
         page.drawImage(image, { x: 0, y: 0, width: pageW, height: pageH });
         stats.rasterizedPages.push(pageNo);
