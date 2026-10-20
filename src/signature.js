@@ -54,7 +54,7 @@ export function createSignaturePad(canvas, { color = '#111827', width = 2.6 } = 
   let dirty = false;
 
   const resize = () => {
-    const ratio = window.devicePixelRatio || 1;
+    const ratio = globalThis.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
     const snapshot = dirty ? canvas.toDataURL() : null;
     canvas.width = Math.max(1, Math.round(rect.width * ratio));

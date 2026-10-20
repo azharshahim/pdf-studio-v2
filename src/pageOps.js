@@ -123,8 +123,10 @@ export async function reorderPages(bytes, order) {
   const kids = pagesNode.lookup(PDFName.of('Kids'), PDFArray);
   if (kids.size() !== count) throw new Error('Structure de pages non plate');
   const refs = kids.asArray().slice();
-  const next = clean.map((n) => refs[n - 1]);
-  kids.asArray().splice(0, kids.size(), ...next);
+  // Réécriture position par position : splice() sur asArray() ne modifie pas le PDF.
+  clean.forEach((n, index) => {
+    kids.set(index, refs[n - 1]);
+  });
   void PDFRef;
   return doc.save();
 }

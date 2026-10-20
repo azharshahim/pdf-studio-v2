@@ -4130,6 +4130,80 @@ function bindPinchZoom() {
   el.addEventListener('touchcancel', end);
 }
 
+/* ── Balayage horizontal pour changer de page (mobile) ────────────── */
+
+function bindSwipePaging() {
+  const el = els.canvasScroll;
+  if (!el) return;
+  let startX = 0;
+  let startY = 0;
+  let startTime = 0;
+  let tracking = false;
+  let dx = 0;
+
+  const canSwipe = () => {
+    if (!state.engine || state.active || markup.tool) return false;
+    if (!els.annobar?.hidden) return false;
+    if (document.querySelector('dialog[open], #sheet:not([hidden])')) return false;
+    // Ne pas voler le geste quand la page dépasse en largeur (zoom, paysage).
+    return el.scrollWidth <= el.clientWidth + 8;
+  };
+
+  el.addEventListener(
+    'touchstart',
+    (e) => {
+      if (e.touches.length !== 1 || !canSwipe()) {
+        tracking = false;
+        return;
+      }
+      tracking = true;
+      dx = 0;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      startTime = performance.now();
+    },
+    { passive: true }
+  );
+
+  el.addEventListener(
+    'touchmove',
+    (e) => {
+      if (!tracking || e.touches.length !== 1) return;
+      const mx = e.touches[0].clientX - startX;
+      const my = e.touches[0].clientY - startY;
+      if (Math.abs(my) > 40 && Math.abs(my) > Math.abs(mx)) {
+        tracking = false;
+        els.stage.style.transform = '';
+        return;
+      }
+      if (Math.abs(mx) < 8) return;
+      dx = mx;
+      const atStart = state.pageIndex <= 0 && mx > 0;
+      const atEnd = state.pageIndex >= state.numPages - 1 && mx < 0;
+      const limit = atStart || atEnd ? 24 : 90;
+      const offset = U.clamp(mx * 0.45, -limit, limit);
+      els.stage.style.transform = `translateX(${offset}px)`;
+    },
+    { passive: true }
+  );
+
+  const finish = (cancelled) => {
+    if (!tracking) return;
+    tracking = false;
+    const elapsed = performance.now() - startTime;
+    els.stage.style.transform = '';
+    if (cancelled) return;
+    const far = Math.abs(dx) > 64;
+    const fast = Math.abs(dx) > 32 && elapsed < 320;
+    if (!far && !fast) return;
+    if (dx < 0 && state.pageIndex < state.numPages - 1) goToPage(state.pageIndex + 2);
+    else if (dx > 0 && state.pageIndex > 0) goToPage(state.pageIndex);
+  };
+
+  el.addEventListener('touchend', () => finish(false), { passive: true });
+  el.addEventListener('touchcancel', () => finish(true), { passive: true });
+}
+
 /* ── Navigation clavier dans les onglets ──────────────────────────── */
 
 function bindTabsKeyboard() {
@@ -4240,6 +4314,7 @@ function init() {
   if (!state.engine) routeTo('home');
   setTimeout(() => showOnboarding(), 700);
   bindPinchZoom();
+  bindSwipePaging();
   bindTabsKeyboard();
   updateKeyboardInset();
   window.visualViewport?.addEventListener('resize', updateKeyboardInset);

@@ -547,8 +547,8 @@ export async function exportPdf({
   // 4. Annotations, signatures, tampons et images posés sur la page
   if (objects.length) {
     try {
-      await drawObjects(pdfDoc, pages, objects);
-      stats.markup = objects.length;
+      stats.markup = await drawObjects(pdfDoc, pages, objects);
+      if (!stats.markup) delete stats.markup;
     } catch (err) {
       console.warn('[exporter] annotations non dessinées', err);
     }
@@ -583,6 +583,7 @@ export function pointsToSvgPath(points = []) {
  * Les bbox sont exprimées en points PDF avec l'origine en bas à gauche.
  */
 export async function drawObjects(pdfDoc, pages, objects) {
+  let drawn = 0;
   const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const imageCache = new Map();
 
@@ -610,6 +611,7 @@ export async function drawObjects(pdfDoc, pages, objects) {
     }
     if (!obj.bbox) continue;
     const { x, y, w, h } = obj.bbox;
+    drawn++;
     const { r, g, b } = hexToRgb01(obj.color || '#111827', { r: 0, g: 0, b: 0 });
     const color = rgb(r, g, b);
 
@@ -736,4 +738,5 @@ export async function drawObjects(pdfDoc, pages, objects) {
       page.drawText(obj.text || '', { x, y, size, font, color });
     }
   }
+  return drawn;
 }
