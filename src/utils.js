@@ -86,6 +86,7 @@ export function formatBytes(n) {
 export function cssFontFamily(font) {
   if (font === 'Times') return '"Times New Roman", Times, serif';
   if (font === 'Courier') return '"Courier New", Courier, monospace';
+  if (font === 'Noto Sans') return '"Noto Sans", "Noto Naskh Arabic", "Segoe UI", system-ui, sans-serif';
   return 'Helvetica, Arial, sans-serif';
 }
 

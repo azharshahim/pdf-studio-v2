@@ -98,6 +98,17 @@
         </div>
       </header>
 
+      <!-- ══════════════ BARRE D'ÉDITION DIRECTE ══════════════ -->
+      <header class="editbar" id="editbar" hidden>
+        <button class="icon-btn editbar-done" id="editDone" aria-label="Valider" data-i18n-title="editor.done" data-icon="check"></button>
+        <div class="editbar-title" id="editTitle" data-i18n="editbar.title">Modifier un PDF</div>
+        <div class="editbar-actions">
+          <span class="editbar-count" id="editbarCount" hidden>0</span>
+          <button class="icon-btn" id="editUndo" aria-label="Annuler" data-i18n-title="common.undo" data-icon="undo"></button>
+          <button class="icon-btn" id="editRedo" aria-label="Rétablir" data-i18n-title="common.redo" data-icon="redo"></button>
+        </div>
+      </header>
+
       <!-- ══════════════ SEARCH ══════════════ -->
       <div class="searchbar" id="searchbar" hidden>
         <div class="search-inner">
@@ -235,102 +246,13 @@
 
         <aside class="inspector" id="inspector">
           <div class="tabs" role="tablist" aria-label="Panneaux">
-            <button class="tab active" data-tab="edit" role="tab" aria-selected="true"><span data-icon="edit"></span><span data-i18n="tab.edit">Éditer</span><span class="tab-badge" id="editCount">0</span></button>
             <button class="tab" data-tab="ocr" role="tab" aria-selected="false"><span data-icon="scan"></span><span data-i18n="tab.ocr">OCR</span></button>
             <button class="tab" data-tab="pages" role="tab" aria-selected="false"><span data-icon="file"></span><span data-i18n="tab.pages">Pages</span></button>
             <button class="tab" data-tab="form" id="tabForm" role="tab" hidden><span data-icon="edit"></span><span data-i18n="tab.form">Formulaire</span></button>
-            <button class="tab" data-tab="text" role="tab" aria-selected="false"><span data-icon="text"></span><span data-i18n="tab.text">Texte</span></button>
+            <button class="tab active" data-tab="text" role="tab" aria-selected="true"><span data-icon="text"></span><span data-i18n="tab.text">Texte</span></button>
           </div>
 
           <div class="panels">
-            <!-- ───── EDIT PANEL ───── -->
-            <section class="panel active" data-panel="edit">
-              <div class="panel-scroll">
-                <div id="editEmpty">
-                  <div class="callout">
-                    <div class="callout-icon" data-icon="edit"></div>
-                    <h3 data-i18n="edit.title">Corriger un texte</h3>
-                    <p data-i18n="edit.desc">Cliquez sur n'importe quelle ligne du document pour la réécrire, ajuster sa police, sa taille ou sa couleur.</p>
-                    <button class="btn soft wide" id="btnAddText"><span data-icon="plus"></span><span data-i18n="edit.addblock">Ajouter un bloc de texte</span></button>
-                  </div>
-                  <div class="panel-section">
-                    <div class="section-head">
-                      <h4 data-i18n="edit.changes">Modifications</h4>
-                      <span class="badge" id="editCountList">0</span>
-                      <button class="linkbtn push" id="btnClearEdits"><span data-i18n="edit.clearall">Tout effacer</span></button>
-                    </div>
-                    <div class="edit-list" id="editList"></div>
-                    <p class="muted small" id="editListEmpty" data-i18n="edit.none">Aucune modification pour l'instant.</p>
-                  </div>
-                </div>
-
-                <div id="editForm" hidden>
-                  <div class="form-head">
-                    <div class="form-head-badges">
-                      <span class="badge" id="efPage">Page 1</span>
-                      <span class="badge outline" id="efSource">Texte PDF</span>
-                      <span class="badge confidence" id="efConfidence" hidden></span>
-                    </div>
-                    <button class="icon-btn tiny" id="efClose" title="Fermer" data-icon="x"></button>
-                  </div>
-
-                  <div class="original" id="efOriginalWrap">
-                    <span data-i18n="edit.original">Texte d'origine</span>
-                    <p id="efOriginal"></p>
-                  </div>
-
-                  <label class="field">
-                    <span data-i18n="edit.newtext">Nouveau texte</span>
-                    <textarea id="efText" rows="3" data-i18n-placeholder="edit.newplaceholder" placeholder="Saisissez le texte…"></textarea>
-                  </label>
-
-                  <div class="field-grid">
-                    <label class="field">
-                      <span data-i18n="edit.font">Police</span>
-                      <select id="efFont">
-                        <option value="Helvetica" data-i18n="edit.fontSans">Sans-serif (Helvetica)</option>
-                        <option value="Times" data-i18n="edit.fontSerif">Serif (Times)</option>
-                        <option value="Courier" data-i18n="edit.fontMono">Monospace (Courier)</option>
-                      </select>
-                    </label>
-                    <label class="field">
-                      <span data-i18n="edit.size">Taille</span>
-                      <input id="efSize" type="number" min="4" max="200" step="0.5" />
-                    </label>
-                  </div>
-
-                  <div class="field-grid three">
-                    <div class="field">
-                      <span data-i18n="edit.style">Style</span>
-                      <div class="style-toggle">
-                        <button id="efBold" class="toggle-btn" title="Gras">B</button>
-                        <button id="efItalic" class="toggle-btn" title="Italique">I</button>
-                      </div>
-                    </div>
-                    <label class="field">
-                      <span data-i18n="edit.textcolor">Texte</span>
-                      <input id="efColor" type="color" />
-                    </label>
-                    <label class="field">
-                      <span data-i18n="edit.bg">Fond</span>
-                      <input id="efBg" type="color" />
-                    </label>
-                  </div>
-
-                  <label class="check">
-                    <input type="checkbox" id="efFit" />
-                    <span data-i18n="edit.fit">Ajuster la taille à la zone</span>
-                  </label>
-
-                  <div class="form-actions">
-                    <button class="btn primary wide" id="efApply"><span data-icon="check"></span><span data-i18n="edit.apply">Valider</span></button>
-                    <button class="btn ghost" id="efReset"><span data-icon="undo"></span><span data-i18n="edit.restore">Rétablir l'original</span></button>
-                  </div>
-                  <p class="muted xsmall" data-i18n="edit.help">Le fond masque le texte d'origine. Choisissez une couleur proche du papier pour un rendu invisible.</p>
-                </div>
-              </div>
-            </section>
-
             <!-- ───── OCR PANEL ───── -->
             <section class="panel" data-panel="ocr" role="tabpanel" aria-label="OCR">
               <div class="panel-scroll">
@@ -454,7 +376,7 @@
               </div>
             </section>
 
-            <section class="panel" data-panel="text" role="tabpanel" aria-label="Texte">
+            <section class="panel active" data-panel="text" role="tabpanel" aria-label="Texte">
               <div class="panel-scroll">
                 <div class="section-head">
                   <h4 data-i18n="text.title">Texte de la page</h4>
@@ -480,6 +402,10 @@
         </aside>
       </div>
     </div>
+
+    <button class="fab" id="btnAddText" type="button" aria-label="Ajouter du texte" data-i18n-title="editor.addText">
+      <span data-icon="plus"></span><span data-i18n="editor.addTextShort">Texte</span>
+    </button>
 
     <div class="drop-overlay" id="dropOverlay" hidden>
       <div class="drop-card">

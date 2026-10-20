@@ -8,10 +8,11 @@ import { readFormFields, fillFormFields } from './forms.js';
 import { findMatch } from './search.js';
 import { createHistory } from './history.js';
 import { createUi } from './ui.js';
+import { createInlineEditor } from './inlineEditor.js';
 import * as Session from './session.js';
 import { buildSampleTextPdf, buildSampleScanPdf } from './samples.js';
 import { icon, hydrateIcons } from './icons.js';
-import { applyLanguage } from './i18n.js';
+import { applyLanguage, t } from './i18n.js';
 import * as U from './utils.js';
 
 const $ = (id) => document.getElementById(id);
@@ -83,29 +84,13 @@ const els = {
   hintText: $('hintText'),
   hintCancel: $('hintCancel'),
   inspector: $('inspector'),
-  editCount: $('editCount'),
-  editCountList: $('editCountList'),
-  editEmpty: $('editEmpty'),
-  editForm: $('editForm'),
   btnAddText: $('btnAddText'),
-  editList: $('editList'),
-  editListEmpty: $('editListEmpty'),
-  btnClearEdits: $('btnClearEdits'),
-  efPage: $('efPage'),
-  efSource: $('efSource'),
-  efClose: $('efClose'),
-  efOriginalWrap: $('efOriginalWrap'),
-  efOriginal: $('efOriginal'),
-  efText: $('efText'),
-  efFont: $('efFont'),
-  efSize: $('efSize'),
-  efBold: $('efBold'),
-  efItalic: $('efItalic'),
-  efColor: $('efColor'),
-  efBg: $('efBg'),
-  efFit: $('efFit'),
-  efApply: $('efApply'),
-  efReset: $('efReset'),
+  editbar: $('editbar'),
+  editDone: $('editDone'),
+  editTitle: $('editTitle'),
+  editUndo: $('editUndo'),
+  editRedo: $('editRedo'),
+  editbarCount: $('editbarCount'),
   ocrLang: $('ocrLang'),
   ocrContrast: $('ocrContrast'),
   ocrDeskew: $('ocrDeskew'),
@@ -198,6 +183,18 @@ const state = {
   formFields: [],
   formValues: {},
 };
+
+/* ─────────────────────── Édition directe sur la page ─────────────────────── */
+
+const inline = createInlineEditor({
+  overlay: els.overlay,
+  getScale: () => state.scale || 1,
+  rectFor: (bbox) => pdfRectToViewportRect(bbox, state.viewport),
+  onChange: () => onInlineChange(),
+  onCommit: () => closeActive(),
+  onDelete: () => deleteActiveEdit(),
+  onDuplicate: () => duplicateActiveEdit(),
+});
 
 /* ─────────────────────────── UI helpers ─────────────────────────── */
 
@@ -293,6 +290,7 @@ window.addEventListener('resize', () => {
 
 async function renderCurrent() {
   if (!state.engine) return;
+  if (state.active) closeActive();
   const token = ++state.renderToken;
   const n = state.pageIndex + 1;
 
@@ -583,13 +581,16 @@ function sampleColorsForBbox(bbox) {
   return { bg, fg: U.rgbToHex(best[0], best[1], best[2]) };
 }
 
-function editSignature(e) {
-  return JSON.stringify([e.text, e.font, e.size, !!e.bold, !!e.italic, e.color, e.bg, e.fit]);
+function clearOverlay() {
+  for (const child of [...els.overlay.children]) {
+    if (child.classList.contains('inline-shell')) continue;
+    child.remove();
+  }
 }
 
 function renderOverlay() {
   if (!state.engine || !state.viewport) return;
-  els.overlay.innerHTML = '';
+  clearOverlay();
   const pageNo = state.pageIndex + 1;
   const vp = state.viewport;
   const lines = editLinesForPage(pageNo);
@@ -623,8 +624,9 @@ function renderOverlay() {
     els.overlay.appendChild(d);
   }
 
-  // Blocs modifiés / ajoutés
+  // Blocs modifiés / ajoutés (le bloc en cours d'édition est rendu par l'éditeur)
   for (const e of pageEdits) {
+    if (e.id === activeId) continue;
     if (!e.bbox || e.bbox.w <= 0) continue;
     const r = pdfRectToViewportRect(e.bbox, vp);
     if (r.width < 0.5 || r.height < 0.5) continue;
@@ -711,60 +713,65 @@ els.overlay.addEventListener('click', async (ev) => {
 
 /* ─────────────────────────── Édition ─────────────────────────── */
 
-function showForm() {
-  els.editEmpty.hidden = true;
-  els.editForm.hidden = false;
-}
+/* ─────────────────────── Édition directe ─────────────────────── */
 
-function hideForm() {
-  els.editForm.hidden = true;
-  els.editEmpty.hidden = false;
-}
-
-function fillForm(e) {
-  const conf = els.efConfidence;
-  if (conf) {
-    if (typeof e.confidence === 'number' && e.source === 'ocr') {
-      conf.hidden = false;
-      conf.textContent = `Confiance ${Math.round(e.confidence)} %`;
-    } else {
-      conf.hidden = true;
-      conf.textContent = '';
-    }
+function showEditingUi() {
+  const e = state.active?.edit;
+  if (!e) return;
+  document.body.classList.add('editing');
+  if (els.editbar) els.editbar.hidden = false;
+  if (els.editTitle) {
+    els.editTitle.textContent = e.kind === 'add' ? t('editbar.addTitle') : t('editbar.title');
   }
-  showForm();
-  els.efPage.textContent = `Page ${e.page}`;
-  els.efSource.textContent = e.kind === 'add' ? 'Nouveau bloc' : e.source === 'ocr' ? 'Bloc OCR' : 'Texte PDF';
-  els.efSource.className = 'badge outline' + (e.source === 'ocr' ? ' warn' : '');
-  els.efOriginalWrap.hidden = e.kind === 'add';
-  els.efOriginal.textContent = e.originalText || '';
-  els.efText.value = e.text || '';
-  els.efFont.value = e.font || 'Helvetica';
-  els.efSize.value = e.size ?? 12;
-  els.efColor.value = normalizeHex(e.color, '#111827');
-  els.efBg.value = normalizeHex(e.bg, '#ffffff');
-  els.efBg.disabled = e.kind === 'add';
-  els.efBold.classList.toggle('active', !!e.bold);
-  els.efItalic.classList.toggle('active', !!e.italic);
-  els.efFit.checked = e.fit !== false;
-  requestAnimationFrame(() => {
-    if (document.activeElement === document.body) {
-      els.efText.focus();
-      els.efText.select();
-    }
-  });
+  updateEditbarCount();
+  updateHistoryButtons();
 }
 
-function normalizeHex(v, fallback) {
-  if (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v)) return v;
-  if (typeof v === 'string' && /^#[0-9a-f]{3}$/i.test(v)) {
-    return `#${v
-      .slice(1)
-      .split('')
-      .map((c) => c + c)
-      .join('')}`;
-  }
-  return fallback;
+function hideEditingUi() {
+  document.body.classList.remove('editing');
+  if (els.editbar) els.editbar.hidden = true;
+}
+
+function updateEditbarCount() {
+  if (!els.editbarCount) return;
+  const n = state.edits.length;
+  els.editbarCount.textContent = String(n);
+  els.editbarCount.hidden = n === 0;
+}
+
+function updateHistoryButtons() {
+  const canUndo = state.history.canUndo();
+  const canRedo = state.history.canRedo();
+  if (els.btnUndo) els.btnUndo.disabled = !canUndo;
+  if (els.btnRedo) els.btnRedo.disabled = !canRedo;
+  if (els.editUndo) els.editUndo.disabled = !canUndo;
+  if (els.editRedo) els.editRedo.disabled = !canRedo;
+}
+
+const refreshTextEcho = U.debounce(() => {
+  updateTextPanel();
+}, 200);
+
+function onInlineChange() {
+  updateEditbarCount();
+  updateExportUi();
+  refreshTextEcho();
+}
+
+function editSignature(e) {
+  return JSON.stringify([
+    e.text,
+    e.font,
+    e.size,
+    !!e.bold,
+    !!e.italic,
+    !!e.underline,
+    e.align || 'left',
+    Number(e.lineHeight) || 1.16,
+    e.color,
+    e.bg,
+    e.fit,
+  ]);
 }
 
 function makeEditFromLine(line, pageNo) {
@@ -783,6 +790,9 @@ function makeEditFromLine(line, pageNo) {
     size: U.clamp(Math.round((line.fontSize || 12) * 2) / 2, 4, 120),
     bold: !!line.bold,
     italic: !!line.italic,
+    underline: false,
+    align: 'left',
+    lineHeight: 1.16,
     color: fg,
     bg,
     fit: false,
@@ -799,13 +809,11 @@ function selectLine(lineId) {
   const edit = makeEditFromLine(line, pageNo);
   state.edits.push(edit);
   state.active = { edit, before, snapshot: { sig: editSignature(edit), data: U.clone(edit) }, isNew: true };
-  fillForm(edit);
   renderOverlay();
+  inline.open(edit, { isNew: true });
+  showEditingUi();
   renderEditList();
   updateExportUi();
-  setTab('edit');
-  openInspectorOnMobile();
-  requestAnimationFrame(() => scrollOverlayBlockIntoView());
 }
 
 function selectEdit(id) {
@@ -818,80 +826,63 @@ function selectEdit(id) {
     snapshot: { sig: editSignature(edit), data: U.clone(edit) },
     isNew: false,
   };
-  fillForm(edit);
   renderOverlay();
+  inline.open(edit, { isNew: false });
+  showEditingUi();
   renderEditList();
-  setTab('edit');
-  openInspectorOnMobile();
-  requestAnimationFrame(() => scrollOverlayBlockIntoView());
-}
-
-function scrollOverlayBlockIntoView() {
-  const el = els.overlay.querySelector('.edit-block.active');
-  el?.scrollIntoView({ block: 'center', inline: 'nearest' });
+  updateExportUi();
 }
 
 function closeActive() {
   const a = state.active;
   if (!a) {
-    hideForm();
+    hideEditingUi();
     return;
   }
-  const dirty = editSignature(a.edit) !== a.snapshot.sig;
-  if (!dirty && a.isNew) {
-    state.edits = state.edits.filter((x) => x.id !== a.edit.id);
-  } else if (dirty && a.before) {
+  inline.sync();
+  const changed = editSignature(a.edit) !== a.snapshot.sig;
+  const hasText = String(a.edit.text || '').trim().length > 0;
+
+  if (a.isNew) {
+    if (!hasText) {
+      state.edits = state.edits.filter((x) => x.id !== a.edit.id);
+    } else if (changed) {
+      state.history.push(a.before);
+    }
+  } else if (changed) {
     state.history.push(a.before);
-    updateHistoryButtons();
   }
+
   state.active = null;
-  hideForm();
+  inline.close();
+  hideEditingUi();
   renderOverlay();
   renderEditList();
   updateExportUi();
   updateTextPanel();
+  updateHistoryButtons();
+  scheduleAutosave();
 }
 
-const refreshFormEcho = U.debounce(() => {
-  renderEditList();
-  updateTextPanel();
-}, 180);
-
-function onFormInput() {
-  const a = state.active;
-  if (!a) return;
-  const e = a.edit;
-  e.text = els.efText.value;
-  e.font = els.efFont.value;
-  const s = parseFloat(els.efSize.value);
-  if (Number.isFinite(s)) e.size = U.clamp(s, 4, 200);
-  e.bold = els.efBold.classList.contains('active');
-  e.italic = els.efItalic.classList.contains('active');
-  e.color = els.efColor.value;
-  if (e.kind !== 'add') e.bg = els.efBg.value;
-  e.fit = els.efFit.checked;
-  renderOverlay();
-  refreshFormEcho();
-}
-
-function resetActiveEdit() {
+function deleteActiveEdit() {
   const a = state.active;
   if (!a) return;
   const removed = a.edit;
-  const wasNew = a.isNew;
-  if (!wasNew) {
-    state.history.push(U.clone(state.edits));
+  if (!a.isNew) {
+    state.history.push(a.before);
     updateHistoryButtons();
   }
   state.edits = state.edits.filter((x) => x.id !== removed.id);
   state.active = null;
-  hideForm();
+  inline.close();
+  hideEditingUi();
   renderOverlay();
   renderEditList();
   updateExportUi();
   updateTextPanel();
-  if (!wasNew) {
-    toast("Texte d'origine rétabli.", 'info', {
+  scheduleAutosave();
+  if (!a.isNew) {
+    toast('Bloc supprimé.', 'info', {
       action: 'Annuler',
       onAction: () => {
         state.edits.push(removed);
@@ -904,15 +895,32 @@ function resetActiveEdit() {
   }
 }
 
+function duplicateActiveEdit() {
+  const a = state.active;
+  if (!a) return;
+  inline.sync();
+  const copy = U.clone(a.edit);
+  copy.id = U.uid('edit');
+  copy.kind = 'add';
+  copy.lineId = null;
+  copy.source = 'add';
+  copy.bbox = { ...copy.bbox, x: copy.bbox.x + 14, y: copy.bbox.y - 14 };
+  copy.baseline = (copy.baseline ?? copy.bbox.y) - 14;
+  copy.bg = null;
+  state.history.push(U.clone(state.edits));
+  state.edits.push(copy);
+  closeActive();
+  selectEdit(copy.id);
+  scheduleAutosave();
+}
+
 function startAddText() {
   if (!state.engine) return;
   closeActive();
   state.addMode = true;
   els.stage.classList.add('placing');
   updateHint();
-  setTab('edit');
-  openInspectorOnMobile();
-  toast('Cliquez sur la page à l’endroit où placer le texte.', 'info', { duration: 3000 });
+  toast('Touchez la page à l’endroit où placer le texte.', 'info', { duration: 3000 });
 }
 
 function cancelAddMode() {
@@ -931,7 +939,7 @@ function placeTextAt(cssX, cssY) {
     kind: 'add',
     lineId: null,
     source: 'add',
-    bbox: { x, y: y - size * 0.26, w: 120, h: size * 1.14 },
+    bbox: { x, y: y - size * 0.26, w: 140, h: size * 1.14 },
     baseline: y,
     originalText: '',
     text: '',
@@ -939,6 +947,9 @@ function placeTextAt(cssX, cssY) {
     size,
     bold: false,
     italic: false,
+    underline: false,
+    align: 'left',
+    lineHeight: 1.16,
     color: '#111827',
     bg: null,
     fit: false,
@@ -947,23 +958,17 @@ function placeTextAt(cssX, cssY) {
   state.edits.push(edit);
   state.active = { edit, before, snapshot: { sig: editSignature(edit), data: U.clone(edit) }, isNew: true };
   cancelAddMode();
-  fillForm(edit);
-  els.efText.focus();
   renderOverlay();
+  inline.open(edit, { isNew: true });
+  showEditingUi();
   renderEditList();
   updateExportUi();
-  setTab('edit');
-}
-
-function updateHistoryButtons() {
-  if (els.btnUndo) els.btnUndo.disabled = !state.history.canUndo();
-  if (els.btnRedo) els.btnRedo.disabled = !state.history.canRedo();
 }
 
 /** Remplace l'état des modifications (undo/redo, restauration de session). */
 function applyEditsSnapshot(snapshot, { autosave = true } = {}) {
+  if (state.active) closeActive();
   state.active = null;
-  hideForm();
   state.edits = U.clone(snapshot);
   renderOverlay();
   renderEditList();
@@ -1094,30 +1099,7 @@ async function maybeRestoreSession() {
 
 function renderEditList() {
   scheduleAutosave();
-  const n = state.edits.length;
-  els.editCount.textContent = n;
-  els.editCount.dataset.zero = n ? '0' : '1';
-  els.editCountList.textContent = n;
-  els.btnClearEdits.disabled = !n;
-  els.btnClearEdits.style.opacity = n ? '' : '0.45';
-  els.editListEmpty.hidden = n > 0;
-  if (!n) {
-    els.editList.innerHTML = '';
-    return;
-  }
-  const sorted = [...state.edits].sort((a, b) => a.page - b.page || b.bbox.y - a.bbox.y);
-  els.editList.innerHTML = sorted
-    .map((e) => {
-      const preview = (e.text || '').replace(/\s+/g, ' ').trim() || '(texte supprimé)';
-      const original = (e.originalText || '').replace(/\s+/g, ' ').trim();
-      return `<div class="edit-item" data-edit-id="${e.id}" role="button" tabindex="0">
-        <span class="edit-item-page">p.${e.page}</span>
-        <span class="edit-item-text">${U.escapeHtml(preview.slice(0, 70))}</span>
-        ${original ? `<span class="edit-item-original">${U.escapeHtml(original.slice(0, 40))}</span>` : ''}
-        <button class="icon-btn tiny" data-del-id="${e.id}" title="Supprimer cette modification">${icon('trash', 14)}</button>
-      </div>`;
-    })
-    .join('');
+  updateEditbarCount();
 }
 
 function deleteEditById(id) {
@@ -1125,7 +1107,8 @@ function deleteEditById(id) {
   if (!removed) return;
   if (state.active?.edit?.id === id) {
     state.active = null;
-    hideForm();
+    inline.close();
+    hideEditingUi();
   }
   state.history.push(U.clone(state.edits));
   updateHistoryButtons();
@@ -1152,7 +1135,8 @@ function clearAllEdits() {
   state.history.push(U.clone(state.edits));
   updateHistoryButtons();
   state.active = null;
-  hideForm();
+  inline.close();
+  hideEditingUi();
   state.edits = [];
   renderOverlay();
   renderEditList();
@@ -1732,10 +1716,14 @@ async function openPdfBytes(bytes, name, password = '') {
     els.thumbCount.textContent = String(state.numPages);
     updateFileChip();
     updatePageNav();
-    hideForm();
+    inline.close();
+    hideEditingUi();
+    state.active = null;
+    state.addMode = false;
+    els.stage.classList.remove('placing');
     renderEditList();
     updateExportUi();
-    setTab('edit');
+    setTab('text');
     buildThumbnails(token);
     await renderCurrent();
     els.canvasScroll.scrollTo({ top: 0, left: 0 });
@@ -2400,48 +2388,30 @@ function bindEvents() {
   });
   els.btnInspectorToggle.addEventListener('click', () => els.inspector.classList.toggle('open'));
 
-  // Édition
-  els.btnAddText.addEventListener('click', startAddText);
-  els.btnAddTextTop.addEventListener('click', startAddText);
+  // Édition directe sur la page
+  els.btnAddText?.addEventListener('click', startAddText);
+  els.btnAddTextTop?.addEventListener('click', startAddText);
   els.hintCancel.addEventListener('click', cancelAddMode);
-  els.editList.addEventListener('click', async (e) => {
-    const del = e.target.closest('[data-del-id]');
-    if (del) {
-      e.stopPropagation();
-      deleteEditById(del.dataset.delId);
-      return;
-    }
-    const item = e.target.closest('[data-edit-id]');
-    if (!item) return;
-    const edit = state.edits.find((x) => x.id === item.dataset.editId);
-    if (!edit) return;
-    if (edit.page !== state.pageIndex + 1) await goToPage(edit.page);
-    selectEdit(edit.id);
+  els.editDone?.addEventListener('click', () => closeActive());
+  els.editUndo?.addEventListener('click', () => {
+    closeActive();
+    undoEdits();
   });
-  els.btnClearEdits.addEventListener('click', clearAllEdits);
-  els.efText.addEventListener('input', onFormInput);
-  els.efFont.addEventListener('change', onFormInput);
-  els.efSize.addEventListener('input', onFormInput);
-  els.efColor.addEventListener('input', onFormInput);
-  els.efBg.addEventListener('input', onFormInput);
-  els.efFit.addEventListener('change', onFormInput);
-  els.efBold.addEventListener('click', () => {
-    els.efBold.classList.toggle('active');
-    onFormInput();
+  els.editRedo?.addEventListener('click', () => {
+    closeActive();
+    redoEdits();
   });
-  els.efItalic.addEventListener('click', () => {
-    els.efItalic.classList.toggle('active');
-    onFormInput();
-  });
-  els.efApply.addEventListener('click', () => closeActive());
-  els.efClose.addEventListener('click', () => closeActive());
-  els.efReset.addEventListener('click', resetActiveEdit);
-  els.efText.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
+
+  // Toucher en dehors du texte valide la modification.
+  document.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (!state.active) return;
+      if (e.target.closest('.inline-shell, #formatbar, #editbar, dialog, .popover')) return;
       closeActive();
-    }
-  });
+    },
+    true
+  );
 
   // OCR
   els.btnOcrPage.addEventListener('click', () => {
@@ -2718,7 +2688,7 @@ function init() {
   els.btnExport.disabled = true;
   updatePageNav();
   updateZoomLabel();
-  hideForm();
+  hideEditingUi();
   updateOcrButtons();
   renderEditList();
   updateHistoryButtons();

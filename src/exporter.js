@@ -331,7 +331,7 @@ export async function exportPdf({
       const file = fontFileFor('arabic', bold, false);
       return { font: await getUnicodeFont('arabic', bold, false), unicode: true, file };
     }
-    if (!isWinAnsiText(run.text)) {
+    if (family === 'Noto Sans' || !isWinAnsiText(run.text)) {
       const file = fontFileFor('sans', bold, italic);
       return { font: await getUnicodeFont('sans', bold, italic), unicode: true, file };
     }
@@ -459,10 +459,16 @@ export async function exportPdf({
         size = Math.max(4, size * factor);
       }
 
-      const lineHeight = size * 1.16;
+      const lineHeight =
+        size * (Number.isFinite(Number(e.lineHeight)) && Number(e.lineHeight) > 0 ? Number(e.lineHeight) : 1.16);
+      const align = e.align === 'center' || e.align === 'right' ? e.align : 'left';
       let y = e.baseline ?? e.bbox.y + e.bbox.h * 0.24;
       for (const runs of prepared) {
+        const total = runs.reduce((acc, r) => acc + r.font.widthOfTextAtSize(r.text, size), 0);
         let x = e.bbox.x + 0.5;
+        if (align === 'center') x = e.bbox.x + (e.bbox.w - total) / 2;
+        else if (align === 'right') x = e.bbox.x + e.bbox.w - total;
+        const startX = x;
         for (const run of runs) {
           if (!run.text.trim()) {
             x += run.font.widthOfTextAtSize(run.text, size);
@@ -476,6 +482,14 @@ export async function exportPdf({
             color: rgb(color.r, color.g, color.b),
           });
           x += run.font.widthOfTextAtSize(run.text, size);
+        }
+        if (e.underline && total > 0.2) {
+          page.drawLine({
+            start: { x: startX, y: y - size * 0.14 },
+            end: { x: startX + total, y: y - size * 0.14 },
+            thickness: Math.max(0.5, size * 0.055),
+            color: rgb(color.r, color.g, color.b),
+          });
         }
         y -= lineHeight;
       }
