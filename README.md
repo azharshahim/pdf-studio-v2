@@ -23,6 +23,10 @@ entièrement dans le navigateur.
 | --- | --- | --- |
 | ![Document sur ordinateur](docs/captures/document-ordinateur.png) | ![Outils sur ordinateur](docs/captures/outils-ordinateur.png) | ![Thème sombre](docs/captures/accueil-sombre-mobile.png) |
 
+| Tablette — accueil | Tablette — outils |
+| --- | --- |
+| ![Accueil sur tablette](docs/captures/accueil-tablette.png) | ![Outils sur tablette](docs/captures/outils-tablette.png) |
+
 Le PDF exporté, rouvert dans l'application : le tampon, la date et le surlignage font partie du
 document, ce ne sont pas de simples repères d'écran.
 
