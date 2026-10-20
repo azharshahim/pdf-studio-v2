@@ -3349,6 +3349,19 @@ body.sheet-open .toasts {
 .home-demos .demo-sep {
   color: var(--muted-2);
 }
+@media (max-width: 560px) {
+  .home-demos {
+    gap: 2px 0;
+  }
+  .home-demos .linkbtn {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+    text-align: left;
+  }
+  .home-demos .demo-sep {
+    display: none;
+  }
+}
 
 @media (max-width: 900px) {
   .tool-card {
@@ -3590,7 +3603,7 @@ body.on-screen #btnOpen {
 }
 .annobar-row {
   display: flex;
-  gap: 2px;
+  gap: 4px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -3603,15 +3616,22 @@ body.on-screen #btnOpen {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  width: 46px;
-  height: 46px;
+  gap: 3px;
+  min-width: 46px;
+  height: 48px;
+  padding: 4px 8px;
   border: none;
   border-radius: 12px;
   background: transparent;
   color: var(--ink-2);
   font: 600 9.5px/1.1 var(--font);
   cursor: pointer;
+}
+.anno-btn > span {
+  font-size: 10px;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
 }
 .anno-btn.active {
   background: var(--accent-soft);
@@ -4158,8 +4178,12 @@ body.editing .annobar {
     min-height: 38px;
   }
   .anno-btn {
-    width: 48px;
-    height: 48px;
+    min-width: 48px;
+    height: 52px;
+    padding: 4px 9px;
+  }
+  .anno-btn > span {
+    font-size: 10.5px;
   }
   .sheet-row {
     min-height: 58px;
@@ -4213,15 +4237,3 @@ body.editing .annobar {
   }
 }
 
-
-/* Lien de démonstration : bloc sur mobile, texte simple sur ordinateur */
-.home-demos {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.home-demos .linkbtn {
-  min-height: 34px;
-  font-size: 12.5px;
-}
