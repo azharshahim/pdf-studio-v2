@@ -108,3 +108,23 @@ export function parsePageRanges(input, maxPage) {
   }
   return [...new Set(result)].sort((a, b) => a - b);
 }
+
+/**
+ * Réordonne les pages selon `order` (liste de numéros d'origine, 1-indexée).
+ * Les pages absentes de la liste sont conservées à la fin.
+ */
+export async function reorderPages(bytes, order) {
+  const { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef } = await loadLib();
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const count = doc.getPageCount();
+  const clean = order.filter((n) => Number.isInteger(n) && n >= 1 && n <= count);
+  for (let n = 1; n <= count; n++) if (!clean.includes(n)) clean.push(n);
+  const pagesNode = doc.catalog.lookup(PDFName.of('Pages'), PDFDict);
+  const kids = pagesNode.lookup(PDFName.of('Kids'), PDFArray);
+  if (kids.size() !== count) throw new Error('Structure de pages non plate');
+  const refs = kids.asArray().slice();
+  const next = clean.map((n) => refs[n - 1]);
+  kids.asArray().splice(0, kids.size(), ...next);
+  void PDFRef;
+  return doc.save();
+}

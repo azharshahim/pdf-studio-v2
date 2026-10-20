@@ -17,6 +17,14 @@ import * as U from './utils.js';
 import { initShell, routeTo, openSheet, closeSheet, isSheetOpen, isMobile, renderTools } from './shell.js';
 import { createMarkup, HIGHLIGHT_COLORS, STAMP_PRESETS } from './markup.js';
 import {
+  renderPagesGrid,
+  estimateCompression,
+  COMPRESS_LEVELS,
+  WATERMARK_PRESETS,
+  toolHeader,
+  progressMarkup,
+} from './tools.js';
+import {
   createSignaturePad,
   typedSignature,
   removeLightBackground,
@@ -3039,6 +3047,357 @@ function insertToday() {
   markup.select?.(obj.id);
 }
 
+/* ─────────────── Zoom de vignette pour la grille de pages ─────────────── */
+
+async function pageThumbDataUrl(n) {
+  const canvas = document.createElement('canvas');
+  try {
+    await state.engine.renderToCanvas(n, canvas, 0.55);
+    return canvas.toDataURL('image/jpeg', 0.7);
+  } catch {
+    return null;
+  }
+}
+
+/* ─────────────────────────── Grille de pages ─────────────────────────── */
+
+function openPagesGridTool() {
+  routeTo('doc');
+  if (!state.engine) return;
+  const body = openSheet({ title: t('tool.pages'), html: '<div id="pagesGridHost"></div>', size: 'full' });
+  if (!body) return;
+  const host = body.querySelector('#pagesGridHost');
+  renderPagesGrid(host, {
+    numPages: state.numPages,
+    thumbFor: pageThumbDataUrl,
+    onSelect: (n, withMenu) => {
+      if (!withMenu) {
+        goToPage(n);
+        closeSheet();
+        return;
+      }
+      openPageActions(n);
+    },
+    onReorder: async (order) => {
+      const identity = order.every((value, i) => value === i + 1);
+      if (identity) return;
+      try {
+        pushLoading(t('pagesGrid.reordering'));
+        const { reorderPages } = await import('./pageOps.js');
+        if (typeof reorderPages === 'function') {
+          const bytes = await reorderPages(state.bytes, order);
+          await openPdfBytes(bytes, state.fileName);
+          closeSheet();
+        } else {
+          toast(t('pagesGrid.manual'), 'info');
+        }
+      } catch (err) {
+        console.error(err);
+        toast(t('pagesGrid.failed'), 'error');
+      } finally {
+        popLoading();
+      }
+    },
+  });
+}
+
+function openPageActions(n) {
+  const body = openSheet({
+    title: t('pagesGrid.page', { n }),
+    html: `<div class="sheet-list">
+      <button class="sheet-row" data-page-act="rotate" type="button"><span class="sheet-row-icon">${icon('rotate', 18)}</span><span class="sheet-row-text"><strong>${t('pagesGrid.rotate')}</strong><span>${t('pagesGrid.rotateHint')}</span></span></button>
+      <button class="sheet-row" data-page-act="left" type="button"><span class="sheet-row-icon">${icon('arrowLeft', 18)}</span><span class="sheet-row-text"><strong>${t('pagesGrid.moveLeft')}</strong></span></button>
+      <button class="sheet-row" data-page-act="right" type="button"><span class="sheet-row-icon">${icon('arrowRight', 18)}</span><span class="sheet-row-text"><strong>${t('pagesGrid.moveRight')}</strong></span></button>
+      <button class="sheet-row" data-page-act="duplicate" type="button"><span class="sheet-row-icon">${icon('copy', 18)}</span><span class="sheet-row-text"><strong>${t('pagesGrid.duplicate')}</strong></span></button>
+      <button class="sheet-row" data-page-act="blank" type="button"><span class="sheet-row-icon">${icon('plus', 18)}</span><span class="sheet-row-text"><strong>${t('pagesGrid.blank')}</strong></span></button>
+      <button class="sheet-row" data-page-act="extract" type="button"><span class="sheet-row-icon">${icon('download', 18)}</span><span class="sheet-row-text"><strong>${t('pagesGrid.extract')}</strong></span></button>
+      <button class="sheet-row danger" data-page-act="delete" type="button"><span class="sheet-row-icon">${icon('trash', 18)}</span><span class="sheet-row-text"><strong>${t('pagesGrid.delete')}</strong></span></button>
+    </div>`,
+  });
+  if (!body) return;
+  body.querySelectorAll('[data-page-act]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const act = btn.dataset.pageAct;
+      closeSheet();
+      await runPageAction(act, n);
+      if (act !== 'extract') openPagesGridTool();
+    });
+  });
+}
+
+async function runPageAction(act, n) {
+  const current = n;
+  try {
+    if (act === 'rotate') {
+      await applyPageOp(t('pagesGrid.rotating'), () => PageOps.rotatePage(state.bytes, current, 90), current);
+    } else if (act === 'left' && current > 1) {
+      await applyPageOp(t('pagesGrid.moving'), () => PageOps.movePage(state.bytes, current, current - 1), current - 1);
+    } else if (act === 'right' && current < state.numPages) {
+      await applyPageOp(t('pagesGrid.moving'), () => PageOps.movePage(state.bytes, current, current + 1), current + 1);
+    } else if (act === 'delete') {
+      await applyPageOp(t('pagesGrid.deleting'), () => PageOps.deletePage(state.bytes, current), Math.min(current, state.numPages - 1) || 1);
+    } else if (act === 'blank') {
+      await applyPageOp(t('pagesGrid.inserting'), () => PageOps.insertBlankPage(state.bytes, current + 1), current + 1);
+    } else if (act === 'duplicate') {
+      await applyPageOp(t('pagesGrid.duplicating'), async () => {
+        const { PDFDocument } = await import('pdf-lib');
+        const src = await PDFDocument.load(state.bytes, { ignoreEncryption: true });
+        const out = await PDFDocument.load(state.bytes, { ignoreEncryption: true });
+        const [copy] = await out.copyPages(src, [current - 1]);
+        out.insertPage(current, copy);
+        return out.save();
+      }, current + 1);
+    } else if (act === 'extract') {
+      const { extractPages } = await import('./pageOps.js');
+      const bytes = await extractPages(state.bytes, [current]);
+      const name = `${U.baseName(state.fileName)}-page-${current}.pdf`;
+      U.downloadBlob(new Blob([bytes], { type: 'application/pdf' }), name);
+      toast(t('msg.extracted', { n: 1, name }), 'success');
+    }
+  } catch (err) {
+    console.error(err);
+    toast(t('msg.opFailed', { msg: err?.message || err }), 'error');
+  }
+}
+
+/* ─────────────────────────── OCR en un geste ─────────────────────────── */
+
+function openOcrTool() {
+  routeTo('doc');
+  if (!state.engine) return;
+  const body = openSheet({
+    title: t('tool.ocr'),
+    html: `${toolHeader('scan', t('ocr.oneGesture'), t('ocr.oneGestureHint'))}
+      <div class="btn-row">
+        <button class="btn primary" id="ocrOne" type="button">${icon('sparkle', 16)}<span>${t('ocr.makeEditable')}</span></button>
+      </div>
+      <div id="ocrOneProgress" hidden>${progressMarkup(t('ocr.init'))}</div>
+      <div class="ocr-langs-mini">
+        <span class="muted small">${t('ocr.langs')}</span>
+        <span class="badge" id="ocrDetected">${t('ocr.auto')}</span>
+      </div>`,
+  });
+  if (!body) return;
+  const langs = [...document.querySelectorAll('#ocrLang input:checked')].map((i) => i.value);
+  const detected = body.querySelector('#ocrDetected');
+  if (detected && langs.length) detected.textContent = langs.join(' · ');
+  body.querySelector('#ocrOne')?.addEventListener('click', async () => {
+    const progress = body.querySelector('#ocrOneProgress');
+    const fill = body.querySelector('[data-progress]');
+    const label = body.querySelector('[data-progress-label]');
+    progress.hidden = false;
+    closeSheet();
+    try {
+      await runOcr([state.pageIndex + 1], {
+        onProgress: (ratio, text) => {
+          if (fill) fill.style.width = `${Math.round(ratio * 100)}%`;
+          if (label && text) label.textContent = text;
+        },
+      });
+      toast(t('ocr.doneEditable'), 'success', { duration: 4000 });
+    } catch (err) {
+      console.error(err);
+      toast(t('msg.opFailed', { msg: err?.message || err }), 'error');
+    }
+  });
+}
+
+/* ─────────────────────────── Compression ─────────────────────────── */
+
+async function openCompressTool() {
+  routeTo('doc');
+  if (!state.engine) {
+    toast(t('tool.needDoc'), 'warn');
+    els.fileInput.click();
+    return;
+  }
+  const sourceSize = state.bytes?.byteLength || 0;
+  const rows = COMPRESS_LEVELS.map(
+    (level) => `<button class="compress-row" data-compress="${level.id}" type="button">
+      <span class="compress-name">${t(level.label)}</span>
+      <span class="compress-size" data-compress-size="${level.id}">…</span>
+    </button>`,
+  ).join('');
+  const body = openSheet({
+    title: t('tool.compress'),
+    html: `${toolHeader('compress', t('compress.title'), t('compress.hint'))}
+      <div class="compress-source">${t('compress.source', { size: U.formatBytes(sourceSize) })}</div>
+      <div class="compress-list">${rows}</div>
+      <p class="muted xsmall">${t('compress.note')}</p>`,
+  });
+  if (!body) return;
+  for (const level of COMPRESS_LEVELS) {
+    try {
+      const size = await estimateCompression(state.engine, level, state.numPages);
+      const el = body.querySelector(`[data-compress-size="${level.id}"]`);
+      if (el) el.textContent = `≈ ${U.formatBytes(size)}`;
+    } catch {
+      const el = body.querySelector(`[data-compress-size="${level.id}"]`);
+      if (el) el.textContent = '—';
+    }
+  }
+  body.querySelectorAll('[data-compress]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const level = COMPRESS_LEVELS.find((l) => l.id === btn.dataset.compress);
+      closeSheet();
+      await compressDocument(level);
+    });
+  });
+}
+
+async function compressDocument(level) {
+  pushLoading(t('compress.working'));
+  try {
+    const { PDFDocument } = await import('pdf-lib');
+    const doc = await PDFDocument.create();
+    for (let n = 1; n <= state.numPages; n++) {
+      const canvas = document.createElement('canvas');
+      await state.engine.renderToCanvas(n, canvas, level.scale);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', level.quality));
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const img = await doc.embedJpg(bytes);
+      const size = await state.engine.getPageSize(n);
+      const page = doc.addPage([size.width, size.height]);
+      page.drawImage(img, { x: 0, y: 0, width: size.width, height: size.height });
+    }
+    const out = await doc.save({ useObjectStreams: true });
+    const name = `${U.baseName(state.fileName)}-compresse.pdf`;
+    U.downloadBlob(new Blob([out], { type: 'application/pdf' }), name);
+    toast(t('compress.done', { before: U.formatBytes(state.bytes.byteLength), after: U.formatBytes(out.byteLength) }), 'success', { duration: 6000 });
+  } catch (err) {
+    console.error(err);
+    toast(t('msg.opFailed', { msg: err?.message || err }), 'error');
+  } finally {
+    popLoading();
+  }
+}
+
+/* ─────────────────────────── Protection / filigrane ─────────────────────────── */
+
+function openProtectTool() {
+  routeTo('doc');
+  if (!state.engine) {
+    toast(t('tool.needDoc'), 'warn');
+    els.fileInput.click();
+    return;
+  }
+  const body = openSheet({
+    title: t('tool.protect'),
+    html: `${toolHeader('lock', t('protect.title'), t('protect.hint'))}
+      <div class="field">
+        <span>${t('protect.watermark')}</span>
+        <input id="watermarkText" placeholder="${t('protect.watermarkPlaceholder')}" value="${WATERMARK_PRESETS[0]}" />
+      </div>
+      <div class="chip-row">
+        ${WATERMARK_PRESETS.map((w) => `<button class="chip" data-watermark="${w}" type="button">${w}</button>`).join('')}
+      </div>
+      <label class="field-inline">
+        <span>${t('protect.opacity')}</span>
+        <input type="range" id="watermarkOpacity" min="6" max="60" value="18" />
+      </label>
+      <button class="btn primary wide" id="applyWatermark" type="button">${icon('shield', 16)}<span>${t('protect.apply')}</span></button>
+      <div class="callout warn small">
+        <p>${t('protect.passwordNote')}</p>
+        <label class="check compact"><input type="checkbox" id="lockApp" /><span>${t('protect.lockApp')}</span></label>
+      </div>`,
+  });
+  if (!body) return;
+  body.querySelectorAll('[data-watermark]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      body.querySelector('#watermarkText').value = chip.dataset.watermark;
+    });
+  });
+  body.querySelector('#applyWatermark')?.addEventListener('click', async () => {
+    const text = body.querySelector('#watermarkText')?.value?.trim();
+    const opacity = Number(body.querySelector('#watermarkOpacity')?.value || 18) / 100;
+    if (!text) return;
+    closeSheet();
+    await applyWatermark(text, opacity);
+  });
+  body.querySelector('#lockApp')?.addEventListener('change', (ev) => {
+    state.lockApp = ev.target.checked;
+    scheduleAutosave();
+    toast(ev.target.checked ? t('protect.locked') : t('protect.unlocked'), 'info');
+  });
+}
+
+async function applyWatermark(text, opacity) {
+  pushLoading(t('protect.working'));
+  try {
+    const { PDFDocument, StandardFonts, rgb, degrees } = await import('pdf-lib');
+    const doc = await PDFDocument.load(state.bytes, { ignoreEncryption: true });
+    const font = await doc.embedFont(StandardFonts.HelveticaBold);
+    for (const page of doc.getPages()) {
+      const { width, height } = page.getSize();
+      const size = Math.max(28, Math.min(width, height) / 9);
+      page.drawText(text, {
+        x: width * 0.12,
+        y: height * 0.42,
+        size,
+        font,
+        color: rgb(0.35, 0.37, 0.45),
+        opacity,
+        rotate: degrees(35),
+      });
+    }
+    const out = await doc.save();
+    const name = `${U.baseName(state.fileName)}-protege.pdf`;
+    U.downloadBlob(new Blob([out], { type: 'application/pdf' }), name);
+    toast(t('protect.done'), 'success', { duration: 5000 });
+  } catch (err) {
+    console.error(err);
+    toast(t('msg.opFailed', { msg: err?.message || err }), 'error');
+  } finally {
+    popLoading();
+  }
+}
+
+/* ─────────────────────────── Conversion ─────────────────────────── */
+
+function openConvertTool() {
+  routeTo('doc');
+  if (!state.engine) {
+    toast(t('tool.needDoc'), 'warn');
+    els.fileInput.click();
+    return;
+  }
+  const body = openSheet({
+    title: t('tool.convert'),
+    html: `${toolHeader('convert', t('convert.title'), t('convert.hint'))}
+      <div class="sheet-list">
+        <button class="sheet-row" data-convert="png" type="button"><span class="sheet-row-icon">${icon('image', 18)}</span><span class="sheet-row-text"><strong>${t('convert.png')}</strong><span>${t('convert.pngHint')}</span></span></button>
+        <button class="sheet-row" data-convert="jpg" type="button"><span class="sheet-row-icon">${icon('image', 18)}</span><span class="sheet-row-text"><strong>${t('convert.jpg')}</strong><span>${t('convert.jpgHint')}</span></span></button>
+        <button class="sheet-row" data-convert="txt" type="button"><span class="sheet-row-icon">${icon('fileText', 18)}</span><span class="sheet-row-text"><strong>${t('convert.txt')}</strong><span>${t('convert.txtHint')}</span></span></button>
+        <button class="sheet-row" data-convert="pdf" type="button"><span class="sheet-row-icon">${icon('file', 18)}</span><span class="sheet-row-text"><strong>${t('convert.pdf')}</strong><span>${t('convert.pdfHint')}</span></span></button>
+      </div>`,
+  });
+  if (!body) return;
+  body.querySelectorAll('[data-convert]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const kind = btn.dataset.convert;
+      closeSheet();
+      if (kind === 'txt') return handleExportText();
+      if (kind === 'pdf') return handleSave();
+      pushLoading(t('convert.working'));
+      try {
+        for (let n = 1; n <= state.numPages; n++) {
+          const canvas = document.createElement('canvas');
+          await state.engine.renderToCanvas(n, canvas, 2);
+          const type = kind === 'jpg' ? 'image/jpeg' : 'image/png';
+          const blob = await new Promise((resolve) => canvas.toBlob(resolve, type, 0.92));
+          U.downloadBlob(blob, `${U.baseName(state.fileName)}-page-${n}.${kind}`);
+        }
+        toast(t('convert.done', { n: state.numPages }), 'success');
+      } catch (err) {
+        console.error(err);
+        toast(t('msg.opFailed', { msg: err?.message || err }), 'error');
+      } finally {
+        popLoading();
+      }
+    });
+  });
+}
+
 /* ───────────────────────── Écran Fichiers (IndexedDB) ───────────────────────── */
 
 let filesCache = [];
@@ -3138,9 +3497,16 @@ async function renderFilesScreen() {
 
 /** Routes des outils : ouvre le document si nécessaire, puis l'outil. */
 async function openTool(id) {
-  if (id === 'compress' || id === 'protect' || id === 'convert') {
-    openDocumentToolsSheet(id);
-    return;
+  if (id === 'compress') return openCompressTool();
+  if (id === 'protect') return openProtectTool();
+  if (id === 'convert') return openConvertTool();
+  if (id === 'pages') {
+    routeTo('doc');
+    return openPagesGridTool();
+  }
+  if (id === 'ocr') {
+    routeTo('doc');
+    return openOcrTool();
   }
   if (!state.engine) {
     toast(t('tool.needDoc'), 'warn', { duration: 4200 });
@@ -3156,14 +3522,6 @@ async function openTool(id) {
   if (id === 'annotate') return openAnnotate();
   if (id === 'sign') return openSignTool();
   if (id === 'stamp') return openStampTool();
-  if (id === 'pages') {
-    routeTo('doc');
-    return openPanelsSheet('pages');
-  }
-  if (id === 'ocr') {
-    routeTo('doc');
-    return openPanelsSheet('ocr');
-  }
 }
 
 const PANEL_LABELS = { pages: 'tab.pages', ocr: 'tab.ocr', form: 'tab.form', text: 'tab.text' };
