@@ -126,6 +126,64 @@ export function renderTools() {
   if (quick) quick.innerHTML = TOOLS.slice(0, 4).map((tool) => toolCard(tool, true)).join('');
 }
 
+/* ─────────────── Aide au premier lancement (3 écrans) ─────────────── */
+
+const ONBOARD_KEY = 'pdf-studio-onboarded';
+
+const ONBOARD_STEPS = [
+  { icon: 'edit', title: 'onboard.1title', text: 'onboard.1text' },
+  { icon: 'highlight', title: 'onboard.2title', text: 'onboard.2text' },
+  { icon: 'save', title: 'onboard.3title', text: 'onboard.3text' },
+];
+
+export function showOnboarding() {
+  try {
+    if (localStorage.getItem(ONBOARD_KEY)) return;
+  } catch {
+    return;
+  }
+  const body = openSheet({
+    title: t('onboard.title'),
+    html: `<div class="onboard">
+      ${ONBOARD_STEPS.map(
+        (step, i) => `<div class="onboard-step ${i === 0 ? 'active' : ''}" data-step="${i}">
+          <span class="onboard-icon">${icon(step.icon, 26)}</span>
+          <h3>${t(step.title)}</h3>
+          <p>${t(step.text)}</p>
+        </div>`,
+      ).join('')}
+      <div class="onboard-dots">
+        ${ONBOARD_STEPS.map((_, i) => `<span class="dot ${i === 0 ? 'active' : ''}" data-dot="${i}"></span>`).join('')}
+      </div>
+      <div class="onboard-actions">
+        <button class="linkbtn" id="onboardSkip" type="button">${t('onboard.skip')}</button>
+        <button class="btn primary" id="onboardNext" type="button">${t('onboard.next')}</button>
+      </div>
+    </div>`,
+  });
+  if (!body) return;
+  let index = 0;
+  const paint = () => {
+    body.querySelectorAll('.onboard-step').forEach((el, i) => el.classList.toggle('active', i === index));
+    body.querySelectorAll('[data-dot]').forEach((el, i) => el.classList.toggle('active', i === index));
+    body.querySelector('#onboardNext').textContent = index === ONBOARD_STEPS.length - 1 ? t('onboard.done') : t('onboard.next');
+  };
+  const finish = () => {
+    try {
+      localStorage.setItem(ONBOARD_KEY, '1');
+    } catch {
+      /* stockage indisponible */
+    }
+    closeSheet();
+  };
+  body.querySelector('#onboardNext')?.addEventListener('click', () => {
+    if (index >= ONBOARD_STEPS.length - 1) return finish();
+    index++;
+    paint();
+  });
+  body.querySelector('#onboardSkip')?.addEventListener('click', finish);
+}
+
 export function initShell(options = {}) {
   handlers = { ...handlers, ...options };
   document.querySelectorAll('.tabitem').forEach((btn) => {

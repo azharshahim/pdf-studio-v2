@@ -14,7 +14,7 @@ import { buildSampleTextPdf, buildSampleScanPdf } from './samples.js';
 import { icon, hydrateIcons } from './icons.js';
 import { applyLanguage, t } from './i18n.js';
 import * as U from './utils.js';
-import { initShell, routeTo, openSheet, closeSheet, isSheetOpen, isMobile, renderTools } from './shell.js';
+import { initShell, routeTo, openSheet, closeSheet, isSheetOpen, isMobile, renderTools, showOnboarding } from './shell.js';
 import { createMarkup, HIGHLIGHT_COLORS, STAMP_PRESETS } from './markup.js';
 import {
   renderPagesGrid,
@@ -1321,8 +1321,12 @@ function scheduleAutosave(now = false) {
       numPages: state.numPages,
       edits: state.edits,
       ocrPages: collectOcrForSession(),
+      markup: markup.objects,
     };
-    if (!payload.edits.length && !payload.ocrPages.length) return;
+    if (!payload.edits.length && !payload.ocrPages.length && !payload.markup.length) {
+      Session.deleteSession?.(state.hash).catch(() => {});
+      return;
+    }
     return Session.saveSession(state.hash, payload).catch(() => {});
   };
   if (now) return run();
@@ -1378,6 +1382,11 @@ async function maybeRestoreSession() {
     state.restoring = true;
     if (Array.isArray(saved.edits)) {
       state.edits = saved.edits.filter((e) => e && e.page >= 1 && e.page <= state.numPages);
+    }
+    if (Array.isArray(saved.markup)) {
+      markup.setObjects(saved.markup.filter((o) => o && o.page >= 1 && o.page <= state.numPages));
+      markupHistory.stack = [JSON.stringify(markup.objects)];
+      markupHistory.index = 0;
     }
     for (const entry of saved.ocrPages || []) {
       if (!entry?.ocr || entry.pageNo < 1 || entry.pageNo > state.numPages) continue;
@@ -3613,6 +3622,7 @@ async function renderFilesScreen() {
           <span>${fileDateLabel(f.updatedAt)} · ${t('files.summary', { e: f.edits, o: f.ocr })}</span>
         </div>
         <div class="file-actions">
+          <button class="icon-btn tiny" data-share="${U.escapeHtml(f.key)}" data-i18n-title="common.share" data-icon="share" aria-label="${t('common.share')}"></button>
           <button class="icon-btn tiny" data-rename="${U.escapeHtml(f.key)}" data-i18n-title="files.rename" data-icon="edit" aria-label="${t('files.rename')}"></button>
           <button class="icon-btn tiny" data-remove="${U.escapeHtml(f.key)}" data-i18n-title="files.delete" data-icon="trash" aria-label="${t('files.delete')}"></button>
         </div>
@@ -3634,6 +3644,18 @@ async function renderFilesScreen() {
       if (!name) return;
       await Session.renameSession?.(btn.dataset.rename, name).catch(() => {});
       renderFilesScreen();
+    });
+  });
+  els.filesList.querySelectorAll('[data-share]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const item = filesCache.find((f) => f.key === btn.dataset.share);
+      if (!item) return;
+      const bytes = await Session.loadBytes?.(item.key);
+      if (!bytes) {
+        toast(t('files.needFile'), 'warn');
+        return;
+      }
+      await shareBlob(new Blob([bytes], { type: 'application/pdf' }), item.name.endsWith('.pdf') ? item.name : `${item.name}.pdf`);
     });
   });
   els.filesList.querySelectorAll('[data-open]').forEach((el) => {
@@ -4216,6 +4238,7 @@ function init() {
     onTool: (id) => openTool(id),
   });
   if (!state.engine) routeTo('home');
+  setTimeout(() => showOnboarding(), 700);
   bindPinchZoom();
   bindTabsKeyboard();
   updateKeyboardInset();

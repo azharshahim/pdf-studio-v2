@@ -32,7 +32,7 @@
   --border: var(--line);
 }
 
-/* Mode sombre — variables partagées */
+/* Mode sombre — variables partagées (auto via prefers-color-scheme) */
 :root[data-theme='dark'] {
   --ink: #e5e7eb;
   --ink-2: #f3f4f6;
@@ -4090,4 +4090,138 @@ body.editing .annobar {
   color: var(--accent-ink);
   font: 600 11px/1 var(--font);
   cursor: pointer;
+}
+
+/* Aide au premier lancement */
+.onboard-step {
+  display: none;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 2px 4px;
+}
+.onboard-step.active {
+  display: flex;
+}
+.onboard-icon {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.onboard-step h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.onboard-step p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.onboard-dots {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin: 14px 0 10px;
+}
+.onboard-dots .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-2);
+}
+.onboard-dots .dot.active {
+  background: var(--accent);
+  width: 18px;
+  border-radius: 999px;
+}
+.onboard-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* Zones tactiles confortables sur mobile */
+@media (max-width: 900px) {
+  .icon-btn,
+  .icon-btn.tiny {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .icon-btn.tiny {
+    min-width: 38px;
+    min-height: 38px;
+  }
+  .anno-btn {
+    width: 48px;
+    height: 48px;
+  }
+  .sheet-row {
+    min-height: 58px;
+  }
+  .tool-card {
+    min-height: 108px;
+  }
+}
+
+
+/* Thème sombre automatique (aucune préférence enregistrée) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --ink: #e5e7eb;
+    --ink-2: #f3f4f6;
+    --text: #cbd5e1;
+    --muted: #94a3b8;
+    --muted-2: #64748b;
+    --line: #334155;
+    --line-2: #475569;
+    --bg: #0b1220;
+    --panel: #111827;
+    --panel-2: #0f172a;
+    --accent: #818cf8;
+    --accent-2: #a5b4fc;
+    --accent-soft: #1e1b4b;
+    --accent-ink: #c7d2fe;
+    --ok: #34d399;
+    --ok-soft: #064e3b;
+    --warn: #fbbf24;
+    --warn-soft: #451a03;
+    --danger: #f87171;
+    --danger-soft: #450a0a;
+    --surface: var(--panel);
+    --surface-2: var(--panel-2);
+    --border: var(--line);
+    color-scheme: dark;
+  }
+  :root:not([data-theme='light']) .tool-icon.indigo { background: #1e1b4b; color: #a5b4fc; }
+  :root:not([data-theme='light']) .tool-icon.amber { background: #451a03; color: #fcd34d; }
+  :root:not([data-theme='light']) .tool-icon.teal { background: #042f2e; color: #5eead4; }
+  :root:not([data-theme='light']) .tool-icon.rose { background: #4c0519; color: #fda4af; }
+  :root:not([data-theme='light']) .tool-icon.violet { background: #2e1065; color: #c4b5fd; }
+  :root:not([data-theme='light']) .tool-icon.sky { background: #082f49; color: #7dd3fc; }
+  :root:not([data-theme='light']) .tool-icon.slate { background: #1e293b; color: #cbd5e1; }
+  :root:not([data-theme='light']) .tool-icon.emerald { background: #022c22; color: #6ee7b7; }
+  :root:not([data-theme='light']) .tool-icon.orange { background: #431407; color: #fdba74; }
+  :root:not([data-theme='light']) .sig-pad,
+  :root:not([data-theme='light']) .sig-item {
+    background: #f8fafc;
+  }
+}
+
+
+/* Lien de démonstration : bloc sur mobile, texte simple sur ordinateur */
+.home-demos {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.home-demos .linkbtn {
+  min-height: 34px;
+  font-size: 12.5px;
 }
