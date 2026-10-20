@@ -7,6 +7,22 @@ texte recherchable.
 Aucun fichier n'est envoyé sur un serveur : le rendu, l'OCR, l'édition et l'export s'exécutent
 entièrement dans le navigateur.
 
+| Accueil (mobile) | Document (mobile) | Annotations (mobile) |
+| --- | --- | --- |
+| ![Accueil](docs/captures/accueil-mobile.png) | ![Document](docs/captures/document-mobile.png) | ![Annotations](docs/captures/annotations-mobile.png) |
+
+| Signature | Tampon | Pages |
+| --- | --- | --- |
+| ![Signature](docs/captures/signature-mobile.png) | ![Tampon](docs/captures/tampon-mobile.png) | ![Pages](docs/captures/pages-mobile.png) |
+
+| Formulaire | Compression | Fichiers |
+| --- | --- | --- |
+| ![Formulaire](docs/captures/formulaire-mobile.png) | ![Compression](docs/captures/compression-mobile.png) | ![Fichiers](docs/captures/fichiers-mobile.png) |
+
+| Ordinateur — document | Ordinateur — outils | Thème sombre |
+| --- | --- | --- |
+| ![Document sur ordinateur](docs/captures/document-ordinateur.png) | ![Outils sur ordinateur](docs/captures/outils-ordinateur.png) | ![Thème sombre](docs/captures/accueil-sombre-mobile.png) |
+
 ---
 
 ## Nouveautés de la V2
@@ -57,12 +73,40 @@ entièrement dans le navigateur.
 - **Interface trilingue** français / anglais / arabe (RTL), sélecteur dans la barre supérieure.
 - **Zoom par pincement** sur écran tactile.
 
+## Nouveautés de la V2.2 — édition sur la page
+
+Toute l'édition se fait **directement sur le document**, comme dans Acrobat sur mobile : plus de
+panneau latéral à ouvrir, la page occupe l'écran.
+
+- **Modifier le texte sur la page** : toucher une ligne ouvre un champ à sa place, au-dessus du
+  clavier ; la ligne est réellement réécrite (le texte d'origine est retiré du PDF à l'export).
+- **Annoter** : barre du bas avec surlignage (4 couleurs), soulignement, texte barré, dessin libre
+  (couleur et épaisseur), note, rectangle, ellipse et flèche ; gomme, annulation, tout est exporté
+  en objets PDF réels.
+- **Signer** : dessin au doigt, saisie (3 polices manuscrites), import d'une photo de signature avec
+  suppression du fond ; bibliothèque locale ; déplacement, redimensionnement et rotation par
+  poignées.
+- **Tampons** : 9 modèles en français, date du jour et tampon personnalisé (texte + couleur), avec
+  opacité et rotation.
+- **Insérer** : photo (appareil photo sur téléphone), coche, croix, date du jour.
+- **Remplir un formulaire** : les champs AcroForm deviennent éditables sur la page ; sans champ,
+  les pointillés, les lignes de signature et les cases sont détectés et peuvent être remplis.
+- **Pages** : grille plein écran avec vignettes, glisser-déposer pour réordonner, rotation,
+  suppression, duplication, page vierge, extraction.
+- **OCR en un geste**, **compression** avec estimation (léger / équilibré / maximum),
+  **protection** par filigrane, **conversion** PNG / JPG / TXT.
+- **Fichiers** : les documents sont conservés dans le navigateur (IndexedDB) — ouvrir, renommer,
+  partager, supprimer. Les annotations font partie de la session sauvegardée.
+- **Mobile d'abord** : navigation par onglets en bas, feuilles plein écran, cibles tactiles de
+  44 px, **pincer pour zoomer**, **balayer pour changer de page**, thème sombre automatique,
+  aide en 3 écrans au premier lancement.
+
 ---
 
 ## Tests
 
 ```bash
-npm test          # Vitest — 39 tests
+npm test          # Vitest — 58 tests
 ```
 
 Les tests couvrent notamment :
@@ -73,7 +117,12 @@ Les tests couvrent notamment :
 - `pageOps` : analyse des plages (`1-3,5`), rotation, suppression, déplacement (contenu préservé),
   insertion, extraction, fusion ;
 - `forms` : lecture des champs AcroForm, remplissage puis relecture, aplatissement ;
-- `imagePrep` : étirement du contraste et estimation d'inclinaison sur un canvas simulé.
+- `imagePrep` : étirement du contraste et estimation d'inclinaison sur un canvas simulé ;
+- les **annotations** : normalisation des rectangles, tracé libre → chemin SVG, flèches, tampons ;
+- l'**export fidèle** : surlignage, rectangle et encre effectivement dessinés, tampon et date
+  retrouvés dans le texte extrait du PDF produit ;
+- la **signature** : signature tapée (image générée), pad de dessin, bibliothèque locale ;
+- `reorderPages` : réordonnancement réel des pages (vérifié en relisant le PDF produit).
 
 La CI GitHub Actions exécute `npm test` puis `npm run build` avant chaque déploiement.
 
@@ -160,7 +209,11 @@ pdf-studio/
 │   ├── ocrEngine.js      # worker Tesseract partagé, parsing des blocs
 │   ├── exporter.js       # pdf-lib : suppression du texte, Noto, couche OCR invisible
 │   ├── textRemoval.js    # réécriture des opérateurs Tj/TJ dans les flux de contenu
-│   ├── pageOps.js        # rotation, suppression, déplacement, extraction, fusion de pages
+│   ├── markup.js         # calque d'objets sur la page (annotations, tampons, images)
+│   ├── signature.js      # pad de dessin, signatures tapées, bibliothèque locale
+│   ├── tools.js          # grille de pages, compression, filigranes, en-têtes d'outils
+│   ├── shell.js          # navigation (Accueil / Fichiers / Outils), feuilles, aide initiale
+│   ├── pageOps.js        # rotation, suppression, déplacement, réordonnancement, extraction, fusion
 │   ├── forms.js          # lecture et remplissage des champs AcroForm
 │   ├── imagePrep.js      # contraste et redressement (deskew) avant OCR
 │   ├── i18n.js           # interface français / anglais / arabe (RTL)
@@ -189,6 +242,9 @@ pdf-studio/
 - les **composants d'interface** (toasts, chargement, dialogues) à `ui.js` ;
 - les **moteurs** à `pdfEngine.js`, `ocrEngine.js`, `exporter.js`, `textRemoval.js` ;
 - les **opérations document** à `pageOps.js` (pages) et `forms.js` (formulaires) ;
+- le **calque d'annotations** à `markup.js` (objets positionnés en points PDF, exportés en
+  surlignages, traits, rectangles, tampons et images réels) ;
+- les **signatures** à `signature.js` et les **écrans d'outils** à `tools.js` et `shell.js` ;
 - le **prétraitement d'image** à `imagePrep.js` et les **traductions** à `i18n.js`.
 
 ### Pipeline d'édition
@@ -228,6 +284,35 @@ embarquées dans `public/fonts/` et intégrées avec `@pdf-lib/fontkit` :
 - les lignes mixtes arabe/latin sont découpées en segments et dessinées avec la police adaptée ;
 - si un caractère n'existe dans **aucune** police embarquée (emoji, notations musicales…), un
   avertissement liste les caractères concernés **avant** de lancer l'export.
+
+## Ce qui a été vérifié, et comment
+
+Les tests automatiques (`npm test`, 58 tests) couvrent la logique pure : recherche, polices,
+remplacement réel du texte, pages, formulaires, images, annotations, export des objets et
+signatures. Ils ne remplacent pas un essai dans un vrai navigateur : les parcours ci-dessous ont
+donc été rejoués dans **Chromium** au moyen de scripts Playwright, en 390 × 844 (téléphone,
+tactile) et en 1280 × 800 (ordinateur).
+
+| Parcours | Résultat |
+| --- | --- |
+| Ouvrir un PDF de 20 pages, zoom automatique à la largeur, navigation | 20 pages, zoom 64 % sur ordinateur, correct sur téléphone |
+| Toucher une ligne, la réécrire, valider | champ en place, texte remplacé, export sans l'ancien texte |
+| Annoter : surlignage, dessin, note, rectangle | 4 objets créés, exportés puis relus dans le PDF produit |
+| Signer (saisie), tampon, coche, date | 4 objets, export `s5-signed.pdf` relu correctement |
+| Remplir un formulaire AcroForm | 4 champs détectés, remplis, exportés |
+| Pages : réordonner par glisser-déposer | ordre du PDF réellement modifié |
+| OCR d'un scan en un geste | page océrisée, texte éditable |
+| Compression (3 niveaux) | estimations affichées, fichier exporté |
+| Langues FR / EN / AR (RTL) | libellés, cartes et feuilles traduits, aucune erreur console |
+| Thème sombre automatique et manuel | couleurs appliquées, contrastes lisibles |
+| Aide au premier lancement | 3 écrans, mémorisée après fermeture |
+| Pincer pour zoomer, balayer pour changer de page | zoom 152 % après pincement, page suivante après balayage |
+
+**Ce qui n'a pas pu être testé ici** : Safari sur iPhone et iPad, Firefox, les appareils photo
+réels (l'entrée caméra est un simple champ fichier), le partage natif (`navigator.share`, absent du
+navigateur de test), l'installation PWA et le mode hors ligne (service worker inactif en
+développement), l'ouverture de PDF réellement chiffrés par mot de passe, et la qualité de l'OCR
+au-delà des deux exemples fournis.
 
 ## Limites connues
 

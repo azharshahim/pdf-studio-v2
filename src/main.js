@@ -2780,25 +2780,48 @@ function editNote(obj) {
 
 /** Décalage en cascade pour que les objets insérés ne se superposent pas. */
 let insertCount = 0;
+/** Taille de la page en points PDF (l'origine des bbox d'objets). */
+function pdfPageSize() {
+  const vp = state.viewport;
+  const box = vp?.viewBox;
+  if (box && box.length === 4) {
+    return { w: Math.abs(box[2] - box[0]) || 595, h: Math.abs(box[3] - box[1]) || 842 };
+  }
+  const scale = state.scale || 1;
+  return { w: (vp?.width || 595) / scale, h: (vp?.height || 842) / scale };
+}
+
+/** Coordonnées PDF du centre de la zone visible (bbox des objets = points PDF). */
+function viewCenterPdf() {
+  const vp = state.viewport;
+  if (vp?.convertToPdfPoint) {
+    const [x, y] = vp.convertToPdfPoint(vp.width / 2, vp.height / 2);
+    return { x, y };
+  }
+  const { w, h } = pdfPageSize();
+  return { x: w / 2, y: h / 2 };
+}
+
+/** Décalage en cascade exprimé en points PDF, pour ne pas empiler les insertions. */
 function cascadeOffset() {
-  const dx = (insertCount % 3) * 18;
-  const dy = Math.floor(insertCount / 3) * 22;
+  const k = 18 / (state.scale || 1);
+  const dx = (insertCount % 3) * k;
+  const dy = Math.floor(insertCount / 3) * (k * 1.2);
   insertCount++;
   return { dx, dy };
 }
 
 /** Ajoute une image (signature, photo, tampon) centrée sur la page. */
 function addImageObject(src, { ratio = 3, label = '', type = 'image' } = {}) {
-  const vp = state.viewport;
-  const pageW = vp ? vp.width : 595;
-  const pageH = vp ? vp.height : 842;
+  const { w: pageW } = pdfPageSize();
   const scale = state.scale || 1;
   const width = Math.min(pageW * 0.34, 150 / scale);
   const height = width / Math.max(0.2, ratio);
+  const center = viewCenterPdf();
   const { dx, dy } = cascadeOffset();
   const bbox = {
-    x: pageW / 2 - width / 2 + dx,
-    y: pageH / 2 - height / 2 - dy,
+    x: center.x - width / 2 + dx,
+    y: center.y - height / 2 - dy,
     w: width,
     h: height,
   };
@@ -2944,12 +2967,15 @@ function openStampTool() {
   body.querySelectorAll('[data-stamp]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.stamp;
+      const center = viewCenterPdf();
       if (id === 'date') {
+        const w = Math.max(120, 150 / (state.scale || 1));
+        const h = Math.max(18, 24 / (state.scale || 1));
         const obj = markup.add({
           type: 'date',
           text: today,
           fontSize: Math.max(8, 18 / (state.scale || 1)),
-          bbox: { x: 60, y: 80, w: 120, h: 18 },
+          bbox: { x: center.x - w / 2, y: center.y - h / 2, w, h },
           color: '#111827',
         });
         place(obj);
@@ -2957,18 +2983,18 @@ function openStampTool() {
       }
       const preset = STAMP_PRESETS.find((s) => s.id === id);
       if (!preset) return;
-      const vp = state.viewport;
       const scale = state.scale || 1;
-      const width = Math.min(190, (vp?.width || 595) * 0.5);
+      const width = Math.min(pdfPageSize().w * 0.62, 240 / scale);
+      const height = width * 0.24;
       const obj = markup.add({
         type: 'stamp',
         text: preset.text,
         color: preset.color,
         borderColor: preset.color,
-        bbox: { x: (vp?.width || 595) / 2 - width / 2, y: (vp?.height || 842) / 2 - 22, w: width, h: 44 },
+        bbox: { x: center.x - width / 2, y: center.y - height / 2, w: width, h: height },
         rotation: 0,
         opacity: 0.95,
-        fontSize: Math.max(9, Math.min(30, 22 / scale)),
+        fontSize: Math.max(9, Math.min(36, width * 0.13)),
       });
       place(obj);
     });
@@ -2981,16 +3007,19 @@ function openStampTool() {
       return;
     }
     const color = body.querySelector('#stampColor')?.value || '#059669';
-    const vp = state.viewport;
+    const center = viewCenterPdf();
+    const scale = state.scale || 1;
+    const w = Math.min(pdfPageSize().w * 0.62, 240 / scale);
+    const h = w * 0.24;
     const obj = markup.add({
       type: 'stamp',
       text,
       color,
       borderColor: color,
-      bbox: { x: (vp?.width || 595) / 2 - 90, y: (vp?.height || 842) / 2 - 22, w: 180, h: 44 },
+      bbox: { x: center.x - w / 2, y: center.y - h / 2, w, h },
       rotation: 0,
       opacity: 0.95,
-      fontSize: Math.max(9, Math.min(30, 22 / (state.scale || 1))),
+      fontSize: Math.max(9, Math.min(36, w * 0.13)),
     });
     place(obj);
   });
@@ -3026,15 +3055,15 @@ function openImageTool(capture = false) {
 function insertMark(symbol) {
   const scale = state.scale || 1;
   const size = Math.max(14, 28 / scale);
-  const vp = state.viewport;
+  const center = viewCenterPdf();
   const { dx, dy } = cascadeOffset();
   const obj = markup.add({
     type: 'check',
     mark: symbol,
     color: symbol === 'cross' ? '#dc2626' : '#059669',
     bbox: {
-      x: (vp?.width || 595) / 2 - size / 2 + dx,
-      y: (vp?.height || 842) / 2 - size / 2 - dy,
+      x: center.x - size / 2 + dx,
+      y: center.y - size / 2 - dy,
       w: size,
       h: size,
     },
@@ -3045,14 +3074,16 @@ function insertMark(symbol) {
 function insertToday() {
   const today = new Date().toLocaleDateString();
   const scale = state.scale || 1;
-  const vp = state.viewport;
+  const center = viewCenterPdf();
   const { dx, dy } = cascadeOffset();
+  const w = Math.max(90, 110 / scale);
+  const h = Math.max(18, 22 / scale);
   const obj = markup.add({
     type: 'date',
     text: today,
     fontSize: Math.max(8, 16 / scale),
     color: '#111827',
-    bbox: { x: (vp?.width || 595) / 2 - 40 + dx, y: (vp?.height || 842) / 2 - 9 - dy, w: 90, h: 18 },
+    bbox: { x: center.x - w / 2 + dx, y: center.y - h / 2 - dy, w, h },
   });
   markup.select?.(obj.id);
 }
