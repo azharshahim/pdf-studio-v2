@@ -20,10 +20,12 @@ test('Modifier lance l’OCR des pages scannées et garde la police à l’édit
     buffer: fs.readFileSync('tests/fixtures/scan-fiche.pdf'),
   });
   await page.locator('#docDock [data-dock=edit]').waitFor({ state: 'visible', timeout: 60_000 });
+  await page.waitForTimeout(800);
+  const reading = await page.locator('#pdfCanvas').evaluate((c) => c.style.width);
   await page.locator('#docDock [data-dock=edit]').tap();
   await expect(page.locator('.line-block.ocr').first()).toBeAttached({ timeout: 150_000 });
   expect(await page.locator('.line-block.ocr').count()).toBeGreaterThan(3);
-  const before = await page.locator('#pdfCanvas').evaluate((c) => c.style.width);
+  const before = reading;
   await page.waitForTimeout(500);
   await page.locator('.line-block.ocr').nth(3).tap();
   await page.locator('.inline-shell').waitFor({ state: 'visible' });

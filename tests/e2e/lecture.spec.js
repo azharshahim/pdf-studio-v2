@@ -49,8 +49,8 @@ test.describe('Lecture seule et démarrage', () => {
     await expect(dock.locator('[data-dock=fillsign]')).toBeHidden();
     await expect(page.locator('.line-block').first()).toBeVisible({ timeout: 30_000 });
     const editW = await page.evaluate(() => document.getElementById('pdfCanvas').getBoundingClientRect().width);
-    expect(readW / editW).toBeGreaterThan(1.15);
-    expect(readW / editW).toBeLessThan(1.35);
+    // Lecture → modification : le zoom ne change pas.
+    expect(Math.abs(readW / editW - 1)).toBeLessThan(0.02);
 
     await page.locator('#btnDocMenu').tap();
     await page.locator('[data-doc-menu=read]').tap();

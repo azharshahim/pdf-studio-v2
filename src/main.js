@@ -1042,10 +1042,11 @@ function setReadMode(on) {
   }
   if (els.readEdit) els.readEdit.hidden = true;
   updateDock();
-  // La lecture s'ouvre à 125 % de la largeur ; la modification à 100 %.
+  // Passer de la lecture à la modification (ou l'inverse) ne change jamais le
+  // zoom : l'écran reste exactement tel quel.
   if (was !== !!on && state.engine) {
-    state.zoom = null;
-    renderCurrent().then(() => centerHorizontally());
+    if (state.zoom == null && state.scale) state.zoom = state.scale;
+    renderCurrent();
   }
   if (!on && was && state.engine) autoOcrForEdit().catch(() => {});
 }
@@ -1858,8 +1859,8 @@ function guessScanLineStyle(line) {
     return scanMeasureCtx.measureText(text).width;
   };
   const pick = pickFontByWidth(measure, line.text, size, line.bbox.w, ready.length ? ready : ['Arimo'], bold);
-  if (!pick) return { bold, font: 'Arimo', scale: 1 };
-  return { bold, font: pick.font, scale: U.clamp(pick.scale, 0.4, 1.4) };
+  if (!pick) return { bold, font: 'Arimo', scale: 1, size };
+  return { bold, font: pick.font, scale: U.clamp(pick.scale, 0.3, 3), size: size * U.clamp(pick.scale, 0.3, 3) };
 }
 
 function makeEditFromLine(line, pageNo) {
@@ -1883,8 +1884,8 @@ function makeEditFromLine(line, pageNo) {
     size: U.clamp(
       Math.round(
         Math.min(
-          (line.fontSize || 12) * (scanStyle ? scanStyle.scale : 1),
-          scanStyle ? Math.max(4, line.bbox.h * 1.1) : Infinity
+          scanStyle ? scanStyle.size || (line.fontSize || 12) * scanStyle.scale : line.fontSize || 12,
+          scanStyle ? Math.max(4, line.bbox.h * 1.5) : Infinity
         ) * 2
       ) / 2,
       4,
@@ -2013,6 +2014,9 @@ async function selectLine(lineId) {
     italic: line.italic,
   });
   if (state.active) closeActive({ restore: false });
+  // L'interface d'édition change la largeur disponible : on fige le zoom pour
+  // que la page ne se redimensionne pas au toucher.
+  if (state.zoom == null && state.scale) state.zoom = state.scale;
   const viewToken = captureEditView();
   await zoomForLine(line);
   focusLineInView(line);

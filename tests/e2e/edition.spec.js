@@ -139,7 +139,7 @@ async function readView(page) {
   return page.evaluate(() => {
     const scroller = document.getElementById('canvasScroll');
     return {
-      zoom: window.__pdfStudio.state.zoom,
+      zoom: window.__pdfStudio.state.scale,
       left: Math.round(scroller.scrollLeft),
       top: Math.round(scroller.scrollTop),
       edits: window.__pdfStudio.state.edits.length,
