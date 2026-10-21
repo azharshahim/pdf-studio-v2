@@ -21,7 +21,17 @@ const baseURL = process.env.PW_BASE_URL || `http://${HOST}:${PORT}`;
 // d'intégration continue n'ont pas toujours 4 Go disponibles).
 const MOBILE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 };
 
-const CHROMIUM_ARGS = { launchOptions: { args: ['--disable-dev-shm-usage'] } };
+const CHROMIUM_ARGS = {
+  launchOptions: {
+    args: [
+      '--disable-dev-shm-usage',
+      // Les machines de test n'ont parfois que 2 Go : on évite le cache
+      // arrière-plan et la rasterisation GPU, gros consommateurs de mémoire.
+      '--disable-back-forward-cache',
+      '--disable-gpu',
+    ],
+  },
+};
 
 const ANDROID_UA =
   'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Mobile Safari/537.36';

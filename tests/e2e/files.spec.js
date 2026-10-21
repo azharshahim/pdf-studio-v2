@@ -100,7 +100,7 @@ test.describe('Fichiers', () => {
     await expect(row).toBeVisible();
     await expect(row).toContainText('modif.');
     // Taille du document affichée dans la ligne.
-    await expect(row.locator('.file-meta')).toContainText('Ko');
+    await expect(row.locator('.file-meta').first()).toContainText('Ko');
 
     await row.locator('[data-open]').click();
     await waitRendered(page);
