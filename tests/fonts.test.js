@@ -9,7 +9,7 @@ describe('catalogue de polices', () => {
     expect(CATALOG.length).toBeGreaterThanOrEqual(12);
     for (const font of CATALOG) {
       for (const file of Object.values(font.files)) {
-        expect(fs.existsSync(path.join('public/fonts/catalog', file)), file).toBe(true);
+        expect(fs.existsSync(path.join('public/fonts', file)), file).toBe(true);
       }
     }
   });

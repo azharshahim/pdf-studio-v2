@@ -17,7 +17,7 @@ async function gotoApp(page) {
       /* stockage indisponible */
     }
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
   await expect(page.locator('#homeDemoText')).toBeVisible();
   // Panneau de bienvenue : il peut masquer le document sur un profil neuf.
   const skip = page.locator('#onboardSkip, [data-onboard="skip"]');

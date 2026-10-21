@@ -9,7 +9,7 @@ async function openDemo(page) {
       /* stockage indisponible */
     }
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
   await expect(page.locator('#homeDemoText')).toBeVisible();
   await page.evaluate(() => document.querySelector('#homeDemoText').click());
   await page.locator('.line-block').first().waitFor({ state: 'visible', timeout: 60_000 });
@@ -63,7 +63,7 @@ test.describe('Barre d’outils du document', () => {
     });
     await openDemo(page);
     await page.locator('#btnDocMenu').tap();
-    await expect(page.locator('#sheet [data-doc-menu]')).toHaveCount(9);
+    await expect(page.locator('#sheet [data-doc-menu]')).toHaveCount(10);
 
     await page.locator('[data-doc-menu=share]').tap();
     await expect.poll(() => page.evaluate(() => window.__shared?.name)).toMatch(/-modifie\.pdf$/);

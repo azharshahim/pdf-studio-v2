@@ -9,7 +9,7 @@ async function gotoApp(page) {
       /* stockage indisponible */
     }
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
   await expect(page.locator('#homePhotos')).toBeVisible();
 }
 

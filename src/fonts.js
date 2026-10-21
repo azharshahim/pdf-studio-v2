@@ -9,14 +9,24 @@
  */
 
 import { assetUrl, setFontCssResolver } from './utils.js';
+import MORE from './fontsMore.json';
 
 /** @typedef {{id:string,label:string,css:string,group:string,files:{n:string,b?:string,i?:string,bi?:string},aliases:RegExp}} CatalogFont */
 
 const f = (slug, hasItalic = true) => ({
-  n: `${slug}-n.woff2`,
-  b: `${slug}-b.woff2`,
-  ...(hasItalic ? { i: `${slug}-i.woff2`, bi: `${slug}-bi.woff2` } : {}),
+  n: `catalog/${slug}-n.woff2`,
+  b: `catalog/${slug}-b.woff2`,
+  ...(hasItalic ? { i: `catalog/${slug}-i.woff2`, bi: `catalog/${slug}-bi.woff2` } : {}),
 });
+
+const FALLBACK = {
+  sans: 'Arial, Helvetica, sans-serif',
+  serif: 'Georgia, "Times New Roman", serif',
+  mono: '"Courier New", monospace',
+  hand: 'cursive',
+  display: 'Impact, Arial, sans-serif',
+  arabic: '"Noto Naskh Arabic", serif',
+};
 
 /** @type {CatalogFont[]} */
 export const CATALOG = [
@@ -34,6 +44,20 @@ export const CATALOG = [
   { id: 'Dancing Script', label: 'Dancing Script (écriture)', css: '"Dancing Script", cursive', group: 'hand', files: f('dancing-script', false), aliases: /dancing/i },
 ];
 
+// Polices supplémentaires (scripts/fetch-fonts.mjs) : chargées à la demande.
+for (const m of MORE) {
+  if (CATALOG.some((c) => c.id === m.id)) continue;
+  const files = Object.fromEntries(Object.entries(m.files).map(([k, v]) => [k, `more/${v}`]));
+  CATALOG.push({
+    id: m.id,
+    label: m.label,
+    css: `"${m.id}", ${FALLBACK[m.group] || 'sans-serif'}`,
+    group: m.group,
+    files,
+    aliases: new RegExp(`^${m.id.replace(/[^a-z0-9]+/gi, '[ -]?')}`, 'i'),
+  });
+}
+
 /** Polices PDF de base, gardées pour la compatibilité. */
 export const BASE_FONTS = [
   { id: 'Helvetica', label: 'Helvetica' },
@@ -47,6 +71,8 @@ export const GROUP_LABELS = {
   serif: 'Serif',
   mono: 'Chasse fixe',
   hand: 'Écriture',
+  display: 'Titres',
+  arabic: 'Arabe',
 };
 
 const byId = new Map(CATALOG.map((c) => [c.id, c]));
@@ -69,8 +95,8 @@ export function catalogFile(id, bold, italic) {
     i: ['i', 'n'],
     n: ['n'],
   }[wanted];
-  for (const key of chain) if (files[key]) return `catalog/${files[key]}`;
-  return `catalog/${files.n}`;
+  for (const key of chain) if (files[key]) return files[key];
+  return files.n;
 }
 
 /** Famille CSS pour l'aperçu à l'écran, ou null si ce n'est pas une police du catalogue. */
@@ -110,7 +136,7 @@ export function ensureCatalogFont(id) {
   ].filter(([key]) => font.files[key]);
   const promise = Promise.all(
     variants.map(async ([key, style, weight]) => {
-      const face = new FontFace(family, `url(${assetUrl(`fonts/catalog/${font.files[key]}`)}) format("woff2")`, {
+      const face = new FontFace(family, `url(${assetUrl(`fonts/${font.files[key]}`)}) format("woff2")`, {
         style,
         weight,
       });

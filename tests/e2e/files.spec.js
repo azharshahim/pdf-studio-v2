@@ -19,7 +19,7 @@ async function gotoApp(page) {
       /* stockage indisponible */
     }
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
   await expect(page.locator('#homeDemoText')).toBeVisible();
 }
 
@@ -65,6 +65,10 @@ async function newPage(context) {
 
 /** Attend que le document soit rendu (et non seulement chargé). */
 async function waitRendered(page) {
+  // Les documents s'ouvrent en lecture seule : on passe en modification.
+  const edit = page.locator('#readEdit');
+  await edit.waitFor({ state: 'visible', timeout: 45_000 }).catch(() => {});
+  if (await edit.isVisible().catch(() => false)) await edit.evaluate((b) => b.click());
   await expect(page.locator('.line-block').first()).toBeVisible({ timeout: 45_000 });
   await page.waitForTimeout(500);
 }

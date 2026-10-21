@@ -23,8 +23,10 @@ test('couche de texte cachée (Courier) : l’édition propose une police sans e
       /* stockage indisponible */
     }
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
   await page.locator('#fileInput').setInputFiles({ name: 'scan.pdf', mimeType: 'application/pdf', buffer: await scanPdf() });
+  await page.locator('#readEdit').waitFor({ state: 'visible', timeout: 60_000 });
+  await page.locator('#readEdit').tap();
   await page.locator('.line-block').first().waitFor({ state: 'visible', timeout: 60_000 });
   await page.waitForTimeout(800);
   await page.locator('.line-block').first().tap();
@@ -83,8 +85,10 @@ test('texte caché sous l’image du scan : même résultat (sans Courier)', asy
       /* stockage indisponible */
     }
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
   await page.locator('#fileInput').setInputFiles({ name: 'scan2.pdf', mimeType: 'application/pdf', buffer: await coveredTextPdf() });
+  await page.locator('#readEdit').waitFor({ state: 'visible', timeout: 60_000 });
+  await page.locator('#readEdit').tap();
   await page.locator('.line-block').first().waitFor({ state: 'visible', timeout: 60_000 });
   await page.waitForTimeout(800);
   await page.locator('.line-block').first().tap();

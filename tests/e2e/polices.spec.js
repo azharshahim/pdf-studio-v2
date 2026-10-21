@@ -9,7 +9,7 @@ async function gotoApp(page) {
       /* stockage indisponible */
     }
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
   await expect(page.locator('#homeDemoText')).toBeVisible();
 }
 
@@ -41,5 +41,29 @@ test.describe('Polices', () => {
     expect(state.font).toBe('Roboto');
     expect(state.loaded).toBe(true);
     expect(state.options).toBeGreaterThanOrEqual(4);
+  });
+
+  test('le sélecteur de polices filtre et applique une police du grand catalogue', async ({ page }) => {
+    await gotoApp(page);
+    await page.evaluate(() => document.querySelector('#homeDemoText').click());
+    await page.locator('.line-block').first().waitFor({ state: 'visible', timeout: 60_000 });
+    await page.waitForTimeout(700);
+    const block = page.locator('.line-block').first();
+    await block.scrollIntoViewIfNeeded();
+    await block.tap();
+    await page.waitForTimeout(600);
+    await page.locator('#fmtFont').tap();
+    await expect(page.locator('#fontSearch')).toBeVisible();
+    const total = await page.locator('.font-row').count();
+    expect(total).toBeGreaterThan(100);
+    await page.locator('#fontSearch').fill('lobster');
+    await page.waitForTimeout(300);
+    const visible = await page.locator('.font-row:visible').count();
+    expect(visible).toBeGreaterThan(0);
+    expect(visible).toBeLessThan(10);
+    await page.locator('.font-row:visible').first().tap();
+    await page.waitForTimeout(1200);
+    const font = await page.evaluate(() => window.__pdfStudio.state.edits.at(-1)?.font);
+    expect(font).toMatch(/lobster/i);
   });
 });

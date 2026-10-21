@@ -4501,7 +4501,7 @@ body.editing .dockitem svg {
   height: 21px;
 }
 /* « Texte » est dans la barre d'outils : le bouton flottant fait doublon. */
-body[data-route='doc'] .fab {
+body[data-route='doc'] .fab:not(.read-edit) {
   display: none;
 }
 @media (min-width: 700px) {
@@ -4875,4 +4875,115 @@ body.on-screen .fab {
 [dir='rtl'] #btnBack svg,
 [dir='rtl'] #editBack svg {
   transform: scaleX(-1);
+}
+
+/* ───── Lecture seule ───── */
+body.reading #docDock,
+body.reading #btnSave,
+body.reading #btnUndo,
+body.reading #btnRedo,
+body.reading .inspector,
+body.reading .inspector-toggle,
+body.reading .fab:not(.read-edit),
+body.reading .line-block,
+body.reading .form-area {
+  display: none !important;
+}
+body.reading .overlay {
+  pointer-events: none;
+}
+body:not(.reading) .read-edit {
+  display: none !important;
+}
+.fab.read-edit {
+  right: 16px;
+  bottom: calc(22px + env(safe-area-inset-bottom));
+  height: 52px;
+  padding: 0 22px 0 18px;
+  font-size: 15px;
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.fab.read-edit svg {
+  width: 20px;
+  height: 20px;
+}
+body.reading .canvas-scroll {
+  padding-bottom: calc(90px + env(safe-area-inset-bottom));
+}
+@media (min-width: 901px) {
+  body.reading .workspace {
+    grid-template-columns: 232px minmax(0, 1fr) !important;
+  }
+}
+
+/* Sélecteur de polices */
+.font-search {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  width: 100%;
+  min-height: 44px;
+  margin-bottom: 8px;
+  padding: 0 14px;
+  border: 1.5px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 500 16px/1 var(--font);
+}
+.font-group {
+  margin: 14px 0 6px;
+  font: 700 12px/1 var(--font);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.font-group small {
+  margin-inline-start: 4px;
+  font-weight: 600;
+  opacity: 0.7;
+}
+.font-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 14px;
+  border: 1.5px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink);
+  text-align: start;
+  cursor: pointer;
+}
+.font-row:hover {
+  background: var(--panel-2, rgba(127, 127, 127, 0.08));
+}
+.font-row.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.font-row[hidden],
+.font-group[hidden] {
+  display: none;
+}
+.font-name {
+  font-size: 18px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.font-sample {
+  flex: 0 0 auto;
+  font-size: 15px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+@media (max-width: 420px) {
+  .font-sample {
+    display: none;
+  }
 }

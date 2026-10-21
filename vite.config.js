@@ -17,6 +17,8 @@ function precacheManifest() {
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
           if (entry.name === 'precache.json' || entry.name === 'sw.js') continue;
           const nextRel = rel ? `${rel}/${entry.name}` : entry.name;
+          // Polices supplémentaires : mises en cache à la première utilisation seulement.
+          if (nextRel === 'fonts/more') continue;
           if (entry.isDirectory()) walk(path.join(dir, entry.name), nextRel);
           else files.push(`./${nextRel}`);
         }

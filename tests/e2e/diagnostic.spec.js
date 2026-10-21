@@ -10,7 +10,7 @@ test('le mode diagnostic est désactivé par défaut et suit le curseur', async 
       /* stockage indisponible */
     }
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
   await expect(page.locator('#homeDemoText')).toBeVisible();
 
   // Désactivé par défaut : pas de badge, case décochée.

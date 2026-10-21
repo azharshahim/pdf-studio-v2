@@ -12,6 +12,7 @@ import { createInlineEditor } from './inlineEditor.js';
 import { estimateOffsetFromFraction, offsetAtPoint } from './caretPoint.js';
 import * as Session from './session.js';
 import { buildBackup, parseBackup, planRestore } from './backup.js';
+import { inkStats, looksBold, pickFontByWidth } from './scanStyle.js';
 import { CACHET_SHAPES, fileToCachet, renderCachet } from './cachet.js';
 import { applyFilter, buildPdfFromJpegs, canvasToJpeg, fileToCanvas, rotateCanvas } from './photoPdf.js';
 import { CATALOG, BASE_FONTS, GROUP_LABELS, ensureCatalogFont } from './fonts.js';
@@ -208,6 +209,7 @@ const els = {
   fileInput: $('fileInput'),
   homeOpen: $('homeOpen'),
   homePhotos: $('homePhotos'),
+  readEdit: $('readEdit'),
   homeResume: $('homeResume'),
   homeDemoText: $('homeDemoText'),
   homeDemoScan: $('homeDemoScan'),
@@ -377,6 +379,7 @@ function ensureLines(n) {
       .then((lines) => {
         pd.lines = lines;
         pd.linesPromise = null;
+        if (lines.some((l) => l.hiddenLayer)) preloadScanFonts();
         return lines;
       })
       .catch((err) => {
@@ -948,9 +951,38 @@ async function printCurrentPdf() {
   }
 }
 
+/* ─────────────────────── Lecture seule / modification ─────────────────────── */
+
+function isReading() {
+  return document.body.classList.contains('reading');
+}
+
+/** Lecture seule : on lit le document ; « Modifier » ouvre les outils d'édition. */
+function setReadMode(on) {
+  const was = isReading();
+  document.body.classList.toggle('reading', !!on);
+  if (on && !was) {
+    try {
+      closeActive();
+      markup.setTool(null);
+      if (document.body.classList.contains('annotating')) closeAnnotate();
+      if (state.addMode) {
+        state.addMode = false;
+        els.stage.classList.remove('placing');
+      }
+    } catch {
+      /* rien d'actif */
+    }
+  }
+  if (els.readEdit) els.readEdit.hidden = !on;
+}
+
 function openDocMenu() {
   if (!state.engine) return;
   const items = [
+    isReading()
+      ? { id: 'edit', icon: 'edit', title: 'menu.edit', hint: 'menu.editHint' }
+      : { id: 'read', icon: 'eye', title: 'menu.read', hint: 'menu.readHint' },
     { id: 'save', icon: 'save', title: 'menu.save', hint: 'menu.saveHint' },
     { id: 'export', icon: 'download', title: 'menu.export', hint: 'menu.exportHint' },
     { id: 'download', icon: 'download', title: 'menu.download', hint: 'menu.downloadHint' },
@@ -981,7 +1013,9 @@ function openDocMenu() {
       closeSheet();
       // Laisse la feuille se fermer avant d'ouvrir l'action suivante.
       setTimeout(() => {
-        if (id === 'save') handleSave();
+        if (id === 'edit') setReadMode(false);
+        else if (id === 'read') setReadMode(true);
+        else if (id === 'save') handleSave();
         else if (id === 'download') downloadModifiedPdf();
         else if (id === 'export') els.btnExport.click();
         else if (id === 'share') shareCurrentPdf();
@@ -993,6 +1027,70 @@ function openDocMenu() {
       }, 260);
     });
   });
+}
+
+/* ─────────────── Sélecteur de polices : aperçu de chaque police + recherche ─────────────── */
+
+function openFontPicker() {
+  const current = els.fmtFont?.value || 'Helvetica';
+  const row = (id, label, css) =>
+    `<button class="font-row${id === current ? ' on' : ''}" type="button" data-font="${U.escapeHtml(id)}" data-label="${U.escapeHtml(label.toLowerCase())}">
+      <span class="font-name" style="font-family:${css}">${U.escapeHtml(label)}</span>
+      <span class="font-sample" style="font-family:${css}">Aa — 0123 éàç</span>
+    </button>`;
+  const baseCss = { Helvetica: 'Helvetica, Arial, sans-serif', Times: '"Times New Roman", Times, serif', Courier: '"Courier New", monospace', 'Noto Sans': '"Noto Sans", sans-serif' };
+  let html = `<input class="font-search" id="fontSearch" type="search" placeholder="${t('fonts.search')}" autocomplete="off" />
+    <div class="font-list" id="fontList">`;
+  html += `<h4 class="font-group">PDF</h4>${BASE_FONTS.map((f) => row(f.id, f.label, baseCss[f.id])).join('')}`;
+  for (const [group, label] of Object.entries(GROUP_LABELS)) {
+    const items = CATALOG.filter((c) => c.group === group);
+    if (!items.length) continue;
+    html += `<h4 class="font-group" data-group="${group}">${label} <small>${items.length}</small></h4>${items.map((c) => row(c.id, c.label, c.css)).join('')}`;
+  }
+  html += '</div>';
+  const body = openSheet({ title: t('fonts.title'), html, size: 'tall', className: 'font-picker' });
+  if (!body) return;
+  const list = body.querySelector('#fontList');
+  // Chargement des polices au fil du défilement (aperçu réel de chaque police).
+  const io = 'IntersectionObserver' in window
+    ? new IntersectionObserver(
+        (entries) => {
+          for (const en of entries) {
+            if (!en.isIntersecting) continue;
+            io.unobserve(en.target);
+            ensureCatalogFont(en.target.dataset.font).catch(() => {});
+          }
+        },
+        { root: body, rootMargin: '200px' }
+      )
+    : null;
+  list.querySelectorAll('.font-row').forEach((el) => {
+    if (io) io.observe(el);
+    el.addEventListener('click', () => {
+      const id = el.dataset.font;
+      closeSheet();
+      if (!els.fmtFont) return;
+      els.fmtFont.value = id;
+      els.fmtFont.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  });
+  const search = body.querySelector('#fontSearch');
+  search.addEventListener('input', () => {
+    const q = U.normalizeText(search.value.trim());
+    list.querySelectorAll('.font-row').forEach((el) => {
+      el.hidden = !!q && !U.normalizeText(el.dataset.label).includes(q);
+    });
+    list.querySelectorAll('.font-group').forEach((g) => {
+      let n = g.nextElementSibling;
+      let any = false;
+      while (n && !n.classList.contains('font-group')) {
+        if (!n.hidden) any = true;
+        n = n.nextElementSibling;
+      }
+      g.hidden = !any;
+    });
+  });
+  list.querySelector('.font-row.on')?.scrollIntoView({ block: 'center' });
 }
 
 const fontsRendered = new Set();
@@ -1365,6 +1463,23 @@ function bindFormatbar() {
   els.editShare?.addEventListener('click', () => shareCurrentPdf());
   els.btnBack?.addEventListener('click', goBack);
   els.editBack?.addEventListener('click', goBack);
+  // Le menu natif est remplacé par le sélecteur avec aperçu des polices.
+  for (const ev of ['mousedown', 'touchstart']) {
+    els.fmtFont?.addEventListener(
+      ev,
+      (e) => {
+        e.preventDefault();
+        openFontPicker();
+      },
+      { passive: false }
+    );
+  }
+  els.fmtFont?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openFontPicker();
+    }
+  });
   els.fmtFont?.addEventListener('change', () => {
     const value = els.fmtFont.value;
     // Charge la police avant de l'appliquer : l'aperçu et les mesures doivent
@@ -1487,8 +1602,63 @@ function editSignature(e) {
   ]);
 }
 
+/* ─────────────── Style des lignes de scan (police, gras) ─────────────── */
+
+/** Polices sans empattement proposées pour imiter un scan (par ordre de préférence). */
+const SCAN_FONTS = ['Arimo', 'Roboto', 'Open Sans', 'Lato', 'Source Sans 3', 'Fira Sans', 'PT Sans', 'Work Sans', 'IBM Plex Sans', 'Noto Sans', 'Cabin', 'Barlow'];
+let scanFontsRequested = false;
+
+function preloadScanFonts() {
+  if (scanFontsRequested) return;
+  scanFontsRequested = true;
+  for (const id of SCAN_FONTS) ensureCatalogFont(id).catch(() => {});
+}
+
+const scanMeasureCtx = document.createElement('canvas').getContext('2d');
+
+/**
+ * Pour une ligne de scan : gras ou non (épaisseur du trait) et police dont la
+ * largeur colle à la ligne. Renvoie null si rien de fiable n'est mesurable.
+ */
+function guessScanLineStyle(line) {
+  if (!state.viewport || !line.text) return null;
+  const rect = pdfRectToViewportRect(line.bbox, state.viewport);
+  const canvas = els.pdfCanvas;
+  const ratioX = canvas.width / Math.max(1, parseFloat(canvas.style.width) || canvas.width);
+  const ratioY = canvas.height / Math.max(1, parseFloat(canvas.style.height) || canvas.height);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+  const x = Math.max(0, Math.floor(rect.left * ratioX));
+  const y = Math.max(0, Math.floor(rect.top * ratioY));
+  const w = Math.min(canvas.width - x, Math.ceil(rect.width * ratioX));
+  const h = Math.min(canvas.height - y, Math.ceil(rect.height * ratioY));
+  if (w < 6 || h < 6 || w * h > 4e6) return null;
+  let data;
+  try {
+    data = ctx.getImageData(x, y, w, h).data;
+  } catch {
+    return null;
+  }
+  const gray = new Uint8ClampedArray(w * h);
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) gray[p] = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+  const stats = inkStats(gray, w, h);
+  if (!stats) return null;
+  const bold = looksBold(stats.stem, stats.inkBottom - stats.inkTop + 1);
+  const ready = SCAN_FONTS.filter((id) => document.fonts?.check?.(`12px "${id}"`));
+  const size = Math.max(4, line.fontSize || 12);
+  const measure = (id, isBold, px, text) => {
+    scanMeasureCtx.font = `${isBold ? '700 ' : '400 '}${px}px ${U.cssFontFamily(id)}`;
+    return scanMeasureCtx.measureText(text).width;
+  };
+  const pick = pickFontByWidth(measure, line.text, size, line.bbox.w, ready.length ? ready : ['Arimo'], bold);
+  if (!pick) return { bold, font: 'Arimo', scale: 1 };
+  return { bold, font: pick.font, scale: U.clamp(pick.scale, 0.88, 1.12) };
+}
+
 function makeEditFromLine(line, pageNo) {
   const { bg, fg } = sampleColorsForBbox(line.bbox);
+  const scanStyle = line.hiddenLayer || line.source === 'ocr' ? guessScanLineStyle(line) : null;
+  if (scanStyle) preloadScanFonts();
   return {
     id: U.uid('edit'),
     page: pageNo,
@@ -1499,9 +1669,9 @@ function makeEditFromLine(line, pageNo) {
     baseline: line.baseline,
     originalText: line.text,
     text: line.text,
-    font: line.font || 'Helvetica',
-    size: U.clamp(Math.round((line.fontSize || 12) * 2) / 2, 4, 120),
-    bold: !!line.bold,
+    font: scanStyle ? scanStyle.font : line.font || 'Helvetica',
+    size: U.clamp(Math.round((line.fontSize || 12) * (scanStyle ? scanStyle.scale : 1) * 2) / 2, 4, 120),
+    bold: scanStyle ? scanStyle.bold : !!line.bold,
     italic: !!line.italic,
     underline: false,
     align: 'left',
@@ -2742,6 +2912,9 @@ async function openPdfBytes(bytes, name, password = '', options = {}) {
     buildThumbnails(token);
     await renderCurrent();
     els.canvasScroll.scrollTo({ top: 0, left: 0 });
+    // Ouverture d'un fichier : lecture seule ; les opérations sur le document
+    // ouvert (pages, compression…) gardent le mode en cours.
+    setReadMode(typeof options.readOnly === 'boolean' ? options.readOnly : isReading());
     updatePanelsForPage();
     ensureAllLines().catch(() => {}); // indexation en arrière-plan
     toast(t('msg.opened', { name: state.fileName, n: state.numPages }), 'success', {
@@ -2841,7 +3014,7 @@ async function handleFile(file) {
     pushLoading(t('msg.reading'));
     const buf = await file.arrayBuffer();
     popLoading();
-    await openPdfBytes(new Uint8Array(buf), file.name);
+    await openPdfBytes(new Uint8Array(buf), file.name, '', { readOnly: true });
   } catch (err) {
     popLoading();
     console.error(err);
@@ -2854,7 +3027,7 @@ async function openDemo(kind) {
   try {
     const bytes = kind === 'scan' ? await buildSampleScanPdf() : await buildSampleTextPdf();
     popLoading();
-    await openPdfBytes(bytes, kind === 'scan' ? 'Facture — exemple scanné.pdf' : 'Rapport — exemple texte.pdf');
+    await openPdfBytes(bytes, kind === 'scan' ? 'Facture — exemple scanné.pdf' : 'Rapport — exemple texte.pdf', '', { readOnly: false });
   } catch (err) {
     popLoading();
     console.error(err);
@@ -4618,7 +4791,7 @@ async function openStoredDocument(item) {
   try {
     const bytes = await Session.loadBytes(item.key);
     if (!bytes) throw new Error('missing');
-    await openPdfBytes(bytes, item.name, '', { session: 'auto' });
+    await openPdfBytes(bytes, item.name, '', { session: 'auto', readOnly: true });
   } catch {
     toast(t('files.needFile'), 'warn', { duration: 6000 });
     pendingReopen = { key: item.key, name: item.name };
@@ -5042,7 +5215,7 @@ function openPhotosTool(reset = true) {
       popLoading();
     }
     photoJob.pages = [];
-    await openPdfBytes(new Uint8Array(bytes), name);
+    await openPdfBytes(new Uint8Array(bytes), name, '', { readOnly: true });
     routeTo('doc');
     toast(t('photos.done', { n: String(count) }), 'success', { duration: 5000 });
   });
@@ -5285,6 +5458,7 @@ function bindEvents() {
   // Écrans
   els.homeOpen?.addEventListener('click', () => els.fileInput.click());
   els.homePhotos?.addEventListener('click', () => openPhotosTool());
+  els.readEdit?.addEventListener('click', () => setReadMode(false));
   els.filesOpen?.addEventListener('click', () => els.fileInput.click());
   els.filesBrowse?.addEventListener('click', () => els.fileInput.click());
   els.filesRefresh?.addEventListener('click', () => renderFilesScreen());
@@ -5321,7 +5495,7 @@ function bindEvents() {
     'pointerdown',
     (e) => {
       if (!state.active) return;
-      if (e.target.closest('.inline-shell, #formatbar, #editbar, #docDock, dialog, .popover')) return;
+      if (e.target.closest('.inline-shell, #formatbar, #editbar, #docDock, dialog, .popover, .font-picker, .sheet')) return;
       closeActive();
     },
     true
@@ -5669,6 +5843,59 @@ function initLanguage() {
   applyLanguage(lang);
 }
 
+/* ─────────── Ouverture depuis l'explorateur (PWA installée) et écran de départ ─────────── */
+
+let launchedWithFile = false;
+
+/** Fichiers PDF ouverts par le système (double-clic, « Ouvrir avec », partage). */
+function bindLaunchFiles() {
+  if (!('launchQueue' in window)) return;
+  window.launchQueue.setConsumer(async (params) => {
+    const handles = params?.files || [];
+    if (!handles.length) return;
+    launchedWithFile = true;
+    for (const handle of handles) {
+      try {
+        const file = await handle.getFile();
+        routeTo('doc');
+        await handleFile(file);
+      } catch (err) {
+        console.warn('[launch] fichier illisible', err);
+        toast(t('msg.openFailed', { msg: err?.message || String(err) }), 'error');
+      }
+    }
+  });
+}
+
+/**
+ * Écran de départ : la liste des fichiers (récents en haut) quand il y en a,
+ * l'accueil sinon. Les raccourcis de l'icône (?open=files|photos) priment.
+ */
+async function openStartScreen() {
+  const wanted = new URLSearchParams(location.search).get('open');
+  if (wanted === 'photos') {
+    routeTo('home');
+    openPhotosTool();
+    return;
+  }
+  if (wanted === 'files') {
+    routeTo('files');
+    return;
+  }
+  if (wanted === 'home') {
+    routeTo('home');
+    return;
+  }
+  try {
+    const docs = await Session.listDocuments();
+    // Un fichier ouvert par le système, ou un document déjà ouvert, garde la main.
+    if (launchedWithFile || state.engine) return;
+    if (docs.length) routeTo('files');
+  } catch {
+    /* stockage indisponible : on reste sur l'accueil */
+  }
+}
+
 function init() {
   initLanguage();
   hydrateIcons();
@@ -5698,6 +5925,8 @@ function init() {
     onTool: (id) => openTool(id),
   });
   if (!state.engine) routeTo('home');
+  bindLaunchFiles();
+  openStartScreen();
   setTimeout(() => showOnboarding(), 700);
   bindPinchZoom();
   bindSwipePaging();

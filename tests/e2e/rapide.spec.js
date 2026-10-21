@@ -14,7 +14,7 @@ async function openDemo(page, seed = {}) {
       /* stockage indisponible */
     }
   }, seed);
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
   await expect(page.locator('#homeDemoText')).toBeVisible();
   await page.evaluate(() => document.querySelector('#homeDemoText').click());
   await page.locator('.line-block').first().waitFor({ state: 'visible', timeout: 60_000 });

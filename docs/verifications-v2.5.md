@@ -239,3 +239,11 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - Texte caché sous l'image d'un scan (ou en mode invisible) : police sans empattement à l'édition.
 - Audit : nom du document dans la barre du haut ; Partager, ⋮ et « + Texte » masqués hors document ; « 1 document » ; dates dans la langue de l'interface ; description de Enregistrer ; messages au-dessus de la barre ; page PDF toujours de gauche à droite en arabe (lettres latines déformées auparavant) ; flèche Retour inversée en arabe.
 - Vérifié : 128 tests unitaires, e2e complets Chromium + Samsung (92) et WebKit (46).
+
+## Lecture seule, icône PDF, écran d'accueil, polices
+
+- Les PDF s'ouvrent en lecture seule ; bouton « Modifier » (#readEdit) pour passer en édition (tests/e2e/lecture.spec.js).
+- Gestionnaire de fichiers PDF (manifest file_handlers + icônes, launchQueue) ; l'application démarre sur la liste des fichiers, les plus récents en haut.
+- Scans : le style (graisse, police) est déduit de l'image pour que les modifications gardent l'aspect d'origine (src/scanStyle.js).
+- Catalogue de 110 polices supplémentaires (OFL, chargées à la demande, non précachées) + sélecteur avec aperçu et recherche (tests/e2e/polices.spec.js).
+- Suites : vitest 133 OK ; Playwright Chromium + Samsung 100 OK.

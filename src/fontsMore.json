@@ -1,0 +1,1169 @@
+[
+ {
+  "id": "Inter",
+  "label": "Inter",
+  "group": "sans",
+  "slug": "inter",
+  "files": {
+   "n": "inter-n.woff2",
+   "b": "inter-b.woff2",
+   "i": "inter-i.woff2",
+   "bi": "inter-bi.woff2"
+  }
+ },
+ {
+  "id": "Poppins",
+  "label": "Poppins",
+  "group": "sans",
+  "slug": "poppins",
+  "files": {
+   "n": "poppins-n.woff2",
+   "b": "poppins-b.woff2",
+   "i": "poppins-i.woff2",
+   "bi": "poppins-bi.woff2"
+  }
+ },
+ {
+  "id": "Nunito",
+  "label": "Nunito",
+  "group": "sans",
+  "slug": "nunito",
+  "files": {
+   "n": "nunito-n.woff2",
+   "b": "nunito-b.woff2",
+   "i": "nunito-i.woff2",
+   "bi": "nunito-bi.woff2"
+  }
+ },
+ {
+  "id": "Nunito Sans",
+  "label": "Nunito Sans",
+  "group": "sans",
+  "slug": "nunito-sans",
+  "files": {
+   "n": "nunito-sans-n.woff2",
+   "b": "nunito-sans-b.woff2",
+   "i": "nunito-sans-i.woff2",
+   "bi": "nunito-sans-bi.woff2"
+  }
+ },
+ {
+  "id": "Source Sans 3",
+  "label": "Source Sans 3",
+  "group": "sans",
+  "slug": "source-sans-3",
+  "files": {
+   "n": "source-sans-3-n.woff2",
+   "b": "source-sans-3-b.woff2",
+   "i": "source-sans-3-i.woff2",
+   "bi": "source-sans-3-bi.woff2"
+  }
+ },
+ {
+  "id": "Work Sans",
+  "label": "Work Sans",
+  "group": "sans",
+  "slug": "work-sans",
+  "files": {
+   "n": "work-sans-n.woff2",
+   "b": "work-sans-b.woff2",
+   "i": "work-sans-i.woff2",
+   "bi": "work-sans-bi.woff2"
+  }
+ },
+ {
+  "id": "Raleway",
+  "label": "Raleway",
+  "group": "sans",
+  "slug": "raleway",
+  "files": {
+   "n": "raleway-n.woff2",
+   "b": "raleway-b.woff2",
+   "i": "raleway-i.woff2",
+   "bi": "raleway-bi.woff2"
+  }
+ },
+ {
+  "id": "Oswald",
+  "label": "Oswald",
+  "group": "sans",
+  "slug": "oswald",
+  "files": {
+   "n": "oswald-n.woff2",
+   "b": "oswald-b.woff2"
+  }
+ },
+ {
+  "id": "Ubuntu",
+  "label": "Ubuntu",
+  "group": "sans",
+  "slug": "ubuntu",
+  "files": {
+   "n": "ubuntu-n.woff2",
+   "b": "ubuntu-b.woff2",
+   "i": "ubuntu-i.woff2",
+   "bi": "ubuntu-bi.woff2"
+  }
+ },
+ {
+  "id": "PT Sans",
+  "label": "PT Sans",
+  "group": "sans",
+  "slug": "pt-sans",
+  "files": {
+   "n": "pt-sans-n.woff2",
+   "b": "pt-sans-b.woff2",
+   "i": "pt-sans-i.woff2",
+   "bi": "pt-sans-bi.woff2"
+  }
+ },
+ {
+  "id": "Fira Sans",
+  "label": "Fira Sans",
+  "group": "sans",
+  "slug": "fira-sans",
+  "files": {
+   "n": "fira-sans-n.woff2",
+   "b": "fira-sans-b.woff2",
+   "i": "fira-sans-i.woff2",
+   "bi": "fira-sans-bi.woff2"
+  }
+ },
+ {
+  "id": "DM Sans",
+  "label": "DM Sans",
+  "group": "sans",
+  "slug": "dm-sans",
+  "files": {
+   "n": "dm-sans-n.woff2",
+   "b": "dm-sans-b.woff2",
+   "i": "dm-sans-i.woff2",
+   "bi": "dm-sans-bi.woff2"
+  }
+ },
+ {
+  "id": "Barlow",
+  "label": "Barlow",
+  "group": "sans",
+  "slug": "barlow",
+  "files": {
+   "n": "barlow-n.woff2",
+   "b": "barlow-b.woff2",
+   "i": "barlow-i.woff2",
+   "bi": "barlow-bi.woff2"
+  }
+ },
+ {
+  "id": "Quicksand",
+  "label": "Quicksand",
+  "group": "sans",
+  "slug": "quicksand",
+  "files": {
+   "n": "quicksand-n.woff2",
+   "b": "quicksand-b.woff2"
+  }
+ },
+ {
+  "id": "Mulish",
+  "label": "Mulish",
+  "group": "sans",
+  "slug": "mulish",
+  "files": {
+   "n": "mulish-n.woff2",
+   "b": "mulish-b.woff2",
+   "i": "mulish-i.woff2",
+   "bi": "mulish-bi.woff2"
+  }
+ },
+ {
+  "id": "Karla",
+  "label": "Karla",
+  "group": "sans",
+  "slug": "karla",
+  "files": {
+   "n": "karla-n.woff2",
+   "b": "karla-b.woff2",
+   "i": "karla-i.woff2",
+   "bi": "karla-bi.woff2"
+  }
+ },
+ {
+  "id": "Rubik",
+  "label": "Rubik",
+  "group": "sans",
+  "slug": "rubik",
+  "files": {
+   "n": "rubik-n.woff2",
+   "b": "rubik-b.woff2",
+   "i": "rubik-i.woff2",
+   "bi": "rubik-bi.woff2"
+  }
+ },
+ {
+  "id": "Manrope",
+  "label": "Manrope",
+  "group": "sans",
+  "slug": "manrope",
+  "files": {
+   "n": "manrope-n.woff2",
+   "b": "manrope-b.woff2"
+  }
+ },
+ {
+  "id": "Josefin Sans",
+  "label": "Josefin Sans",
+  "group": "sans",
+  "slug": "josefin-sans",
+  "files": {
+   "n": "josefin-sans-n.woff2",
+   "b": "josefin-sans-b.woff2",
+   "i": "josefin-sans-i.woff2",
+   "bi": "josefin-sans-bi.woff2"
+  }
+ },
+ {
+  "id": "Cabin",
+  "label": "Cabin",
+  "group": "sans",
+  "slug": "cabin",
+  "files": {
+   "n": "cabin-n.woff2",
+   "b": "cabin-b.woff2",
+   "i": "cabin-i.woff2",
+   "bi": "cabin-bi.woff2"
+  }
+ },
+ {
+  "id": "Hind",
+  "label": "Hind",
+  "group": "sans",
+  "slug": "hind",
+  "files": {
+   "n": "hind-n.woff2",
+   "b": "hind-b.woff2"
+  }
+ },
+ {
+  "id": "IBM Plex Sans",
+  "label": "IBM Plex Sans",
+  "group": "sans",
+  "slug": "ibm-plex-sans",
+  "files": {
+   "n": "ibm-plex-sans-n.woff2",
+   "b": "ibm-plex-sans-b.woff2",
+   "i": "ibm-plex-sans-i.woff2",
+   "bi": "ibm-plex-sans-bi.woff2"
+  }
+ },
+ {
+  "id": "Archivo",
+  "label": "Archivo",
+  "group": "sans",
+  "slug": "archivo",
+  "files": {
+   "n": "archivo-n.woff2",
+   "b": "archivo-b.woff2",
+   "i": "archivo-i.woff2",
+   "bi": "archivo-bi.woff2"
+  }
+ },
+ {
+  "id": "Noto Sans",
+  "label": "Noto Sans (catalogue)",
+  "group": "sans",
+  "slug": "noto-sans",
+  "files": {
+   "n": "noto-sans-n.woff2",
+   "b": "noto-sans-b.woff2",
+   "i": "noto-sans-i.woff2",
+   "bi": "noto-sans-bi.woff2"
+  }
+ },
+ {
+  "id": "Open Sans Condensed",
+  "label": "Open Sans Condensed",
+  "group": "sans",
+  "slug": "open-sans-condensed",
+  "files": {
+   "n": "open-sans-condensed-n.woff2",
+   "b": "open-sans-condensed-b.woff2"
+  }
+ },
+ {
+  "id": "Roboto Condensed",
+  "label": "Roboto Condensed",
+  "group": "sans",
+  "slug": "roboto-condensed",
+  "files": {
+   "n": "roboto-condensed-n.woff2",
+   "b": "roboto-condensed-b.woff2",
+   "i": "roboto-condensed-i.woff2",
+   "bi": "roboto-condensed-bi.woff2"
+  }
+ },
+ {
+  "id": "Titillium Web",
+  "label": "Titillium Web",
+  "group": "sans",
+  "slug": "titillium-web",
+  "files": {
+   "n": "titillium-web-n.woff2",
+   "b": "titillium-web-b.woff2",
+   "i": "titillium-web-i.woff2",
+   "bi": "titillium-web-bi.woff2"
+  }
+ },
+ {
+  "id": "Exo 2",
+  "label": "Exo 2",
+  "group": "sans",
+  "slug": "exo-2",
+  "files": {
+   "n": "exo-2-n.woff2",
+   "b": "exo-2-b.woff2",
+   "i": "exo-2-i.woff2",
+   "bi": "exo-2-bi.woff2"
+  }
+ },
+ {
+  "id": "Signika",
+  "label": "Signika",
+  "group": "sans",
+  "slug": "signika",
+  "files": {
+   "n": "signika-n.woff2",
+   "b": "signika-b.woff2"
+  }
+ },
+ {
+  "id": "Asap",
+  "label": "Asap",
+  "group": "sans",
+  "slug": "asap",
+  "files": {
+   "n": "asap-n.woff2",
+   "b": "asap-b.woff2",
+   "i": "asap-i.woff2",
+   "bi": "asap-bi.woff2"
+  }
+ },
+ {
+  "id": "Lora",
+  "label": "Lora",
+  "group": "serif",
+  "slug": "lora",
+  "files": {
+   "n": "lora-n.woff2",
+   "b": "lora-b.woff2",
+   "i": "lora-i.woff2",
+   "bi": "lora-bi.woff2"
+  }
+ },
+ {
+  "id": "Libre Baskerville",
+  "label": "Libre Baskerville",
+  "group": "serif",
+  "slug": "libre-baskerville",
+  "files": {
+   "n": "libre-baskerville-n.woff2",
+   "b": "libre-baskerville-b.woff2",
+   "i": "libre-baskerville-i.woff2",
+   "bi": "libre-baskerville-bi.woff2"
+  }
+ },
+ {
+  "id": "Crimson Text",
+  "label": "Crimson Text",
+  "group": "serif",
+  "slug": "crimson-text",
+  "files": {
+   "n": "crimson-text-n.woff2",
+   "b": "crimson-text-b.woff2",
+   "i": "crimson-text-i.woff2",
+   "bi": "crimson-text-bi.woff2"
+  }
+ },
+ {
+  "id": "EB Garamond",
+  "label": "EB Garamond",
+  "group": "serif",
+  "slug": "eb-garamond",
+  "files": {
+   "n": "eb-garamond-n.woff2",
+   "b": "eb-garamond-b.woff2",
+   "i": "eb-garamond-i.woff2",
+   "bi": "eb-garamond-bi.woff2"
+  }
+ },
+ {
+  "id": "Cormorant Garamond",
+  "label": "Cormorant Garamond",
+  "group": "serif",
+  "slug": "cormorant-garamond",
+  "files": {
+   "n": "cormorant-garamond-n.woff2",
+   "b": "cormorant-garamond-b.woff2",
+   "i": "cormorant-garamond-i.woff2",
+   "bi": "cormorant-garamond-bi.woff2"
+  }
+ },
+ {
+  "id": "Noto Serif",
+  "label": "Noto Serif",
+  "group": "serif",
+  "slug": "noto-serif",
+  "files": {
+   "n": "noto-serif-n.woff2",
+   "b": "noto-serif-b.woff2",
+   "i": "noto-serif-i.woff2",
+   "bi": "noto-serif-bi.woff2"
+  }
+ },
+ {
+  "id": "PT Serif",
+  "label": "PT Serif",
+  "group": "serif",
+  "slug": "pt-serif",
+  "files": {
+   "n": "pt-serif-n.woff2",
+   "b": "pt-serif-b.woff2",
+   "i": "pt-serif-i.woff2",
+   "bi": "pt-serif-bi.woff2"
+  }
+ },
+ {
+  "id": "Source Serif 4",
+  "label": "Source Serif 4",
+  "group": "serif",
+  "slug": "source-serif-4",
+  "files": {
+   "n": "source-serif-4-n.woff2",
+   "b": "source-serif-4-b.woff2",
+   "i": "source-serif-4-i.woff2",
+   "bi": "source-serif-4-bi.woff2"
+  }
+ },
+ {
+  "id": "Bitter",
+  "label": "Bitter",
+  "group": "serif",
+  "slug": "bitter",
+  "files": {
+   "n": "bitter-n.woff2",
+   "b": "bitter-b.woff2",
+   "i": "bitter-i.woff2",
+   "bi": "bitter-bi.woff2"
+  }
+ },
+ {
+  "id": "Cardo",
+  "label": "Cardo",
+  "group": "serif",
+  "slug": "cardo",
+  "files": {
+   "n": "cardo-n.woff2",
+   "b": "cardo-b.woff2",
+   "i": "cardo-i.woff2"
+  }
+ },
+ {
+  "id": "Old Standard TT",
+  "label": "Old Standard TT",
+  "group": "serif",
+  "slug": "old-standard-tt",
+  "files": {
+   "n": "old-standard-tt-n.woff2",
+   "b": "old-standard-tt-b.woff2",
+   "i": "old-standard-tt-i.woff2"
+  }
+ },
+ {
+  "id": "Libre Caslon Text",
+  "label": "Libre Caslon Text",
+  "group": "serif",
+  "slug": "libre-caslon-text",
+  "files": {
+   "n": "libre-caslon-text-n.woff2",
+   "b": "libre-caslon-text-b.woff2",
+   "i": "libre-caslon-text-i.woff2"
+  }
+ },
+ {
+  "id": "Spectral",
+  "label": "Spectral",
+  "group": "serif",
+  "slug": "spectral",
+  "files": {
+   "n": "spectral-n.woff2",
+   "b": "spectral-b.woff2",
+   "i": "spectral-i.woff2",
+   "bi": "spectral-bi.woff2"
+  }
+ },
+ {
+  "id": "Domine",
+  "label": "Domine",
+  "group": "serif",
+  "slug": "domine",
+  "files": {
+   "n": "domine-n.woff2",
+   "b": "domine-b.woff2"
+  }
+ },
+ {
+  "id": "Vollkorn",
+  "label": "Vollkorn",
+  "group": "serif",
+  "slug": "vollkorn",
+  "files": {
+   "n": "vollkorn-n.woff2",
+   "b": "vollkorn-b.woff2",
+   "i": "vollkorn-i.woff2",
+   "bi": "vollkorn-bi.woff2"
+  }
+ },
+ {
+  "id": "IBM Plex Serif",
+  "label": "IBM Plex Serif",
+  "group": "serif",
+  "slug": "ibm-plex-serif",
+  "files": {
+   "n": "ibm-plex-serif-n.woff2",
+   "b": "ibm-plex-serif-b.woff2",
+   "i": "ibm-plex-serif-i.woff2",
+   "bi": "ibm-plex-serif-bi.woff2"
+  }
+ },
+ {
+  "id": "Crimson Pro",
+  "label": "Crimson Pro",
+  "group": "serif",
+  "slug": "crimson-pro",
+  "files": {
+   "n": "crimson-pro-n.woff2",
+   "b": "crimson-pro-b.woff2",
+   "i": "crimson-pro-i.woff2",
+   "bi": "crimson-pro-bi.woff2"
+  }
+ },
+ {
+  "id": "Zilla Slab",
+  "label": "Zilla Slab",
+  "group": "serif",
+  "slug": "zilla-slab",
+  "files": {
+   "n": "zilla-slab-n.woff2",
+   "b": "zilla-slab-b.woff2",
+   "i": "zilla-slab-i.woff2",
+   "bi": "zilla-slab-bi.woff2"
+  }
+ },
+ {
+  "id": "Alegreya",
+  "label": "Alegreya",
+  "group": "serif",
+  "slug": "alegreya",
+  "files": {
+   "n": "alegreya-n.woff2",
+   "b": "alegreya-b.woff2",
+   "i": "alegreya-i.woff2",
+   "bi": "alegreya-bi.woff2"
+  }
+ },
+ {
+  "id": "Arvo",
+  "label": "Arvo",
+  "group": "serif",
+  "slug": "arvo",
+  "files": {
+   "n": "arvo-n.woff2",
+   "b": "arvo-b.woff2",
+   "i": "arvo-i.woff2",
+   "bi": "arvo-bi.woff2"
+  }
+ },
+ {
+  "id": "Gelasio",
+  "label": "Gelasio (≈ Georgia)",
+  "group": "serif",
+  "slug": "gelasio",
+  "files": {
+   "n": "gelasio-n.woff2",
+   "b": "gelasio-b.woff2",
+   "i": "gelasio-i.woff2",
+   "bi": "gelasio-bi.woff2"
+  }
+ },
+ {
+  "id": "Source Code Pro",
+  "label": "Source Code Pro",
+  "group": "mono",
+  "slug": "source-code-pro",
+  "files": {
+   "n": "source-code-pro-n.woff2",
+   "b": "source-code-pro-b.woff2",
+   "i": "source-code-pro-i.woff2",
+   "bi": "source-code-pro-bi.woff2"
+  }
+ },
+ {
+  "id": "Fira Code",
+  "label": "Fira Code",
+  "group": "mono",
+  "slug": "fira-code",
+  "files": {
+   "n": "fira-code-n.woff2",
+   "b": "fira-code-b.woff2"
+  }
+ },
+ {
+  "id": "Fira Mono",
+  "label": "Fira Mono",
+  "group": "mono",
+  "slug": "fira-mono",
+  "files": {
+   "n": "fira-mono-n.woff2",
+   "b": "fira-mono-b.woff2"
+  }
+ },
+ {
+  "id": "IBM Plex Mono",
+  "label": "IBM Plex Mono",
+  "group": "mono",
+  "slug": "ibm-plex-mono",
+  "files": {
+   "n": "ibm-plex-mono-n.woff2",
+   "b": "ibm-plex-mono-b.woff2",
+   "i": "ibm-plex-mono-i.woff2",
+   "bi": "ibm-plex-mono-bi.woff2"
+  }
+ },
+ {
+  "id": "Space Mono",
+  "label": "Space Mono",
+  "group": "mono",
+  "slug": "space-mono",
+  "files": {
+   "n": "space-mono-n.woff2",
+   "b": "space-mono-b.woff2",
+   "i": "space-mono-i.woff2",
+   "bi": "space-mono-bi.woff2"
+  }
+ },
+ {
+  "id": "Inconsolata",
+  "label": "Inconsolata",
+  "group": "mono",
+  "slug": "inconsolata",
+  "files": {
+   "n": "inconsolata-n.woff2",
+   "b": "inconsolata-b.woff2"
+  }
+ },
+ {
+  "id": "JetBrains Mono",
+  "label": "JetBrains Mono",
+  "group": "mono",
+  "slug": "jetbrains-mono",
+  "files": {
+   "n": "jetbrains-mono-n.woff2",
+   "b": "jetbrains-mono-b.woff2",
+   "i": "jetbrains-mono-i.woff2",
+   "bi": "jetbrains-mono-bi.woff2"
+  }
+ },
+ {
+  "id": "Ubuntu Mono",
+  "label": "Ubuntu Mono",
+  "group": "mono",
+  "slug": "ubuntu-mono",
+  "files": {
+   "n": "ubuntu-mono-n.woff2",
+   "b": "ubuntu-mono-b.woff2",
+   "i": "ubuntu-mono-i.woff2",
+   "bi": "ubuntu-mono-bi.woff2"
+  }
+ },
+ {
+  "id": "PT Mono",
+  "label": "PT Mono",
+  "group": "mono",
+  "slug": "pt-mono",
+  "files": {
+   "n": "pt-mono-n.woff2"
+  }
+ },
+ {
+  "id": "DM Mono",
+  "label": "DM Mono",
+  "group": "mono",
+  "slug": "dm-mono",
+  "files": {
+   "n": "dm-mono-n.woff2",
+   "i": "dm-mono-i.woff2"
+  }
+ },
+ {
+  "id": "Special Elite",
+  "label": "Special Elite (machine à écrire)",
+  "group": "mono",
+  "slug": "special-elite",
+  "files": {
+   "n": "special-elite-n.woff2"
+  }
+ },
+ {
+  "id": "Cutive Mono",
+  "label": "Cutive Mono",
+  "group": "mono",
+  "slug": "cutive-mono",
+  "files": {
+   "n": "cutive-mono-n.woff2"
+  }
+ },
+ {
+  "id": "Pacifico",
+  "label": "Pacifico",
+  "group": "hand",
+  "slug": "pacifico",
+  "files": {
+   "n": "pacifico-n.woff2"
+  }
+ },
+ {
+  "id": "Caveat",
+  "label": "Caveat",
+  "group": "hand",
+  "slug": "caveat",
+  "files": {
+   "n": "caveat-n.woff2",
+   "b": "caveat-b.woff2"
+  }
+ },
+ {
+  "id": "Satisfy",
+  "label": "Satisfy",
+  "group": "hand",
+  "slug": "satisfy",
+  "files": {
+   "n": "satisfy-n.woff2"
+  }
+ },
+ {
+  "id": "Great Vibes",
+  "label": "Great Vibes",
+  "group": "hand",
+  "slug": "great-vibes",
+  "files": {
+   "n": "great-vibes-n.woff2"
+  }
+ },
+ {
+  "id": "Sacramento",
+  "label": "Sacramento",
+  "group": "hand",
+  "slug": "sacramento",
+  "files": {
+   "n": "sacramento-n.woff2"
+  }
+ },
+ {
+  "id": "Kaushan Script",
+  "label": "Kaushan Script",
+  "group": "hand",
+  "slug": "kaushan-script",
+  "files": {
+   "n": "kaushan-script-n.woff2"
+  }
+ },
+ {
+  "id": "Shadows Into Light",
+  "label": "Shadows Into Light",
+  "group": "hand",
+  "slug": "shadows-into-light",
+  "files": {
+   "n": "shadows-into-light-n.woff2"
+  }
+ },
+ {
+  "id": "Indie Flower",
+  "label": "Indie Flower",
+  "group": "hand",
+  "slug": "indie-flower",
+  "files": {
+   "n": "indie-flower-n.woff2"
+  }
+ },
+ {
+  "id": "Homemade Apple",
+  "label": "Homemade Apple",
+  "group": "hand",
+  "slug": "homemade-apple",
+  "files": {
+   "n": "homemade-apple-n.woff2"
+  }
+ },
+ {
+  "id": "Allura",
+  "label": "Allura",
+  "group": "hand",
+  "slug": "allura",
+  "files": {
+   "n": "allura-n.woff2"
+  }
+ },
+ {
+  "id": "Parisienne",
+  "label": "Parisienne",
+  "group": "hand",
+  "slug": "parisienne",
+  "files": {
+   "n": "parisienne-n.woff2"
+  }
+ },
+ {
+  "id": "Courgette",
+  "label": "Courgette",
+  "group": "hand",
+  "slug": "courgette",
+  "files": {
+   "n": "courgette-n.woff2"
+  }
+ },
+ {
+  "id": "Merienda",
+  "label": "Merienda",
+  "group": "hand",
+  "slug": "merienda",
+  "files": {
+   "n": "merienda-n.woff2",
+   "b": "merienda-b.woff2"
+  }
+ },
+ {
+  "id": "Patrick Hand",
+  "label": "Patrick Hand",
+  "group": "hand",
+  "slug": "patrick-hand",
+  "files": {
+   "n": "patrick-hand-n.woff2"
+  }
+ },
+ {
+  "id": "Architects Daughter",
+  "label": "Architects Daughter",
+  "group": "hand",
+  "slug": "architects-daughter",
+  "files": {
+   "n": "architects-daughter-n.woff2"
+  }
+ },
+ {
+  "id": "Reenie Beanie",
+  "label": "Reenie Beanie",
+  "group": "hand",
+  "slug": "reenie-beanie",
+  "files": {
+   "n": "reenie-beanie-n.woff2"
+  }
+ },
+ {
+  "id": "Alex Brush",
+  "label": "Alex Brush",
+  "group": "hand",
+  "slug": "alex-brush",
+  "files": {
+   "n": "alex-brush-n.woff2"
+  }
+ },
+ {
+  "id": "Tangerine",
+  "label": "Tangerine",
+  "group": "hand",
+  "slug": "tangerine",
+  "files": {
+   "n": "tangerine-n.woff2",
+   "b": "tangerine-b.woff2"
+  }
+ },
+ {
+  "id": "Yellowtail",
+  "label": "Yellowtail",
+  "group": "hand",
+  "slug": "yellowtail",
+  "files": {
+   "n": "yellowtail-n.woff2"
+  }
+ },
+ {
+  "id": "Marck Script",
+  "label": "Marck Script",
+  "group": "hand",
+  "slug": "marck-script",
+  "files": {
+   "n": "marck-script-n.woff2"
+  }
+ },
+ {
+  "id": "Gloria Hallelujah",
+  "label": "Gloria Hallelujah",
+  "group": "hand",
+  "slug": "gloria-hallelujah",
+  "files": {
+   "n": "gloria-hallelujah-n.woff2"
+  }
+ },
+ {
+  "id": "Bebas Neue",
+  "label": "Bebas Neue",
+  "group": "display",
+  "slug": "bebas-neue",
+  "files": {
+   "n": "bebas-neue-n.woff2"
+  }
+ },
+ {
+  "id": "Anton",
+  "label": "Anton",
+  "group": "display",
+  "slug": "anton",
+  "files": {
+   "n": "anton-n.woff2"
+  }
+ },
+ {
+  "id": "Abril Fatface",
+  "label": "Abril Fatface",
+  "group": "display",
+  "slug": "abril-fatface",
+  "files": {
+   "n": "abril-fatface-n.woff2"
+  }
+ },
+ {
+  "id": "Lobster",
+  "label": "Lobster",
+  "group": "display",
+  "slug": "lobster",
+  "files": {
+   "n": "lobster-n.woff2"
+  }
+ },
+ {
+  "id": "Archivo Black",
+  "label": "Archivo Black",
+  "group": "display",
+  "slug": "archivo-black",
+  "files": {
+   "n": "archivo-black-n.woff2"
+  }
+ },
+ {
+  "id": "Righteous",
+  "label": "Righteous",
+  "group": "display",
+  "slug": "righteous",
+  "files": {
+   "n": "righteous-n.woff2"
+  }
+ },
+ {
+  "id": "Alfa Slab One",
+  "label": "Alfa Slab One",
+  "group": "display",
+  "slug": "alfa-slab-one",
+  "files": {
+   "n": "alfa-slab-one-n.woff2"
+  }
+ },
+ {
+  "id": "Fjalla One",
+  "label": "Fjalla One",
+  "group": "display",
+  "slug": "fjalla-one",
+  "files": {
+   "n": "fjalla-one-n.woff2"
+  }
+ },
+ {
+  "id": "Passion One",
+  "label": "Passion One",
+  "group": "display",
+  "slug": "passion-one",
+  "files": {
+   "n": "passion-one-n.woff2",
+   "b": "passion-one-b.woff2"
+  }
+ },
+ {
+  "id": "Bangers",
+  "label": "Bangers",
+  "group": "display",
+  "slug": "bangers",
+  "files": {
+   "n": "bangers-n.woff2"
+  }
+ },
+ {
+  "id": "Permanent Marker",
+  "label": "Permanent Marker",
+  "group": "display",
+  "slug": "permanent-marker",
+  "files": {
+   "n": "permanent-marker-n.woff2"
+  }
+ },
+ {
+  "id": "Cinzel",
+  "label": "Cinzel",
+  "group": "display",
+  "slug": "cinzel",
+  "files": {
+   "n": "cinzel-n.woff2",
+   "b": "cinzel-b.woff2"
+  }
+ },
+ {
+  "id": "Playfair Display SC",
+  "label": "Playfair Display SC",
+  "group": "display",
+  "slug": "playfair-display-sc",
+  "files": {
+   "n": "playfair-display-sc-n.woff2",
+   "b": "playfair-display-sc-b.woff2",
+   "i": "playfair-display-sc-i.woff2",
+   "bi": "playfair-display-sc-bi.woff2"
+  }
+ },
+ {
+  "id": "Oleo Script",
+  "label": "Oleo Script",
+  "group": "display",
+  "slug": "oleo-script",
+  "files": {
+   "n": "oleo-script-n.woff2",
+   "b": "oleo-script-b.woff2"
+  }
+ },
+ {
+  "id": "Fredoka",
+  "label": "Fredoka",
+  "group": "display",
+  "slug": "fredoka",
+  "files": {
+   "n": "fredoka-n.woff2",
+   "b": "fredoka-b.woff2"
+  }
+ },
+ {
+  "id": "Chewy",
+  "label": "Chewy",
+  "group": "display",
+  "slug": "chewy",
+  "files": {
+   "n": "chewy-n.woff2"
+  }
+ },
+ {
+  "id": "Amiri",
+  "label": "Amiri",
+  "group": "arabic",
+  "slug": "amiri",
+  "files": {
+   "n": "amiri-n.woff2",
+   "b": "amiri-b.woff2",
+   "i": "amiri-i.woff2",
+   "bi": "amiri-bi.woff2"
+  }
+ },
+ {
+  "id": "Cairo",
+  "label": "Cairo",
+  "group": "arabic",
+  "slug": "cairo",
+  "files": {
+   "n": "cairo-n.woff2",
+   "b": "cairo-b.woff2"
+  }
+ },
+ {
+  "id": "Tajawal",
+  "label": "Tajawal",
+  "group": "arabic",
+  "slug": "tajawal",
+  "files": {
+   "n": "tajawal-n.woff2",
+   "b": "tajawal-b.woff2"
+  }
+ },
+ {
+  "id": "Scheherazade New",
+  "label": "Scheherazade New",
+  "group": "arabic",
+  "slug": "scheherazade-new",
+  "files": {
+   "n": "scheherazade-new-n.woff2",
+   "b": "scheherazade-new-b.woff2"
+  }
+ },
+ {
+  "id": "Noto Kufi Arabic",
+  "label": "Noto Kufi Arabic",
+  "group": "arabic",
+  "slug": "noto-kufi-arabic",
+  "files": {
+   "n": "noto-kufi-arabic-n.woff2",
+   "b": "noto-kufi-arabic-b.woff2"
+  }
+ },
+ {
+  "id": "Lateef",
+  "label": "Lateef",
+  "group": "arabic",
+  "slug": "lateef",
+  "files": {
+   "n": "lateef-n.woff2",
+   "b": "lateef-b.woff2"
+  }
+ },
+ {
+  "id": "Reem Kufi",
+  "label": "Reem Kufi",
+  "group": "arabic",
+  "slug": "reem-kufi",
+  "files": {
+   "n": "reem-kufi-n.woff2",
+   "b": "reem-kufi-b.woff2"
+  }
+ },
+ {
+  "id": "Harmattan",
+  "label": "Harmattan",
+  "group": "arabic",
+  "slug": "harmattan",
+  "files": {
+   "n": "harmattan-n.woff2",
+   "b": "harmattan-b.woff2"
+  }
+ },
+ {
+  "id": "Almarai",
+  "label": "Almarai",
+  "group": "arabic",
+  "slug": "almarai",
+  "files": {
+   "n": "almarai-n.woff2",
+   "b": "almarai-b.woff2"
+  }
+ },
+ {
+  "id": "Changa",
+  "label": "Changa",
+  "group": "arabic",
+  "slug": "changa",
+  "files": {
+   "n": "changa-n.woff2",
+   "b": "changa-b.woff2"
+  }
+ }
+]
