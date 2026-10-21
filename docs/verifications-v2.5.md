@@ -196,3 +196,10 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - Le bouton flottant « + Texte » disparaît du document (doublon).
 - Vérifié : 103 tests unitaires et 58 tests Chromium/Samsung (profil 390 px : Signer et Tampon visibles sans défiler).
 - Non fait (étapes suivantes) : menu du document façon Adobe (⋮ : Exporter, Compresser, Mot de passe, Imprimer), signatures enregistrées en un geste, reconnaissance automatique de la police d'un scan.
+
+## Menu ⋮ du document (v2.6, étape 2)
+
+- Bouton ⋮ dans la barre du haut : Enregistrer, Exporter…, Partager, Imprimer, Compresser, Convertir, Définir le mot de passe, Rechercher.
+- Partager et Imprimer génèrent le PDF avec les modifications, l'OCR et les annotations. Partage vérifié (fichier PDF « -modifie.pdf » transmis à l'API de partage). Impression : via un cadre caché, avec repli (PDF ouvert dans un nouvel onglet) ; **non testée sur un vrai téléphone**.
+- Boutons de la barre compacte agrandis (≥ 48 px).
+- 105 tests unitaires, 60 tests Chromium/Samsung.

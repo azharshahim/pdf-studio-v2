@@ -54,4 +54,26 @@ test.describe('Barre d’outils du document', () => {
     await page.locator('#docDock [data-dock=highlight]').tap();
     await expect(page.locator('body')).toHaveClass(/annotating/);
   });
+
+  test('menu ⋮ : actions du document, partage et compression', async ({ page }) => {
+    await page.addInitScript(() => {
+      navigator.canShare = () => true;
+      navigator.share = async (data) => {
+        window.__shared = { name: data.files[0].name, type: data.files[0].type, size: data.files[0].size };
+      };
+    });
+    await openDemo(page);
+    await page.locator('#btnDocMenu').tap();
+    await expect(page.locator('#sheet [data-doc-menu]')).toHaveCount(8);
+
+    await page.locator('[data-doc-menu=share]').tap();
+    await expect.poll(() => page.evaluate(() => window.__shared?.name)).toMatch(/-modifie\.pdf$/);
+    const shared = await page.evaluate(() => window.__shared);
+    expect(shared.type).toBe('application/pdf');
+    expect(shared.size).toBeGreaterThan(1000);
+
+    await page.locator('#btnDocMenu').tap();
+    await page.locator('[data-doc-menu=compress]').tap();
+    await expect(page.locator('#sheetTitle')).toContainText(/ompress/i);
+  });
 });

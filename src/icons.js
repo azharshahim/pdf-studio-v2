@@ -53,6 +53,8 @@ const P = {
   signature: '<path d="M4 17c3 0 3.5-9 6-9s1 7 3.5 7 2.5-6 4-6 1.5 3 2.5 3"/><path d="M4 20.5h16"/>',
   stamp: '<path d="M9 4h6a2 2 0 0 1 2 2v3l-1.5 2h-7L7 9V6a2 2 0 0 1 2-2z"/><path d="M7 13h10v3.5H7z"/><path d="M5 19.5h14"/>',
   layers: '<path d="m12 3.5 8.5 4.5L12 12.5 3.5 8z"/><path d="m4 12 8 4.2 8-4.2M4 16l8 4.2 8-4.2"/>',
+  more: '<circle cx="12" cy="5.5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="18.5" r="1.6"/>',
+  printer: '<path d="M7 9V4.5h10V9"/><rect x="4" y="9" width="16" height="8" rx="2"/><path d="M7.5 14h9v6h-9z"/>',
   lock: '<rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/><path d="M12 14.5v2.5"/>',
   compress: '<path d="M12 3.5v6M9.5 7l2.5 2.5L14.5 7"/><path d="M12 20.5v-6M9.5 17l2.5-2.5 2.5 2.5"/><path d="M4 12h16"/>',
   convert: '<path d="M4.5 8.5h12l-3-3M19.5 15.5h-12l3 3"/>',

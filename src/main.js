@@ -136,6 +136,7 @@ const els = {
   fmtSize: $('fmtSize'),
   fmtFont: $('fmtFont'),
   docDock: $('docDock'),
+  btnDocMenu: $('btnDocMenu'),
   fmtColorBtn: $('fmtColorBtn'),
   fmtSwatch: $('fmtSwatch'),
   fmtColorPop: $('fmtColorPop'),
@@ -790,6 +791,126 @@ function bindDock() {
   updateDock();
 }
 
+/* ───────── Menu ⋮ du document ───────── */
+
+/** Génère le PDF courant (modifications, OCR, annotations) sans le télécharger. */
+async function buildCurrentPdf() {
+  closeActive();
+  const { exportPdf } = await import('./exporter.js');
+  const result = await exportPdf({
+    sourceBytes: state.bytes,
+    edits: state.edits,
+    ocrPages: collectOcrForSession(),
+    redactMode: 'stream',
+    renderPage: null,
+    objects: markup.objects,
+  });
+  return new Blob([result.bytes], { type: 'application/pdf' });
+}
+
+function docFileName(suffix = '') {
+  const base = U.baseName(state.fileName || 'document.pdf');
+  return `${base}${suffix}.pdf`;
+}
+
+async function shareCurrentPdf() {
+  pushLoading(t('save.working'));
+  try {
+    const blob = await buildCurrentPdf();
+    popLoading();
+    await shareBlob(blob, docFileName('-modifie'));
+  } catch (err) {
+    console.error(err);
+    popLoading();
+    toast(t('save.error'), 'error');
+  }
+}
+
+async function printCurrentPdf() {
+  pushLoading(t('save.working'));
+  let url = null;
+  try {
+    const blob = await buildCurrentPdf();
+    url = URL.createObjectURL(blob);
+    popLoading();
+    const frame = document.createElement('iframe');
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0';
+    frame.src = url;
+    let done = false;
+    const fallback = () => {
+      if (done) return;
+      done = true;
+      toast(t('menu.printFail'), 'info', { duration: 5000 });
+      window.open(url, '_blank', 'noopener');
+    };
+    frame.addEventListener('load', () => {
+      try {
+        frame.contentWindow.focus();
+        frame.contentWindow.print();
+        done = true;
+      } catch {
+        fallback();
+      }
+    });
+    document.body.appendChild(frame);
+    // Certains navigateurs mobiles n'affichent pas le PDF dans un cadre caché.
+    setTimeout(fallback, 4000);
+    setTimeout(() => {
+      frame.remove();
+      URL.revokeObjectURL(url);
+    }, 120000);
+  } catch (err) {
+    console.error(err);
+    popLoading();
+    toast(t('save.error'), 'error');
+  }
+}
+
+function openDocMenu() {
+  if (!state.engine) return;
+  const items = [
+    { id: 'save', icon: 'save', title: 'menu.save', hint: 'menu.saveHint' },
+    { id: 'export', icon: 'download', title: 'menu.export', hint: 'menu.exportHint' },
+    { id: 'share', icon: 'share', title: 'menu.share', hint: 'menu.shareHint' },
+    { id: 'print', icon: 'printer', title: 'menu.print', hint: 'menu.printHint' },
+    { id: 'compress', icon: 'compress', title: 'menu.compress', hint: 'menu.compressHint' },
+    { id: 'convert', icon: 'convert', title: 'menu.convert', hint: 'menu.convertHint' },
+    { id: 'password', icon: 'lock', title: 'menu.password', hint: 'menu.passwordHint' },
+    { id: 'search', icon: 'search', title: 'menu.search', hint: 'menu.searchHint' },
+  ];
+  const rows = items
+    .map(
+      (it) => `<button class="sheet-row" data-doc-menu="${it.id}" type="button">
+        <span class="sheet-row-icon">${icon(it.icon, 19)}</span>
+        <span class="sheet-row-text"><strong>${t(it.title)}</strong><span>${t(it.hint)}</span></span>
+        ${icon('chevronRight', 16)}
+      </button>`
+    )
+    .join('');
+  const body = openSheet({
+    title: U.baseName(state.fileName || t('menu.title')),
+    html: `<div class="sheet-list">${rows}</div>`,
+    className: 'doc-menu',
+  });
+  body?.querySelectorAll('[data-doc-menu]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.docMenu;
+      closeSheet();
+      // Laisse la feuille se fermer avant d'ouvrir l'action suivante.
+      setTimeout(() => {
+        if (id === 'save') handleSave();
+        else if (id === 'export') els.btnExport.click();
+        else if (id === 'share') shareCurrentPdf();
+        else if (id === 'print') printCurrentPdf();
+        else if (id === 'compress') openCompressTool();
+        else if (id === 'convert') openConvertTool();
+        else if (id === 'password') openProtectTool();
+        else if (id === 'search') openSearch();
+      }, 260);
+    });
+  });
+}
+
 const fontsRendered = new Set();
 
 /** Remplit la liste des polices : polices de base, puis le catalogue par famille. */
@@ -1155,6 +1276,7 @@ function bindFormatbar() {
 
   populateFontSelect();
   bindDock();
+  els.btnDocMenu?.addEventListener('click', openDocMenu);
   els.fmtFont?.addEventListener('change', () => {
     const value = els.fmtFont.value;
     // Charge la police avant de l'appliquer : l'aperçu et les mesures doivent
@@ -2296,6 +2418,7 @@ function updateExportUi() {
   els.btnExport.disabled = !state.engine;
   if (els.btnSave) els.btnSave.disabled = !state.engine;
   els.btnSearch.disabled = !state.engine;
+  if (els.btnDocMenu) els.btnDocMenu.disabled = !state.engine;
 }
 
 /* ─────────────────────────── Recherche ─────────────────────────── */
