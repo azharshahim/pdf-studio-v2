@@ -4611,3 +4611,111 @@ body.editing .docdock {
     overflow: hidden;
   }
 }
+
+/* Cachets */
+.stamp-cachet-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+.stamp-cachet-row .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+}
+.stamp-preset.stamp-img {
+  display: grid;
+  place-items: center;
+  border-color: var(--line-2);
+  padding: 6px;
+}
+.stamp-preset.stamp-img img {
+  max-width: 100%;
+  max-height: 64px;
+  object-fit: contain;
+}
+.cachet-tabs,
+.cachet-shapes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.seg {
+  flex: 1 1 auto;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1.5px solid var(--line-2);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink-2);
+  font: 600 13px/1 var(--font);
+  cursor: pointer;
+}
+.seg.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.cachet-pane {
+  display: grid;
+  gap: 8px;
+}
+.cachet-pane input:not([type='color']):not([type='range']):not([type='checkbox']) {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1.5px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 500 16px/1 var(--font);
+}
+.cachet-import-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.cachet-import-buttons .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+}
+.range-row {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.cachet-preview {
+  display: grid;
+  place-items: center;
+  min-height: 90px;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1.5px dashed var(--line-2);
+  border-radius: 12px;
+  background:
+    repeating-conic-gradient(rgba(127, 127, 127, 0.12) 0% 25%, transparent 0% 50%) 0 0 / 16px 16px;
+}
+.cachet-preview[hidden] {
+  display: none;
+}
+.cachet-preview img {
+  max-width: 100%;
+  max-height: 160px;
+  object-fit: contain;
+}
+#cachetUse {
+  width: 100%;
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}

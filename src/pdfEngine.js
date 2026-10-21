@@ -169,21 +169,48 @@ export function buildLines(items, styles, pageNo, fontMap = {}) {
 
 const OP = pdfjsLib.OPS || {};
 
+const mulCtm = (m, n) => [
+  n[0] * m[0] + n[1] * m[2],
+  n[0] * m[1] + n[1] * m[3],
+  n[2] * m[0] + n[3] * m[2],
+  n[2] * m[1] + n[3] * m[3],
+  n[4] * m[0] + n[5] * m[2] + m[4],
+  n[4] * m[1] + n[5] * m[3] + m[5],
+];
+
 /**
- * Vrai si la page contient du texte en mode « invisible » (3) : c'est la couche
- * de reconnaissance cachée des scans. Sa police (souvent Courier) n'a rien à
- * voir avec ce qu'on voit sur l'image.
+ * Vrai si le texte de la page n'est pas celui qu'on voit : couche de
+ * reconnaissance cachée des scans, soit en mode « invisible » (3), soit
+ * écrite sous une image qui recouvre la page. Sa police (souvent Courier)
+ * n'a rien à voir avec ce qu'on voit sur l'image.
+ * @param {number} pageArea surface de la page (en unités utilisateur)
  */
-export function hasInvisibleText(fnArray = [], argsArray = [], ops = OP) {
+export function hasInvisibleText(fnArray = [], argsArray = [], ops = OP, pageArea = 0) {
   const shows = new Set([ops.showText, ops.showSpacedText, ops.nextLineShowText, ops.nextLineSetSpacingShowText]);
+  const images = new Set([ops.paintImageXObject, ops.paintInlineImageXObject, ops.paintJpegXObject].filter((x) => x !== undefined));
   let mode = 0;
+  let ctm = [1, 0, 0, 1, 0, 0];
   const stack = [];
+  let visibleTextSeen = false;
   for (let i = 0; i < fnArray.length; i++) {
     const fn = fnArray[i];
-    if (fn === ops.save) stack.push(mode);
-    else if (fn === ops.restore) mode = stack.pop() ?? 0;
-    else if (fn === ops.setTextRenderingMode) mode = Number(argsArray[i]?.[0]) || 0;
-    else if (mode === 3 && shows.has(fn)) return true;
+    if (fn === ops.save) stack.push({ mode, ctm });
+    else if (fn === ops.restore) {
+      const top = stack.pop();
+      mode = top ? top.mode : 0;
+      ctm = top ? top.ctm : [1, 0, 0, 1, 0, 0];
+    } else if (fn === ops.transform) {
+      const a = argsArray[i];
+      if (a && a.length >= 6) ctm = mulCtm(ctm, a);
+    } else if (fn === ops.setTextRenderingMode) mode = Number(argsArray[i]?.[0]) || 0;
+    else if (shows.has(fn)) {
+      if (mode === 3) return true;
+      visibleTextSeen = true;
+    } else if (images.has(fn) && pageArea > 0 && visibleTextSeen) {
+      // Image qui recouvre l'essentiel de la page, dessinée après le texte.
+      const cover = Math.abs(ctm[0] * ctm[3] - ctm[1] * ctm[2]) / pageArea;
+      if (cover >= 0.6) return true;
+    }
   }
   return false;
 }
@@ -259,7 +286,8 @@ export class PdfEngine {
   async pageHasHiddenText(page) {
     try {
       const ops = await page.getOperatorList();
-      return hasInvisibleText(ops.fnArray, ops.argsArray);
+      const [x0, y0, x1, y1] = page.view || [0, 0, 0, 0];
+      return hasInvisibleText(ops.fnArray, ops.argsArray, OP, Math.abs((x1 - x0) * (y1 - y0)));
     } catch {
       return false;
     }

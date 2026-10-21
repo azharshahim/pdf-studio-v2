@@ -12,6 +12,7 @@ import { createInlineEditor } from './inlineEditor.js';
 import { estimateOffsetFromFraction, offsetAtPoint } from './caretPoint.js';
 import * as Session from './session.js';
 import { buildBackup, parseBackup, planRestore } from './backup.js';
+import { CACHET_SHAPES, fileToCachet, renderCachet } from './cachet.js';
 import { CATALOG, BASE_FONTS, GROUP_LABELS, ensureCatalogFont } from './fonts.js';
 import { isQuotaError } from './session.js';
 import { describeBrowser, formatDiagnostic } from './diagnostic.js';
@@ -36,6 +37,7 @@ import {
   removeLightBackground,
   signatureSheetHtml,
   loadStamps,
+  saveImageStamp,
   saveStamp,
   deleteStamp,
   loadSignerName,
@@ -3586,10 +3588,10 @@ function cascadeOffset() {
 }
 
 /** Ajoute une image (signature, photo, tampon) centrée sur la page. */
-function addImageObject(src, { ratio = 3, label = '', type = 'image' } = {}) {
+function addImageObject(src, { ratio = 3, label = '', type = 'image', widthPx = 150, pageShare = 0.34 } = {}) {
   const { w: pageW } = pdfPageSize();
   const scale = state.scale || 1;
-  const width = Math.min(pageW * 0.34, 150 / scale);
+  const width = Math.min(pageW * pageShare, widthPx / scale);
   const height = width / Math.max(0.2, ratio);
   const center = viewCenterPdf();
   const { dx, dy } = cascadeOffset();
@@ -3767,11 +3769,15 @@ function openStampTool() {
         ? `<div class="stamp-mine"><h4>${t('stamp.mine')}</h4><div class="stamp-grid">${loadStamps()
             .map(
               (st) =>
-                `<span class="stamp-saved"><button class="stamp-preset" data-stamp-saved="${st.id}" type="button" style="color:${st.color};border-color:${st.color}">${U.escapeHtml(st.text)}</button><button class="sig-del" data-stamp-del="${st.id}" type="button" aria-label="${t('sign.delete')}">${icon('x', 13)}</button></span>`
+                `<span class="stamp-saved"><button class="stamp-preset${st.kind === 'image' ? ' stamp-img' : ''}" data-stamp-saved="${st.id}" type="button" ${st.kind === 'image' ? `aria-label="${t('cachet.title')}"` : `style="color:${st.color};border-color:${st.color}"`}>${st.kind === 'image' ? `<img src="${st.src}" alt="" />` : U.escapeHtml(st.text)}</button><button class="sig-del" data-stamp-del="${st.id}" type="button" aria-label="${t('sign.delete')}">${icon('x', 13)}</button></span>`
             )
             .join('')}</div></div>`
         : ''
     }
+    <div class="stamp-cachet-row">
+      <button class="btn soft" id="cachetCreate" type="button">${icon('stamp', 16)}<span>${t('cachet.create')}</span></button>
+      <button class="btn soft" id="cachetImport" type="button">${icon('image', 16)}<span>${t('cachet.import')}</span></button>
+    </div>
     <div class="stamp-custom">
       <h4>${t('stamp.custom')}</h4>
       <input id="stampText" placeholder="${t('stamp.text')}" value="" />
@@ -3846,7 +3852,13 @@ function openStampTool() {
   body.querySelectorAll('[data-stamp-saved]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const st = loadStamps().find((x) => x.id === btn.dataset.stampSaved);
-      if (st) addCustomStamp(st.text, st.color);
+      if (!st) return;
+      if (st.kind === 'image') {
+        closeSheet();
+        addImageObject(st.src, { ratio: st.ratio || 2, type: 'image', label: 'Cachet', widthPx: 190, pageShare: 0.4 });
+        return;
+      }
+      addCustomStamp(st.text, st.color);
     });
   });
   body.querySelectorAll('[data-stamp-del]').forEach((btn) => {
@@ -3856,6 +3868,9 @@ function openStampTool() {
       openStampTool();
     });
   });
+
+  body.querySelector('#cachetCreate')?.addEventListener('click', () => openCachetSheet('create'));
+  body.querySelector('#cachetImport')?.addEventListener('click', () => openCachetSheet('import'));
 
   body.querySelector('#stampAdd')?.addEventListener('click', () => {
     const text = body.querySelector('#stampText')?.value?.trim();
@@ -3867,6 +3882,118 @@ function openStampTool() {
     if (body.querySelector('#stampSave')?.checked) saveStamp({ text, color });
     addCustomStamp(text, color);
   });
+}
+
+/** Cachets : création (texte + forme) ou import d'une photo / d'un scan. */
+function openCachetSheet(mode = 'create') {
+  const shapeLabels = { rect: 'cachet.shapeRect', rounded: 'cachet.shapeRounded', ellipse: 'cachet.shapeEllipse', double: 'cachet.shapeDouble' };
+  const html = `
+    <div class="cachet-tabs" role="tablist">
+      <button class="seg ${mode === 'create' ? 'on' : ''}" data-cachet-tab="create" type="button">${t('cachet.create')}</button>
+      <button class="seg ${mode === 'import' ? 'on' : ''}" data-cachet-tab="import" type="button">${t('cachet.import')}</button>
+    </div>
+    <div class="cachet-pane" data-pane="create" ${mode === 'create' ? '' : 'hidden'}>
+      <input id="cachetL1" placeholder="${t('cachet.line1')}" maxlength="40" />
+      <input id="cachetL2" placeholder="${t('cachet.line2')}" maxlength="40" />
+      <input id="cachetL3" placeholder="${t('cachet.line3')}" maxlength="40" />
+      <div class="cachet-shapes">${CACHET_SHAPES.map(
+        (sh, i) => `<button class="seg ${i === 1 ? 'on' : ''}" data-shape="${sh}" type="button">${t(shapeLabels[sh])}</button>`
+      ).join('')}</div>
+      <div class="stamp-row"><input type="color" id="cachetColor" value="#1d4ed8" aria-label="${t('cachet.color')}" /></div>
+    </div>
+    <div class="cachet-pane" data-pane="import" ${mode === 'import' ? '' : 'hidden'}>
+      <p class="muted small">${t('cachet.importHint')}</p>
+      <div class="cachet-import-buttons">
+        <button class="btn soft" id="cachetPick" type="button">${icon('image', 16)}<span>${t('cachet.pickGallery')}</span></button>
+        <button class="btn soft" id="cachetShoot" type="button">${icon('camera', 16)}<span>${t('cachet.pickCamera')}</span></button>
+      </div>
+      <label class="check compact"><input type="checkbox" id="cachetNoBg" checked /><span>${t('cachet.removeBg')}</span></label>
+      <label class="range-row"><span>${t('cachet.threshold')}</span><input type="range" id="cachetThr" min="150" max="250" value="225" /></label>
+    </div>
+    <div class="cachet-preview"><img id="cachetPreview" alt="" /></div>
+    <label class="check compact"><input type="checkbox" id="cachetSave" checked /><span>${t('stamp.saveIt')}</span></label>
+    <button class="btn primary" id="cachetUse" type="button" disabled>${icon('plus', 16)}<span>${t('cachet.use')}</span></button>`;
+  const body = openSheet({ title: t('cachet.title'), html, size: 'tall' });
+  if (!body) return;
+  const q = (sel) => body.querySelector(sel);
+  const preview = q('#cachetPreview');
+  const use = q('#cachetUse');
+  let current = null; // { src, ratio }
+  let shape = 'rounded';
+  let imported = null; // File
+  let active = mode;
+
+  const showCurrent = () => {
+    use.disabled = !current;
+    if (current) preview.src = current.src;
+    else preview.removeAttribute('src');
+    preview.parentElement.hidden = !current;
+  };
+  const refreshCreate = () => {
+    const lines = ['#cachetL1', '#cachetL2', '#cachetL3'].map((id) => q(id).value);
+    current = lines.some((l) => l.trim()) ? renderCachet({ lines, color: q('#cachetColor').value, shape }) : null;
+    showCurrent();
+  };
+  const refreshImport = async () => {
+    if (!imported) {
+      current = null;
+      showCurrent();
+      return;
+    }
+    try {
+      current = await fileToCachet(imported, { removeBg: q('#cachetNoBg').checked, threshold: Number(q('#cachetThr').value) });
+    } catch {
+      current = null;
+      toast(t('cachet.badImage'), 'error');
+    }
+    showCurrent();
+  };
+  const refresh = () => (active === 'create' ? refreshCreate() : refreshImport());
+
+  body.querySelectorAll('[data-cachet-tab]').forEach((tab) =>
+    tab.addEventListener('click', () => {
+      active = tab.dataset.cachetTab;
+      body.querySelectorAll('[data-cachet-tab]').forEach((x) => x.classList.toggle('on', x === tab));
+      body.querySelectorAll('[data-pane]').forEach((p) => (p.hidden = p.dataset.pane !== active));
+      refresh();
+    })
+  );
+  body.querySelectorAll('[data-shape]').forEach((b) =>
+    b.addEventListener('click', () => {
+      shape = b.dataset.shape;
+      body.querySelectorAll('[data-shape]').forEach((x) => x.classList.toggle('on', x === b));
+      refreshCreate();
+    })
+  );
+  ['#cachetL1', '#cachetL2', '#cachetL3', '#cachetColor'].forEach((id) => q(id).addEventListener('input', refreshCreate));
+  q('#cachetNoBg').addEventListener('change', refreshImport);
+  q('#cachetThr').addEventListener('input', U.debounce(refreshImport, 120));
+  const pick = (capture) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    if (capture) input.capture = 'environment';
+    input.addEventListener('change', () => {
+      imported = input.files?.[0] || null;
+      refreshImport();
+    });
+    input.click();
+  };
+  q('#cachetPick').addEventListener('click', () => pick(false));
+  q('#cachetShoot').addEventListener('click', () => pick(true));
+  use.addEventListener('click', () => {
+    if (!current) return;
+    if (q('#cachetSave').checked) {
+      const res = saveImageStamp({ src: current.src, ratio: current.ratio, label: 'Cachet' });
+      if (!res.ok) toast(t('cachet.notSaved'), 'warn');
+    }
+    closeSheet();
+    markup.setTool(null);
+    addImageObject(current.src, { ratio: current.ratio, type: 'image', label: 'Cachet', widthPx: 190, pageShare: 0.4 });
+    toast(t('image.placed'), 'success');
+  });
+  showCurrent();
+  if (mode === 'create') q('#cachetL1').focus();
 }
 
 /** Insère une image / photo (appareil photo sur mobile). */

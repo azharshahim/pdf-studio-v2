@@ -59,6 +59,23 @@ export function saveStamp({ text, color }) {
   return list;
 }
 
+/** Enregistre un cachet-image (PNG transparent) dans « Mes tampons ». */
+export function saveImageStamp({ src, ratio, label = '' }) {
+  const list = loadStamps();
+  list.unshift({ id: `stp-${Date.now().toString(36)}`, kind: 'image', src, ratio, label });
+  // Les images pèsent : on garde les 12 plus récents, quitte à en retirer.
+  let kept = list.slice(0, 12);
+  while (kept.length) {
+    try {
+      localStorage.setItem(STAMP_KEY, JSON.stringify(kept));
+      return { ok: true, list: kept };
+    } catch {
+      kept = kept.slice(0, -1);
+    }
+  }
+  return { ok: false, list: [] };
+}
+
 export function deleteStamp(id) {
   const list = loadStamps().filter((s) => s.id !== id);
   try {
