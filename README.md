@@ -1,4 +1,4 @@
-# PDF Studio — OCR & édition de PDF · V2.4
+# PDF Studio — OCR & édition de PDF · V2.5
 
 Application web **100 % locale** : ouvrez un PDF, corrigez le texte **directement sur la page**,
 annotez-le, signez-le, remplissez ses formulaires, lancez l'OCR sur les pages scannées puis
@@ -115,8 +115,8 @@ panneau latéral à ouvrir, la page occupe l'écran.
 ## Tests
 
 ```bash
-npm test          # Vitest — 78 tests (logique pure)
-npm run test:e2e  # Playwright — 9 parcours, 4 profils de navigateur
+npm test          # Vitest — 92 tests (logique pure)
+npm run test:e2e  # Playwright — 19 parcours, 4 profils de navigateur
 ```
 
 Les tests de bout en bout ont besoin d'un navigateur :
@@ -144,7 +144,10 @@ Les tests couvrent notamment :
 - l'**export fidèle** : surlignage, rectangle et encre effectivement dessinés, tampon et date
   retrouvés dans le texte extrait du PDF produit ;
 - la **signature** : signature tapée (image générée), pad de dessin, bibliothèque locale ;
-- `reorderPages` : réordonnancement réel des pages (vérifié en relisant le PDF produit).
+- `reorderPages` : réordonnancement réel des pages (vérifié en relisant le PDF produit) ;
+- les **limites de stockage** : éviction des plus anciens documents, formatage des tailles,
+  détection des erreurs de quota ;
+- le **mode diagnostic** : reconnaissance du navigateur et mise en forme de la ligne affichée.
 
 La CI GitHub Actions exécute `npm test` puis `npm run build` avant chaque déploiement.
 
@@ -182,8 +185,9 @@ fonctionner aussi bien à la racine que dans un sous-dossier.
   navigateurs sans `Map.prototype.getOrInsertComputed`, `Promise.try` ou `Promise.withResolvers`.
 - `src/polyfills.js` complète ces API pour le reste de l'application (Safari < 17.4,
   Firefox < 128, anciens Chrome).
-- **Testés en 390 × 844 tactile** : Chromium 153, WebKit 26.6 (moteur de Safari) et,
-  pour la logique de garde-fous, un profil Samsung Internet ; Firefox 155 via la CI.
+- **Testés en 390 × 844 tactile** : Chromium 153 et un profil Samsung Internet en local ;
+  WebKit 26.6 (moteur de Safari) et Firefox 155 via la CI. Le détail de ce qui n'a pas pu être
+  testé localement est dans [`docs/verifications-v2.5.md`](docs/verifications-v2.5.md).
 - Le build legacy couvre Safari iOS 15+ et Firefox ESR.
 
 ---
@@ -354,9 +358,34 @@ Le détail des mesures et des captures est dans [`docs/verifications-v2.3.md`](d
 Le détail des mesures et des scénarios est dans
 [`docs/verifications-v2.4.md`](docs/verifications-v2.4.md).
 
+## Version 2.5 — fichiers complets, vérifications et diagnostic
+
+- **Les documents sont vraiment enregistrés** : IndexedDB conserve désormais le PDF lui-même
+  (octets, nom, taille, date) avec ses modifications, ses annotations et ses pages OCR, dans un
+  seul enregistrement fusionné. Toucher un document dans « Fichiers » le rouvre directement, avec
+  ses modifications, une courte animation de chargement.
+- **Limites claires** : 10 documents ou 150 Mo ; les plus anciens ne sont évincés qu'après une
+  confirmation qui les nomme ; en cas de quota, un message explicite explique quoi supprimer.
+- **Écran Fichiers** : bouton « Parcourir mon appareil » en tête de liste, taille de chaque
+  document et espace total utilisé, icônes partager / renommer / supprimer à 44 px, suppression
+  confirmée qui efface aussi le PDF. Si le navigateur a effacé les octets, la ligne propose
+  « Choisir le fichier à nouveau » sans perdre la session.
+- **États grisés** : cinq cas (valider, annuler, rouvrir la même ligne, changer de ligne, scan
+  OCR) mesurés en styles calculés — aucun élément atténué ni bouton désactivé à tort, y compris en
+  thème sombre ; le fond gris d'un scan n'atténue pas le texte (contraste ≈ 16,9:1).
+- **Outils vérifiés dans le fichier** : signature dessinée au doigt (placée, déplacée,
+  redimensionnée), tampons « Approuvé » et date, surlignage jaune, champ de formulaire rempli —
+  chaque cas exporté puis rouvert avec pdf.js pour confirmer la présence de l'élément.
+- **Mode diagnostic** (désactivé par défaut, écran Outils) : affiche discrètement le navigateur
+  détecté, le mode d'édition (`contentEditable` ou `textarea`) et la position du curseur.
+
+Le détail des mesures, des captures et **la liste explicite de ce qui n'a pas été testé**
+(vrai Samsung Internet, claviers natifs, IME réelle, Safari iOS, OCR complet, quota réel…) est
+dans [`docs/verifications-v2.5.md`](docs/verifications-v2.5.md).
+
 ## Ce qui a été vérifié, et comment
 
-Les tests automatiques (`npm test`, 58 tests) couvrent la logique pure : recherche, polices,
+Les tests automatiques (`npm test`, 92 tests) couvrent la logique pure : recherche, polices,
 remplacement réel du texte, pages, formulaires, images, annotations, export des objets et
 signatures. Ils ne remplacent pas un essai dans un vrai navigateur : les parcours ci-dessous ont
 donc été rejoués dans **Chromium** au moyen de scripts Playwright, en 390 × 844 (téléphone,
@@ -389,6 +418,12 @@ composition IME** (les événements `compositionstart` / `insertCompositionText`
 `compositionend` sont émis par script), et **Firefox en local** : le processus de rendu est tué par
 le noyau de cette machine de test (≈ 2 Go de mémoire) dès l'ouverture d'un PDF ; la CI, qui
 dispose de plus de mémoire, exécute le profil Firefox.
+
+Pour la V2.5, restent non testés : le **quota réel** du disque et l'**éviction réelle** des octets
+par le navigateur (simulés), l'**OCR complet** dans les parcours de bout en bout (couche de texte
+injectée pour ne pas attendre plusieurs minutes) et **WebKit en local** (bibliothèques système
+absentes de cette machine ; la CI exécute le profil). La liste complète est dans
+[`docs/verifications-v2.5.md`](docs/verifications-v2.5.md).
 
 ## Limites connues
 
