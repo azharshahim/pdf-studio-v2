@@ -188,3 +188,11 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - Aperçu à l'écran et PDF exporté utilisent la même police ; repli sur Noto Sans pour un caractère absent (arabe, etc.).
 - Un PDF texte dont la police est dans le catalogue (ex. Roboto) est reconnu et réédité avec cette police.
 - Non fait : choix automatique de la police d'un **scan** (le texte n'est qu'une image) ; la police par défaut d'une ligne OCR reste Helvetica, à changer dans la liste.
+
+## Barre d'outils du document (v2.6, étape 1)
+
+- Dans le document, la barre du bas (Accueil/Fichiers/Outils) est remplacée par une barre d'outils : Modifier, Texte, Surligner, Tracer, Signer, Tampon, Commenter, Formulaire (si le PDF en a), Pages, OCR, Plus (→ écran Outils).
+- Pendant la modification d'un texte : version compacte (icônes seules) au-dessus de la barre de mise en forme ; un appui sur Signer, Tampon, etc. valide le texte puis ouvre l'outil, en un seul appui.
+- Le bouton flottant « + Texte » disparaît du document (doublon).
+- Vérifié : 103 tests unitaires et 58 tests Chromium/Samsung (profil 390 px : Signer et Tampon visibles sans défiler).
+- Non fait (étapes suivantes) : menu du document façon Adobe (⋮ : Exporter, Compresser, Mot de passe, Imprimer), signatures enregistrées en un geste, reconnaissance automatique de la police d'un scan.

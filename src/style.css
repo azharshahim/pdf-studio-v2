@@ -4389,3 +4389,119 @@ body.annotating .annobar {
   text-overflow: ellipsis;
   backdrop-filter: blur(4px);
 }
+
+
+/* ───────── Barre d'outils du document (style lecteur PDF) ───────── */
+.docdock {
+  flex: 0 0 auto;
+  display: none;
+  align-items: stretch;
+  gap: 1px;
+  height: calc(62px + env(safe-area-inset-bottom));
+  padding: 0 3px env(safe-area-inset-bottom);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  z-index: 30;
+}
+.docdock::-webkit-scrollbar {
+  display: none;
+}
+.dockitem {
+  flex: 0 0 auto;
+  min-width: 58px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: 600 11px/1.2 var(--font);
+  cursor: pointer;
+  border-radius: 12px;
+}
+.dockitem[hidden] {
+  display: none;
+}
+.dockitem svg {
+  width: 23px;
+  height: 23px;
+}
+.dockitem.active {
+  color: var(--accent);
+}
+.dockitem:active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+/* Dans le document, la barre d'outils remplace la navigation du bas. */
+body[data-route='doc'] .docdock {
+  display: flex;
+}
+body[data-route='doc'] .tabbar {
+  display: none;
+}
+body.annotating .docdock,
+body.form-open .docdock {
+  display: none;
+}
+/* Pendant la modification d'un texte : version compacte, au-dessus de la barre de mise en forme. */
+body.editing .docdock {
+  display: flex;
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--kb-offset, 0px) + 74px + env(safe-area-inset-bottom));
+  width: min(720px, calc(100vw - 12px));
+  height: 44px;
+  padding: 3px 4px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  z-index: 79;
+}
+body.editing .dockitem {
+  flex-direction: row;
+  min-width: 0;
+  gap: 5px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+body.editing .dockitem svg {
+  width: 18px;
+  height: 18px;
+}
+body.editing .dock-extra {
+  display: none;
+}
+
+/* Compact : icônes seules, pour que Signer et Tampon restent visibles sans défiler. */
+body.editing .dockitem {
+  flex: 1 1 0;
+  min-width: 40px;
+  padding: 0;
+  justify-content: center;
+}
+body.editing .dockitem > span:last-child {
+  display: none;
+}
+body.editing .dockitem svg {
+  width: 21px;
+  height: 21px;
+}
+/* « Texte » est dans la barre d'outils : le bouton flottant fait doublon. */
+body[data-route='doc'] .fab {
+  display: none;
+}
+@media (min-width: 700px) {
+  body:not(.editing) .docdock {
+    justify-content: center;
+  }
+}

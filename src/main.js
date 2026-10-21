@@ -135,6 +135,7 @@ const els = {
   formatbar: $('formatbar'),
   fmtSize: $('fmtSize'),
   fmtFont: $('fmtFont'),
+  docDock: $('docDock'),
   fmtColorBtn: $('fmtColorBtn'),
   fmtSwatch: $('fmtSwatch'),
   fmtColorPop: $('fmtColorPop'),
@@ -713,6 +714,82 @@ function clearOverlay() {
   }
 }
 
+/* ───────── Barre d'outils du document ───────── */
+
+/** Actions de la barre : valide d'abord le texte en cours, puis lance l'outil. */
+function dockAction(id) {
+  if (!state.engine) return;
+  if (id === 'more') {
+    closeActive();
+    routeTo('tools');
+    return;
+  }
+  closeActive();
+  if (state.addMode && id !== 'text') cancelAddMode();
+  switch (id) {
+    case 'edit':
+      closeAnnotate?.();
+      toast(t('dock.editHint'), 'info', { duration: 3200 });
+      break;
+    case 'text':
+      startAddText();
+      break;
+    case 'comment':
+      openAnnotate();
+      activateAnnoTool('note');
+      break;
+    case 'highlight':
+      openAnnotate();
+      activateAnnoTool('highlight');
+      break;
+    case 'draw':
+      openAnnotate();
+      activateAnnoTool('ink');
+      break;
+    case 'sign':
+      openSignTool();
+      break;
+    case 'stamp':
+      openStampTool();
+      break;
+    case 'form':
+      openFormTool();
+      break;
+    case 'pages':
+    case 'ocr':
+      openTool(id);
+      break;
+    default:
+  }
+  updateDock();
+}
+
+function updateDock() {
+  const dock = els.docDock;
+  if (!dock) return;
+  const form = document.getElementById('dockForm');
+  if (form) form.hidden = !state.formFields?.length;
+  dock.querySelectorAll('[data-dock]').forEach((b) => {
+    const id = b.dataset.dock;
+    const active =
+      (id === 'text' && state.addMode) ||
+      (id === 'edit' && !state.addMode && !document.body.classList.contains('annotating'));
+    b.classList.toggle('active', active);
+  });
+}
+
+function bindDock() {
+  // Garde le focus dans le texte en cours : sans cela, le premier appui ferme
+  // le clavier, la mise en page bouge et le clic tombe à côté.
+  els.docDock?.addEventListener('pointerdown', (ev) => {
+    if (ev.target.closest('button')) ev.preventDefault();
+  });
+  els.docDock?.querySelectorAll('[data-dock]').forEach((btn) => {
+    btn.addEventListener('click', () => dockAction(btn.dataset.dock));
+  });
+  updateDock();
+}
+
 const fontsRendered = new Set();
 
 /** Remplit la liste des polices : polices de base, puis le catalogue par famille. */
@@ -1077,6 +1154,7 @@ function bindFormatbar() {
   });
 
   populateFontSelect();
+  bindDock();
   els.fmtFont?.addEventListener('change', () => {
     const value = els.fmtFont.value;
     // Charge la police avant de l'appliquer : l'aperçu et les mesures doivent
@@ -2173,6 +2251,7 @@ function updateTextPanel() {
 }
 
 function updateHint() {
+  updateDock();
   if (!state.engine) return;
   const pd = getPageData(state.pageIndex + 1);
   els.hintCancel.hidden = !state.addMode;
@@ -4528,7 +4607,7 @@ function bindEvents() {
     'pointerdown',
     (e) => {
       if (!state.active) return;
-      if (e.target.closest('.inline-shell, #formatbar, #editbar, dialog, .popover')) return;
+      if (e.target.closest('.inline-shell, #formatbar, #editbar, #docDock, dialog, .popover')) return;
       closeActive();
     },
     true
