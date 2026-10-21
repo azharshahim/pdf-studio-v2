@@ -119,5 +119,35 @@ export function createUi(els) {
     });
   }
 
-  return { pushLoading, popLoading, toast, confirmMissingGlyphs, askPassword };
+  /**
+   * Confirmation générique (suppression, dépassement de limite…).
+   * @returns {Promise<boolean>}
+   */
+  function askConfirm({ title, message, confirmLabel, cancelLabel, danger = true } = {}) {
+    if (!els.confirmDialog) return Promise.resolve(false);
+    els.confirmTitle.textContent = title || '';
+    els.confirmText.textContent = message || '';
+    els.confirmOk.textContent = confirmLabel || (danger ? 'Confirmer' : 'OK');
+    els.confirmOk.classList.toggle('danger', !!danger);
+    if (els.confirmCancel) els.confirmCancel.textContent = cancelLabel || 'Annuler';
+    return new Promise((resolve) => {
+      const done = (value) => {
+        els.confirmDialog.removeEventListener('close', onClose);
+        els.confirmCancel.removeEventListener('click', onCancel);
+        els.confirmOk.removeEventListener('click', onOk);
+        if (els.confirmDialog.open) els.confirmDialog.close();
+        resolve(value);
+      };
+      const onClose = () => done(false);
+      const onCancel = () => done(false);
+      const onOk = () => done(true);
+      els.confirmDialog.addEventListener('close', onClose);
+      els.confirmCancel.addEventListener('click', onCancel);
+      els.confirmOk.addEventListener('click', onOk);
+      els.confirmDialog.showModal();
+      requestAnimationFrame(() => els.confirmCancel.focus());
+    });
+  }
+
+  return { pushLoading, popLoading, toast, confirmMissingGlyphs, askPassword, askConfirm };
 }

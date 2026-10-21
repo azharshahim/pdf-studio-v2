@@ -11,9 +11,10 @@ import { createUi } from './ui.js';
 import { createInlineEditor } from './inlineEditor.js';
 import { estimateOffsetFromFraction, offsetAtPoint } from './caretPoint.js';
 import * as Session from './session.js';
+import { isQuotaError } from './session.js';
 import { buildSampleTextPdf, buildSampleScanPdf } from './samples.js';
 import { icon, hydrateIcons } from './icons.js';
-import { applyLanguage, t } from './i18n.js';
+import { applyLanguage, getLang, t } from './i18n.js';
 import * as U from './utils.js';
 import { initShell, routeTo, openSheet, closeSheet, isSheetOpen, isMobile, renderTools, showOnboarding } from './shell.js';
 import { createMarkup, HIGHLIGHT_COLORS, STAMP_PRESETS } from './markup.js';
@@ -57,6 +58,11 @@ const els = {
   btnUndo: $('btnUndo'),
   btnRedo: $('btnRedo'),
   resumeDialog: $('resumeDialog'),
+  confirmDialog: $('confirmDialog'),
+  confirmTitle: $('confirmTitle'),
+  confirmText: $('confirmText'),
+  confirmOk: $('confirmOk'),
+  confirmCancel: $('confirmCancel'),
   resumeText: $('resumeText'),
   resumeYes: $('resumeYes'),
   resumeNo: $('resumeNo'),
@@ -190,6 +196,8 @@ const els = {
   homeRecent: $('homeRecent'),
   homeRecentWrap: $('homeRecentWrap'),
   filesOpen: $('filesOpen'),
+  filesBrowse: $('filesBrowse'),
+  filesTotal: $('filesTotal'),
   filesRefresh: $('filesRefresh'),
   filesList: $('filesList'),
   filesCount: $('filesCount'),
@@ -210,7 +218,7 @@ const els = {
 
 // Helpers d'interface (toasts, chargement, dialogues)
 const ui = createUi(els);
-const { toast, pushLoading, popLoading, confirmMissingGlyphs, askPassword } = ui;
+const { toast, pushLoading, popLoading, confirmMissingGlyphs, askPassword, askConfirm } = ui;
 
 const state = {
   engine: null,
@@ -1540,10 +1548,9 @@ function scheduleAutosave(now = false) {
       ocrPages: collectOcrForSession(),
       markup: markup.objects,
     };
-    if (!payload.edits.length && !payload.ocrPages.length && !payload.markup.length) {
-      Session.deleteSession?.(state.hash).catch(() => {});
-      return;
-    }
+    // Même sans modification, l'enregistrement reste : il porte les octets du
+    // PDF et permet de le rouvrir depuis « Fichiers ». Seule la session
+    // d'édition est vidée.
     return Session.saveSession(state.hash, payload).catch(() => {});
   };
   if (now) return run();
@@ -1551,25 +1558,116 @@ function scheduleAutosave(now = false) {
 }
 
 /**
- * Propose de reprendre une session existante pour ce document.
- * `state.hash` doit être calculé avant l'appel.
+ * Enregistre le PDF et ses métadonnées dans IndexedDB, après avoir vérifié les
+ * limites (10 documents / 150 Mo). Les documents les plus anciens ne sont
+ * supprimés qu'après confirmation explicite.
  */
-async function maybeRestoreSession() {
-  if (!state.hash) return;
+async function persistDocument(hash, bytes) {
+  try {
+    const plan = await Session.checkLimits(hash, bytes.byteLength);
+    if (plan.blocked) {
+      toast(t('files.tooBig', { size: U.formatBytes(bytes.byteLength), max: '150 Mo' }), 'error', {
+        duration: 9000,
+      });
+      return false;
+    }
+    if (plan.evict.length) {
+      const docs = await Session.listDocuments().catch(() => []);
+      const names = plan.evict
+        .map((key) => docs.find((d) => d.key === key)?.name)
+        .filter(Boolean)
+        .slice(0, 3)
+        .join(', ');
+      const ok = await askConfirm({
+        title: t('files.limitTitle'),
+        message: t('files.limitText', {
+          max: String(Session.MAX_DOCUMENTS),
+          names: names || t('files.someOld'),
+        }),
+        confirmLabel: t('files.limitConfirm'),
+        cancelLabel: t('common.cancel'),
+      });
+      if (!ok) {
+        toast(t('files.limitKept'), 'warn', { duration: 7000 });
+        return false;
+      }
+      for (const key of plan.evict) {
+        await Session.deleteDocument(key).catch(() => {});
+      }
+    }
+    await Session.saveDocumentBytes(hash, bytes, {
+      name: state.fileName,
+      numPages: state.numPages,
+    });
+    return true;
+  } catch (err) {
+    console.warn('[store] enregistrement impossible', err);
+    toast(isQuotaError(err) ? t('files.quota') : t('files.saveFailed'), 'error', { duration: 9000 });
+    return false;
+  }
+}
+
+/** Applique une session enregistrée au document courant (sans dialogue). */
+function applySessionData(saved) {
+  state.restoring = true;
+  try {
+    if (Array.isArray(saved.edits)) {
+      state.edits = saved.edits.filter((e) => e && e.page >= 1 && e.page <= state.numPages);
+    }
+    if (Array.isArray(saved.markup)) {
+      markup.setObjects(saved.markup.filter((o) => o && o.page >= 1 && o.page <= state.numPages));
+      markupHistory.stack = [JSON.stringify(markup.objects)];
+      markupHistory.index = 0;
+    }
+    for (const entry of saved.ocrPages || []) {
+      if (!entry?.ocr || entry.pageNo < 1 || entry.pageNo > state.numPages) continue;
+      const pd = getPageData(entry.pageNo);
+      pd.ocr = entry.ocr;
+      pd.ocrStatus = 'done';
+    }
+    state.history.clear();
+    updateHistoryButtons();
+    renderOverlay();
+    renderEditList();
+    updateExportUi();
+    updatePanelsForPage();
+    updateTextPanel();
+    return true;
+  } finally {
+    state.restoring = false;
+  }
+}
+
+/**
+ * Reprend la session d'un document (modifications, annotations, OCR).
+ * @param {string} hash clé du document
+ * @param {{silent?:boolean}} options `silent` : pas de dialogue (ouverture
+ *   depuis « Fichiers » ou reprise directe après avoir choisi le fichier)
+ */
+async function restoreSessionData(hash, { silent = false } = {}) {
+  if (!hash) return false;
   let saved = null;
   try {
-    saved = await Session.loadSession(state.hash);
+    saved = await Session.loadSession(hash);
   } catch {
-    return;
+    return false;
   }
-  if (!saved) return;
+  if (!saved) return false;
   const nEdits = saved.edits?.length || 0;
   const nOcr = saved.ocrPages?.length || 0;
-  if (!nEdits && !nOcr) return;
+  const nMarkup = saved.markup?.length || 0;
+  if (!nEdits && !nOcr && !nMarkup) return false;
+
+  if (silent) {
+    applySessionData(saved);
+    toast(t('msg.sessionRestored'), 'success', { duration: 2200 });
+    return true;
+  }
 
   const parts = [];
   if (nEdits) parts.push(`${nEdits} modification${nEdits > 1 ? 's' : ''}`);
   if (nOcr) parts.push(`${nOcr} page${nOcr > 1 ? 's' : ''} OCRisée${nOcr > 1 ? 's' : ''}`);
+  if (nMarkup) parts.push(`${nMarkup} annotation${nMarkup > 1 ? 's' : ''}`);
   els.resumeText.textContent = `Une session a été trouvée pour « ${saved.name || state.fileName} » : ${parts.join(
     ' et '
   )}. Voulez-vous reprendre où vous en étiez ?`;
@@ -1592,35 +1690,25 @@ async function maybeRestoreSession() {
   });
 
   if (!answer) {
-    await Session.deleteSession(state.hash).catch(() => {});
-    return;
+    // Refuser la reprise ne doit pas supprimer le document : on efface
+    // seulement la session d'édition, les octets restent dans « Fichiers ».
+    await Session.saveSession(state.hash, {
+      name: state.fileName,
+      numPages: state.numPages,
+      edits: [],
+      ocrPages: [],
+      markup: [],
+    }).catch(() => {});
+    return false;
   }
-  try {
-    state.restoring = true;
-    if (Array.isArray(saved.edits)) {
-      state.edits = saved.edits.filter((e) => e && e.page >= 1 && e.page <= state.numPages);
-    }
-    if (Array.isArray(saved.markup)) {
-      markup.setObjects(saved.markup.filter((o) => o && o.page >= 1 && o.page <= state.numPages));
-      markupHistory.stack = [JSON.stringify(markup.objects)];
-      markupHistory.index = 0;
-    }
-    for (const entry of saved.ocrPages || []) {
-      if (!entry?.ocr || entry.pageNo < 1 || entry.pageNo > state.numPages) continue;
-      const pd = getPageData(entry.pageNo);
-      pd.ocr = entry.ocr;
-      pd.ocrStatus = 'done';
-    }
-    state.history.clear();
-    updateHistoryButtons();
-    renderOverlay();
-    renderEditList();
-    updateExportUi();
-    updatePanelsForPage();
-    toast(t('msg.sessionRestored'), 'success', { duration: 2600 });
-  } finally {
-    state.restoring = false;
-  }
+  applySessionData(saved);
+  toast(t('msg.sessionRestored'), 'success', { duration: 2600 });
+  return true;
+}
+
+/** Propose de reprendre une session (ouverture manuelle d'un PDF). */
+function maybeRestoreSession() {
+  return restoreSessionData(state.hash, { silent: false });
 }
 
 /* ── Dialogue de mot de passe ─────────────────────────────────────── */
@@ -2191,7 +2279,17 @@ function closeSearch() {
 
 /* ─────────────────────────── Import / démo ─────────────────────────── */
 
-async function openPdfBytes(bytes, name, password = '') {
+/**
+ * Ouvre un PDF.
+ * @param {Uint8Array} bytes
+ * @param {string} name
+ * @param {string} [password]
+ * @param {{session?: 'ask'|'auto'|'skip'}} [options] `auto` : reprend la
+ *   session sans demander (ouverture depuis « Fichiers ») ; `skip` : ignore
+ *   toute session enregistrée.
+ */
+async function openPdfBytes(bytes, name, password = '', options = {}) {
+  const openOptions = { session: 'ask', ...options };
   pushLoading(t('msg.opening'));
   const attempt = ++state.loadToken;
   let passwordPrompt = null;
@@ -2281,14 +2379,26 @@ async function openPdfBytes(bytes, name, password = '') {
       })
       .catch(() => {});
 
-    // Empreinte + session éventuelle (sans bloquer le rendu)
+    // Empreinte, enregistrement local, puis session éventuelle.
     const docToken = state.docToken;
     Session.hashBytes(bytes)
-      .then((hash) => {
+      .then(async (hash) => {
         if (docToken !== state.docToken) return;
         state.hash = hash;
-        // Conserve le document pour l'écran « Fichiers » (IndexedDB).
-        Session.saveBytes?.(hash, bytes, { name: state.fileName }).catch(() => {});
+        const pending = takePendingReopen();
+        if (pending && pending.key === hash) {
+          // Le fichier choisi correspond bien au document perdu : on reprend
+          // la session enregistrée, sans redemander.
+          await persistDocument(hash, bytes);
+          if (docToken !== state.docToken) return;
+          await restoreSessionData(hash, { silent: true });
+          return;
+        }
+        if (pending) toast(t('files.wrongFile'), 'warn', { duration: 7000 });
+        await persistDocument(hash, bytes);
+        if (docToken !== state.docToken) return;
+        if (openOptions.session === 'auto') return restoreSessionData(hash, { silent: true });
+        if (openOptions.session === 'skip') return;
         return maybeRestoreSession();
       })
       .catch(() => {});
@@ -2317,7 +2427,7 @@ async function openPdfBytes(bytes, name, password = '') {
   // Demande de mot de passe (nouvelle tentative avec le mot de passe saisi)
   if (passwordPrompt) {
     const pwd = await askPassword(!passwordPrompt.wrong);
-    if (pwd) return openPdfBytes(bytes, name, pwd);
+    if (pwd) return openPdfBytes(bytes, name, pwd, options);
   }
 }
 
@@ -3864,108 +3974,176 @@ function openConvertTool() {
 
 let filesCache = [];
 
+/**
+ * Document dont les octets ont disparu : on demande à l'utilisateur de
+ * rechoisir le fichier. La session, elle, est conservée.
+ */
+let pendingReopen = null;
+
+function takePendingReopen() {
+  const pending = pendingReopen;
+  pendingReopen = null;
+  return pending;
+}
+
 function fileDateLabel(ts) {
   if (!ts) return '';
   try {
-    return new Date(ts).toLocaleString(undefined, {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    const locale = getLang() === 'en' ? 'en-GB' : getLang() === 'ar' ? 'ar' : 'fr-FR';
+    const date = new Date(ts);
+    const day = date.toLocaleDateString(locale, { day: '2-digit', month: '2-digit' });
+    const time = date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+    return `${day} ${time}`;
   } catch {
     return '';
   }
 }
 
-/** Liste les documents récents : sessions enregistrées + document courant. */
+/**
+ * Liste les documents enregistrés (octets + session), sans les octets.
+ * Le tri est fait par date de dernière ouverture.
+ */
 async function loadFiles() {
-  const items = [];
   try {
-    const sessions = await Session.listSessions?.();
-    for (const entry of sessions || []) {
-      items.push({
-        key: entry.key,
-        name: entry.name || 'document.pdf',
-        size: entry.size || 0,
-        updatedAt: entry.updatedAt || 0,
-        edits: entry.edits || 0,
-        ocr: entry.ocr || 0,
-        hasBytes: !!entry.bytes,
-      });
-    }
+    return await Session.listDocuments();
   } catch {
-    /* IndexedDB indisponible */
+    return [];
   }
-  return items;
+}
+
+/** Ouvre un document enregistré (octets stockés) et reprend sa session. */
+async function openStoredDocument(item) {
+  if (!item) return;
+  pushLoading(t('files.opening', { name: item.name }));
+  try {
+    const bytes = await Session.loadBytes(item.key);
+    if (!bytes) throw new Error('missing');
+    await openPdfBytes(bytes, item.name, '', { session: 'auto' });
+  } catch {
+    toast(t('files.needFile'), 'warn', { duration: 6000 });
+    pendingReopen = { key: item.key, name: item.name };
+    renderFilesScreen();
+  } finally {
+    popLoading();
+  }
+}
+
+async function deleteStoredDocument(item) {
+  if (!item) return;
+  const ok = await askConfirm({
+    title: t('files.deleteTitle'),
+    message: t('files.deleteText', { name: item.name }),
+    confirmLabel: t('files.delete'),
+    cancelLabel: t('common.cancel'),
+  });
+  if (!ok) return;
+  try {
+    await Session.deleteDocument(item.key);
+  } catch {
+    toast(t('files.saveFailed'), 'error');
+    return;
+  }
+  if (state.hash === item.key) state.hash = null; // ne pas le recréer à l'autosave
+  toast(t('files.deleted'), 'success');
+  await renderFilesScreen();
 }
 
 async function renderFilesScreen() {
   if (!els.filesList) return;
+  els.filesList.hidden = false;
+  els.filesEmpty.hidden = true;
   els.filesList.innerHTML = `<p class="muted small">${t('files.loading')}</p>`;
-  filesCache = await loadFiles();
-  els.filesCount.textContent = String(filesCache.length);
-  els.filesEmpty.hidden = filesCache.length > 0;
-  els.filesList.hidden = filesCache.length === 0;
-  els.filesList.innerHTML = filesCache
-    .map(
-      (f) => `<div class="file-row" data-key="${U.escapeHtml(f.key)}">
+  const [items, used] = await Promise.all([
+    loadFiles(),
+    Session.usedBytes().catch(() => 0),
+  ]);
+  filesCache = items;
+  els.filesCount.textContent = String(items.length);
+  els.filesEmpty.hidden = items.length > 0;
+  els.filesList.hidden = items.length === 0;
+  if (els.filesTotal) {
+    els.filesTotal.textContent = items.length
+      ? t('files.total', {
+          size: U.formatBytes(used),
+          n: String(items.length),
+          max: String(Session.MAX_DOCUMENTS),
+        })
+      : '';
+  }
+  if (!items.length) {
+    els.filesList.innerHTML = '';
+    return;
+  }
+  els.filesList.innerHTML = items
+    .map((f) => {
+      const missing = !f.hasBytes;
+      const summary = t('files.summary', { e: f.edits, o: f.ocr });
+      const details = [fileDateLabel(f.updatedAt), U.formatBytes(f.size)].filter(Boolean).join(' · ');
+      return `<div class="file-row${missing ? ' missing' : ''}" data-key="${U.escapeHtml(f.key)}">
         <span class="file-thumb-icon">${icon('fileText', 20)}</span>
-        <div class="file-main" data-open="${U.escapeHtml(f.key)}">
+        <button class="file-main" type="button" data-open="${U.escapeHtml(f.key)}">
           <strong>${U.escapeHtml(f.name)}</strong>
-          <span>${fileDateLabel(f.updatedAt)} · ${t('files.summary', { e: f.edits, o: f.ocr })}</span>
-        </div>
+          <span class="file-meta">${U.escapeHtml(details)}</span>
+          <span class="file-meta">${U.escapeHtml(summary)}</span>
+          ${missing ? `<span class="file-missing">${t('files.rechoose')}</span>` : ''}
+        </button>
         <div class="file-actions">
-          <button class="icon-btn tiny" data-share="${U.escapeHtml(f.key)}" data-i18n-title="common.share" data-icon="share" aria-label="${t('common.share')}"></button>
-          <button class="icon-btn tiny" data-rename="${U.escapeHtml(f.key)}" data-i18n-title="files.rename" data-icon="edit" aria-label="${t('files.rename')}"></button>
-          <button class="icon-btn tiny" data-remove="${U.escapeHtml(f.key)}" data-i18n-title="files.delete" data-icon="trash" aria-label="${t('files.delete')}"></button>
+          <button class="icon-btn file-action" type="button" data-share="${U.escapeHtml(f.key)}" data-i18n-title="common.share" data-icon="share" aria-label="${t('common.share')}"></button>
+          <button class="icon-btn file-action" type="button" data-rename="${U.escapeHtml(f.key)}" data-i18n-title="files.rename" data-icon="edit" aria-label="${t('files.rename')}"></button>
+          <button class="icon-btn file-action" type="button" data-remove="${U.escapeHtml(f.key)}" data-i18n-title="files.delete" data-icon="trash" aria-label="${t('files.delete')}"></button>
         </div>
-      </div>`,
-    )
+      </div>`;
+    })
     .join('');
   hydrateIcons(els.filesList);
+
+  els.filesList.querySelectorAll('[data-open]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      const item = filesCache.find((f) => f.key === el.dataset.open);
+      if (!item) return;
+      if (!item.hasBytes) {
+        // PDF disparu : on garde la session et on propose de rechoisir le fichier.
+        pendingReopen = { key: item.key, name: item.name };
+        toast(t('files.needFile'), 'warn', { duration: 8000 });
+        els.fileInput.click();
+        return;
+      }
+      await openStoredDocument(item);
+    });
+  });
   els.filesList.querySelectorAll('[data-remove]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      await Session.deleteSession(btn.dataset.remove).catch(() => {});
-      toast(t('files.deleted'), 'success');
-      renderFilesScreen();
+      const item = filesCache.find((f) => f.key === btn.dataset.remove);
+      await deleteStoredDocument(item);
     });
   });
   els.filesList.querySelectorAll('[data-rename]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const item = filesCache.find((f) => f.key === btn.dataset.rename);
       const name = window.prompt(t('files.renamePrompt'), item?.name || '');
-      if (!name) return;
-      await Session.renameSession?.(btn.dataset.rename, name).catch(() => {});
-      renderFilesScreen();
+      if (!name || !name.trim()) return;
+      await Session.renameDocument(btn.dataset.rename, name).catch(() => {});
+      if (state.hash === btn.dataset.rename) {
+        state.fileName = name.trim();
+        updateFileChip();
+        document.title = `${U.baseName(state.fileName)} — PDF Studio`;
+      }
+      await renderFilesScreen();
     });
   });
   els.filesList.querySelectorAll('[data-share]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const item = filesCache.find((f) => f.key === btn.dataset.share);
       if (!item) return;
-      const bytes = await Session.loadBytes?.(item.key);
+      const bytes = await Session.loadBytes(item.key).catch(() => null);
       if (!bytes) {
         toast(t('files.needFile'), 'warn');
         return;
       }
-      await shareBlob(new Blob([bytes], { type: 'application/pdf' }), item.name.endsWith('.pdf') ? item.name : `${item.name}.pdf`);
-    });
-  });
-  els.filesList.querySelectorAll('[data-open]').forEach((el) => {
-    el.addEventListener('click', async () => {
-      const item = filesCache.find((f) => f.key === el.dataset.open);
-      if (!item) return;
-      if (!item.hasBytes) {
-        toast(t('files.needFile'), 'warn');
-        return;
-      }
-      const bytes = await Session.loadBytes?.(item.key);
-      if (!bytes) {
-        toast(t('files.needFile'), 'warn');
-        return;
-      }
-      await openPdfBytes(bytes, item.name);
+      await shareBlob(
+        new Blob([bytes], { type: 'application/pdf' }),
+        item.name.endsWith('.pdf') ? item.name : `${item.name}.pdf`
+      );
     });
   });
 }
@@ -4206,6 +4384,8 @@ function bindEvents() {
   // Écrans
   els.homeOpen?.addEventListener('click', () => els.fileInput.click());
   els.filesOpen?.addEventListener('click', () => els.fileInput.click());
+  els.filesBrowse?.addEventListener('click', () => els.fileInput.click());
+  els.filesRefresh?.addEventListener('click', () => renderFilesScreen());
   els.homeDemoText?.addEventListener('click', () => openDemo('text'));
   els.homeDemoScan?.addEventListener('click', () => openDemo('scan'));
   els.homeResume?.addEventListener('click', () => routeTo('doc'));

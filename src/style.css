@@ -3131,9 +3131,12 @@ body.editing .tabbar {
 }
 .file-main strong {
   font-size: 13.5px;
-  white-space: nowrap;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 .file-main span {
   font-size: 11.5px;
@@ -3142,6 +3145,67 @@ body.editing .tabbar {
 .file-actions {
   display: flex;
   gap: 2px;
+}
+/* Actions de la liste : 44 px partout (téléphone comme bureau). */
+.file-action {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+}
+.files-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 10px;
+}
+.files-toolbar .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 0 18px;
+}
+.files-toolbar .btn svg {
+  width: 18px;
+  height: 18px;
+}
+.files-total {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.file-main {
+  text-align: start;
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  color: inherit;
+  font: inherit;
+}
+.file-meta {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+.file-row.missing {
+  border-style: dashed;
+}
+.file-missing {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--warn);
+}
+@media (pointer: coarse) {
+  .file-row {
+    padding: 6px 8px 6px 12px;
+    gap: 8px;
+  }
+  .file-action {
+    width: 44px;
+    height: 44px;
+  }
 }
 .empty-inline {
   display: flex;

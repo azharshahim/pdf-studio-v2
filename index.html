@@ -461,7 +461,13 @@
             <span class="badge" id="filesCount">0</span>
             <button class="icon-btn" id="filesRefresh" data-i18n-title="files.refresh" data-icon="redo" aria-label="Rafraîchir"></button>
           </header>
-          <p class="muted small" data-i18n="files.note">Documents récents et sessions enregistrés dans votre navigateur (IndexedDB). Rien n'est envoyé sur un serveur.</p>
+          <div class="files-toolbar">
+            <button class="btn primary" id="filesBrowse" type="button">
+              <span data-icon="folder"></span><span data-i18n="files.browse">Parcourir mon appareil</span>
+            </button>
+            <span class="files-total" id="filesTotal"></span>
+          </div>
+          <p class="muted small" data-i18n="files.note">Documents enregistrés dans votre navigateur (IndexedDB) : le PDF et vos modifications. Rien n'est envoyé sur un serveur.</p>
           <div class="files-list" id="filesList"></div>
           <div class="empty-inline" id="filesEmpty" hidden>
             <span data-icon="folder"></span>
@@ -644,6 +650,15 @@
     <div class="dialog-actions">
       <button class="btn ghost" id="resumeNo" type="button" data-i18n="resume.no">Non merci</button>
       <button class="btn primary" id="resumeYes" type="button" data-i18n="resume.yes">Reprendre</button>
+    </div>
+  </dialog>
+
+  <dialog class="dialog" id="confirmDialog" aria-labelledby="confirmTitle">
+    <h3 id="confirmTitle"></h3>
+    <p class="dialog-text" id="confirmText"></p>
+    <div class="dialog-actions">
+      <button class="btn ghost" id="confirmCancel" type="button" data-i18n="common.cancel">Annuler</button>
+      <button class="btn danger" id="confirmOk" type="button">Confirmer</button>
     </div>
   </dialog>
 
