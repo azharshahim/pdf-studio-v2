@@ -48,7 +48,6 @@ test.describe('Barre d’outils du document', () => {
     await openDemo(page);
     await page.locator('#docDock [data-dock=stamp]').tap();
     await expect(page.locator('#sheet')).toBeVisible();
-    await page.locator('#sheet .icon-btn, #sheetClose').first().tap().catch(() => {});
     await page.evaluate(() => document.querySelector('#sheetBackdrop')?.click());
     await page.waitForTimeout(500);
     await page.locator('#docDock [data-dock=highlight]').tap();

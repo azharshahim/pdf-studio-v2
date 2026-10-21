@@ -780,13 +780,38 @@ function updateDock() {
 }
 
 function bindDock() {
-  // Garde le focus dans le texte en cours : sans cela, le premier appui ferme
-  // le clavier, la mise en page bouge et le clic tombe à côté.
-  els.docDock?.addEventListener('pointerdown', (ev) => {
-    if (ev.target.closest('button')) ev.preventDefault();
+  const dock = els.docDock;
+  if (!dock) return;
+  // L'action part au relâchement du doigt (pas sur `click`) : WebKit (Safari,
+  // iPhone) peut ne pas envoyer de `click` quand le focus du texte bouge, et
+  // un `preventDefault` sur `pointerdown` y supprime parfois le clic. Un
+  // déplacement > 10 px (défilement horizontal de la barre) n'est pas un appui.
+  let press = null;
+  let lastFired = 0;
+  const fire = (btn) => {
+    lastFired = Date.now();
+    dockAction(btn.dataset.dock);
+  };
+  dock.addEventListener('pointerdown', (ev) => {
+    const btn = ev.target.closest('[data-dock]');
+    press = btn ? { btn, x: ev.clientX, y: ev.clientY, id: ev.pointerId } : null;
   });
-  els.docDock?.querySelectorAll('[data-dock]').forEach((btn) => {
-    btn.addEventListener('click', () => dockAction(btn.dataset.dock));
+  dock.addEventListener('pointerup', (ev) => {
+    if (!press || press.id !== ev.pointerId) return;
+    const { btn, x, y } = press;
+    press = null;
+    if (Math.hypot(ev.clientX - x, ev.clientY - y) > 10) return;
+    if (!btn.contains(ev.target) && ev.target !== btn) return;
+    fire(btn);
+  });
+  dock.addEventListener('pointercancel', () => {
+    press = null;
+  });
+  // Clavier / lecteur d'écran : `click` sans pointeur ; on ignore le clic qui suit un appui déjà traité.
+  dock.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('[data-dock]');
+    if (!btn || Date.now() - lastFired < 600) return;
+    fire(btn);
   });
   updateDock();
 }

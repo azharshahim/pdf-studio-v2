@@ -203,3 +203,9 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - Partager et Imprimer génèrent le PDF avec les modifications, l'OCR et les annotations. Partage vérifié (fichier PDF « -modifie.pdf » transmis à l'API de partage). Impression : via un cadre caché, avec repli (PDF ouvert dans un nouvel onglet) ; **non testée sur un vrai téléphone**.
 - Boutons de la barre compacte agrandis (≥ 48 px).
 - 105 tests unitaires, 60 tests Chromium/Samsung.
+
+## Correctif WebKit — barre d'outils (v2.6)
+
+- Les tests de GitHub (Chromium, Firefox, WebKit, Samsung) échouaient uniquement sur WebKit : un appui sur Signer / Tampon n'ouvrait rien, car WebKit n'envoie pas toujours de `click` après un `preventDefault` sur `pointerdown`.
+- Corrigé : l'action part au relâchement du doigt (déplacement > 10 px = défilement, ignoré) ; le `click` reste pour le clavier.
+- Vérifié localement : WebKit 30/30, Chromium + Samsung 60/60, unitaires 105/105. Firefox : vérifié par GitHub uniquement.
