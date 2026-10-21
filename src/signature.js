@@ -36,6 +36,57 @@ export function saveSignature(entry) {
   return item;
 }
 
+const STAMP_KEY = 'pdf-studio-stamps';
+
+export function loadStamps() {
+  try {
+    const list = JSON.parse(localStorage.getItem(STAMP_KEY) || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Enregistre un tampon personnalisé (texte + couleur) ; pas de doublon. */
+export function saveStamp({ text, color }) {
+  const list = loadStamps().filter((s) => !(s.text === text && s.color === color));
+  list.unshift({ id: `stp-${Date.now().toString(36)}`, text, color });
+  try {
+    localStorage.setItem(STAMP_KEY, JSON.stringify(list.slice(0, 12)));
+  } catch {
+    /* stockage plein */
+  }
+  return list;
+}
+
+export function deleteStamp(id) {
+  const list = loadStamps().filter((s) => s.id !== id);
+  try {
+    localStorage.setItem(STAMP_KEY, JSON.stringify(list));
+  } catch {
+    /* ignore */
+  }
+  return list;
+}
+
+const NAME_KEY = 'pdf-studio-name';
+
+export function loadSignerName() {
+  try {
+    return localStorage.getItem(NAME_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function saveSignerName(name) {
+  try {
+    localStorage.setItem(NAME_KEY, String(name || '').trim());
+  } catch {
+    /* ignore */
+  }
+}
+
 export function deleteSignature(id) {
   const list = loadSignatures().filter((s) => s.id !== id);
   try {
@@ -173,7 +224,16 @@ export function signatureSheetHtml() {
         )
         .join('')}</div>`
     : '';
+  const quick = `<div class="sig-quick-wrap"><h4>${t('sign.quick')}</h4>
+      <div class="sig-quick">
+        <button class="quick-chip" data-quick="date" type="button">${icon('clock', 15)}<span>${t('quick.date')}</span></button>
+        <button class="quick-chip" data-quick="check" type="button"><span class="quick-glyph">✓</span></button>
+        <button class="quick-chip" data-quick="cross" type="button"><span class="quick-glyph">✗</span></button>
+        <button class="quick-chip" data-quick="name" type="button">${icon('text', 15)}<span>${t('quick.name')}</span></button>
+      </div></div>`;
   return `
+    ${saved ? `<div class="sig-saved-wrap first"><h4>${t('sign.saved')}</h4>${saved}</div>` : ''}
+    ${quick}
     <div class="sig-tabs" role="tablist">
       <button class="sig-tab active" data-sig-tab="draw" type="button">${t('sign.draw')}</button>
       <button class="sig-tab" data-sig-tab="type" type="button">${t('sign.type')}</button>
@@ -203,6 +263,5 @@ export function signatureSheetHtml() {
       <button class="btn soft wide" id="sigPickImage" type="button">${icon('image', 16)}<span>${t('sign.choose')}</span></button>
       <input type="file" id="sigFile" accept="image/*" hidden />
     </div>
-    ${saved ? `<div class="sig-saved-wrap"><h4>${t('sign.saved')}</h4>${saved}</div>` : ''}
   `;
 }

@@ -4518,3 +4518,52 @@ body.editing .dockitem svg {
 body.editing .docdock {
   padding: 3px;
 }
+
+/* Signatures : mes signatures en premier, remplissage rapide */
+.sig-saved-wrap.first h4 {
+  margin-top: 0;
+}
+.sig-saved-wrap.first {
+  margin-bottom: 12px;
+}
+.sig-item {
+  width: 124px;
+  height: 64px;
+}
+.sig-quick-wrap h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.sig-quick {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.quick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 600 13px/1 var(--font);
+  cursor: pointer;
+}
+.quick-glyph {
+  font-size: 20px;
+  line-height: 1;
+}
+.stamp-mine h4 {
+  margin: 14px 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.stamp-saved {
+  position: relative;
+  display: inline-flex;
+}

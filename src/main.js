@@ -34,6 +34,11 @@ import {
   typedSignature,
   removeLightBackground,
   signatureSheetHtml,
+  loadStamps,
+  saveStamp,
+  deleteStamp,
+  loadSignerName,
+  saveSignerName,
   loadSignatures,
   saveSignature,
   deleteSignature,
@@ -788,10 +793,33 @@ function bindDock() {
   // déplacement > 10 px (défilement horizontal de la barre) n'est pas un appui.
   let press = null;
   let lastFired = 0;
+  let swallowNext = false;
   const fire = (btn) => {
     lastFired = Date.now();
+    swallowNext = true;
     dockAction(btn.dataset.dock);
   };
+  // Le `click` qui suit l'appui tombe sur ce qui vient de s'ouvrir (fond de la
+  // feuille, par exemple) et le refermerait aussitôt : on avale ce seul clic.
+  // Un nouvel appui (autre `pointerdown`) annule la consigne.
+  document.addEventListener(
+    'pointerdown',
+    () => {
+      swallowNext = false;
+    },
+    true
+  );
+  document.addEventListener(
+    'click',
+    (ev) => {
+      if (swallowNext && Date.now() - lastFired < 450 && !ev.target.closest('#docDock')) {
+        swallowNext = false;
+        ev.stopPropagation();
+        ev.preventDefault();
+      }
+    },
+    true
+  );
   dock.addEventListener('pointerdown', (ev) => {
     const btn = ev.target.closest('[data-dock]');
     press = btn ? { btn, x: ev.clientX, y: ev.clientY, id: ev.pointerId } : null;
@@ -3592,6 +3620,27 @@ function openSignTool() {
     toast(t('sign.placed'), 'success');
   });
 
+  body.querySelectorAll('[data-quick]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const kind = btn.dataset.quick;
+      let text = '';
+      if (kind === 'date') {
+        text = new Date().toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' });
+      } else if (kind === 'check') text = '✓';
+      else if (kind === 'cross') text = '✗';
+      else if (kind === 'name') {
+        let name = loadSignerName();
+        if (!name) {
+          name = (window.prompt(t('quick.namePrompt'), '') || '').trim();
+          if (!name) return;
+          saveSignerName(name);
+        }
+        text = name;
+      }
+      closeSheet();
+      placeQuickText(text);
+    });
+  });
   body.querySelectorAll('[data-sig-use]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const entry = loadSignatures().find((s) => s.id === btn.dataset.sigUse);
@@ -3610,6 +3659,26 @@ function openSignTool() {
   });
 }
 
+/** Pose un petit texte (date, coche, croix, nom) au centre de la zone visible. */
+function placeQuickText(text) {
+  const scale = state.scale || 1;
+  const fontSize = Math.max(8, 18 / scale);
+  const w = Math.max(fontSize * 1.4, fontSize * 0.62 * String(text).length + 8 / scale);
+  const h = fontSize * 1.5;
+  const center = viewCenterPdf();
+  const obj = markup.add({
+    type: 'date',
+    text,
+    fontSize,
+    bbox: freeSpot({ x: center.x - w / 2, y: center.y - h / 2, w, h }),
+    color: '#111827',
+  });
+  markup.setTool(null);
+  markup.select?.(obj.id);
+  scheduleAutosave();
+  return obj;
+}
+
 function openStampTool() {
   routeTo('doc');
   if (!state.engine) return;
@@ -3622,9 +3691,20 @@ function openStampTool() {
       ).join('')}
       <button class="stamp-preset date" data-stamp="date" type="button">${icon('clock', 15)} ${today}</button>
     </div>
+    ${
+      loadStamps().length
+        ? `<div class="stamp-mine"><h4>${t('stamp.mine')}</h4><div class="stamp-grid">${loadStamps()
+            .map(
+              (st) =>
+                `<span class="stamp-saved"><button class="stamp-preset" data-stamp-saved="${st.id}" type="button" style="color:${st.color};border-color:${st.color}">${U.escapeHtml(st.text)}</button><button class="sig-del" data-stamp-del="${st.id}" type="button" aria-label="${t('sign.delete')}">${icon('x', 13)}</button></span>`
+            )
+            .join('')}</div></div>`
+        : ''
+    }
     <div class="stamp-custom">
       <h4>${t('stamp.custom')}</h4>
       <input id="stampText" placeholder="${t('stamp.text')}" value="" />
+      <label class="check compact"><input type="checkbox" id="stampSave" checked /><span>${t('stamp.saveIt')}</span></label>
       <div class="stamp-row">
         <input type="color" id="stampColor" value="#059669" />
         <button class="btn primary small" id="stampAdd" type="button">${icon('plus', 15)}<span>${t('stamp.add')}</span></button>
@@ -3675,13 +3755,7 @@ function openStampTool() {
     });
   });
 
-  body.querySelector('#stampAdd')?.addEventListener('click', () => {
-    const text = body.querySelector('#stampText')?.value?.trim();
-    if (!text) {
-      toast(t('stamp.needText'), 'warn');
-      return;
-    }
-    const color = body.querySelector('#stampColor')?.value || '#059669';
+  const addCustomStamp = (text, color) => {
     const center = viewCenterPdf();
     const scale = state.scale || 1;
     const w = Math.min(pdfPageSize().w * 0.62, 240 / scale);
@@ -3697,6 +3771,30 @@ function openStampTool() {
       fontSize: Math.max(9, Math.min(36, w * 0.13)),
     });
     place(obj);
+  };
+  body.querySelectorAll('[data-stamp-saved]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const st = loadStamps().find((x) => x.id === btn.dataset.stampSaved);
+      if (st) addCustomStamp(st.text, st.color);
+    });
+  });
+  body.querySelectorAll('[data-stamp-del]').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      deleteStamp(btn.dataset.stampDel);
+      openStampTool();
+    });
+  });
+
+  body.querySelector('#stampAdd')?.addEventListener('click', () => {
+    const text = body.querySelector('#stampText')?.value?.trim();
+    if (!text) {
+      toast(t('stamp.needText'), 'warn');
+      return;
+    }
+    const color = body.querySelector('#stampColor')?.value || '#059669';
+    if (body.querySelector('#stampSave')?.checked) saveStamp({ text, color });
+    addCustomStamp(text, color);
   });
 }
 

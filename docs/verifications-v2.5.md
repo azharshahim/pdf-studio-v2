@@ -209,3 +209,10 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - Les tests de GitHub (Chromium, Firefox, WebKit, Samsung) échouaient uniquement sur WebKit : un appui sur Signer / Tampon n'ouvrait rien, car WebKit n'envoie pas toujours de `click` après un `preventDefault` sur `pointerdown`.
 - Corrigé : l'action part au relâchement du doigt (déplacement > 10 px = défilement, ignoré) ; le `click` reste pour le clavier.
 - Vérifié localement : WebKit 30/30, Chromium + Samsung 60/60, unitaires 105/105. Firefox : vérifié par GitHub uniquement.
+
+## Signatures et tampons enregistrés (v2.6, étape 3)
+
+- Fenêtre « Remplir et signer » : « Mes signatures » en premier (un appui = pose), puis « Remplir rapidement » : Date du jour, ✓, ✗, Mon nom (demandé une fois, gardé sur l'appareil).
+- Tampons : les tampons personnalisés peuvent être enregistrés (case cochée par défaut) et reviennent dans « Mes tampons », avec suppression.
+- Corrigé au passage : le `click` qui suit un appui sur la barre d'outils retombait sur le fond de la feuille et la refermait ; ce seul clic est maintenant ignoré.
+- Vérifié : 105 tests unitaires ; 68 tests Chromium + Samsung ; 34 tests WebKit.
