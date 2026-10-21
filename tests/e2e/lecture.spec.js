@@ -29,7 +29,10 @@ test.describe('Lecture seule et démarrage', () => {
     await expect(dock.locator('[data-dock=search]')).toBeVisible();
     // Pas d'OCR ni d'outils de modification en lecture.
     await expect(dock.locator('[data-dock=ocr]')).toBeHidden();
-    await expect(dock.locator('[data-dock=highlight]')).toBeHidden();
+    await expect(dock.locator('[data-dock=highlight]')).toBeVisible();
+    await expect(dock.locator('[data-dock=comment]')).toBeVisible();
+    await expect(dock.locator('[data-dock=draw]')).toBeVisible();
+    await expect(dock.locator('[data-dock=pages]')).toBeHidden();
     await expect(page.locator('#btnSave')).toBeHidden();
     await expect(page.locator('.line-block:visible')).toHaveCount(0);
 
@@ -52,6 +55,25 @@ test.describe('Lecture seule et démarrage', () => {
     await page.locator('#btnDocMenu').tap();
     await page.locator('[data-doc-menu=read]').tap();
     await expect(dock.locator('[data-dock=fillsign]')).toBeVisible();
+  });
+
+  test('surligner en lecture seule, sans passer en modification', async ({ page }) => {
+    await init(page);
+    await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
+    await page.locator('#fileInput').setInputFiles({ name: 'surl.pdf', mimeType: 'application/pdf', buffer: await simplePdf('Texte a surligner en lecture') });
+    const dock = page.locator('#docDock');
+    await dock.locator('[data-dock=highlight]').tap();
+    await expect(page.locator('#annobar')).toBeVisible({ timeout: 30_000 });
+    expect(await page.evaluate(() => document.body.classList.contains('reading'))).toBe(true);
+    const box = await page.locator('#pdfCanvas').boundingBox();
+    await page.mouse.move(box.x + 40, box.y + 60);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 140, box.y + 62, { steps: 8 });
+    await page.mouse.up();
+    await expect.poll(() => page.evaluate(() => window.__pdfStudio.markup.objects.map((o) => o.type))).toEqual(['highlight']);
+    await page.locator('#annoDone').tap();
+    await expect(dock.locator('[data-dock=fillsign]')).toBeVisible();
+    expect(await page.evaluate(() => document.body.classList.contains('reading'))).toBe(true);
   });
 
   test('Remplir et signer : outils de saisie, renommer le fichier, retour à la lecture', async ({ page }) => {

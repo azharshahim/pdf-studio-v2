@@ -4897,9 +4897,16 @@ body.reading .line-block {
 body.reading:not(.fillsign) .form-area {
   display: none !important;
 }
-body.reading:not(.fillsign) .overlay {
+body.reading:not(.fillsign):not(.annotating) .overlay {
   pointer-events: none;
 }
+/* Ordre des outils en lecture : Remplir et signer, Surligner, Commenter, Tracer, Rechercher, Modifier */
+body.reading:not(.fillsign) #docDock [data-dock='fillsign'] { order: 1; }
+body.reading:not(.fillsign) #docDock [data-dock='highlight'] { order: 2; }
+body.reading:not(.fillsign) #docDock [data-dock='comment'] { order: 3; }
+body.reading:not(.fillsign) #docDock [data-dock='draw'] { order: 4; }
+body.reading:not(.fillsign) #docDock [data-dock='search'] { order: 5; }
+body.reading:not(.fillsign) #docDock [data-dock='edit'] { order: 6; }
 /* Barre d'outils selon le mode : lecture (r), modification (e), remplir et signer (f) */
 #docDock .dockitem[data-modes] {
   display: none;
@@ -5078,4 +5085,37 @@ body.reading .search-replace {
 .wm-empty {
   padding: 18px 4px;
   text-align: center;
+}
+
+/* Ordinateur : la barre d'outils devient une palette verticale flottante, comme dans Acrobat. */
+@media (min-width: 901px) {
+  body[data-route='doc']:not(.editing) .docdock {
+    position: fixed;
+    left: 252px;
+    top: 150px;
+    z-index: 60;
+    flex-direction: column;
+    height: auto;
+    width: 76px;
+    padding: 6px 4px;
+    gap: 2px;
+    overflow: visible;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: var(--shadow-lg);
+  }
+  body[data-route='doc']:not(.editing) .dockitem {
+    min-width: 0;
+    min-height: 58px;
+    max-width: none;
+    flex: 0 0 auto;
+  }
+  body.reading:not(.fillsign) .docdock {
+    justify-content: flex-start;
+  }
+}
+
+body.reading:not(.fillsign) #btnAddTextTop,
+body.reading .hintbar {
+  display: none !important;
 }

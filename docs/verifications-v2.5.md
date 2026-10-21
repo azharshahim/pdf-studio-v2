@@ -256,3 +256,9 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - Modification : plus de zoom automatique en touchant un texte ; Rechercher/Remplacer (style de la ligne conservé) ; bouton Filigrane (détection, renommer, supprimer) ; OCR, Pages, Plus dans la barre.
 - Filigranes : détection des textes inclinés ou très pâles (opérateurs pdf.js), suppression dans les flux de page et les objets de formulaire (tests/watermark.test.js + e2e).
 - Suites : vitest 138 OK ; Playwright Chromium + Samsung OK.
+
+## Lecture à la Acrobat (v2.7)
+
+- Surligner, Commenter et Tracer disponibles en lecture seule (barre : Remplir et signer, Surligner, Commenter, Tracer, Rechercher, Modifier).
+- Ordinateur : la barre devient une palette verticale flottante à gauche de la page (comme Acrobat) ; en lecture, plus de bouton « + Texte » ni d'astuce de modification.
+- Suites : vitest 138 OK ; Playwright Chromium + Samsung 122 OK.
