@@ -2522,8 +2522,12 @@ body.editing .canvas-scroll {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
-.inline-text::selection {
+.inline-text::selection,
+.inline-textarea::selection,
+.inline-text *::selection {
   background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: inherit;
+  -webkit-text-fill-color: currentColor;
 }
 .inline-shell.dragging {
   cursor: grabbing;

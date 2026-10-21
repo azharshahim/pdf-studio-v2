@@ -1187,7 +1187,7 @@ els.overlay.addEventListener(
       navigator.vibrate?.(8);
       if (el.classList.contains('line-block')) selectLine(el.dataset.lineId);
       else selectEdit(el.dataset.editId);
-    }, 480);
+    }, 650);
   },
   true
 );

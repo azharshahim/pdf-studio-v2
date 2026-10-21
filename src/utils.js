@@ -154,26 +154,53 @@ export function sampleCanvasBackground(canvas, rect, margin = 6) {
   if (!ctx) return '#ffffff';
   const ratioX = canvas.width / Math.max(1, parseFloat(canvas.style.width) || canvas.width);
   const ratioY = canvas.height / Math.max(1, parseFloat(canvas.style.height) || canvas.height);
-  const xs = [rect.left - margin, rect.left + rect.width / 2, rect.left + rect.width + margin];
-  const ys = [rect.top - margin, rect.top + rect.height / 2, rect.top + rect.height + margin];
-  const samples = [];
-  for (const x of xs) {
-    for (const y of ys) {
-      const px = Math.round(x * ratioX);
-      const py = Math.round(y * ratioY);
-      if (px < 0 || py < 0 || px >= canvas.width || py >= canvas.height) continue;
-      try {
-        const d = ctx.getImageData(px, py, 1, 1).data;
-        if (d[3] > 200) samples.push([d[0], d[1], d[2]]);
-      } catch {
-        /* ignore */
-      }
+  // Points sur et autour du cadre (jamais au centre : c'est là qu'est le texte).
+  // Les voisins proches (bordures de tableau, texte d'à côté) sont minoritaires :
+  // on retient la couleur la plus fréquente, pas la médiane.
+  const pts = [];
+  const L = rect.left;
+  const R = rect.left + rect.width;
+  const T = rect.top;
+  const B = rect.top + rect.height;
+  for (const m of [1.5, margin]) {
+    for (let i = 0; i <= 6; i++) {
+      const fx = L + ((R - L) * i) / 6;
+      const fy = T + ((B - T) * i) / 6;
+      pts.push([fx, T - m], [fx, B + m], [L - m, fy], [R + m, fy]);
     }
   }
-  if (!samples.length) return '#ffffff';
-  const med = (i) => {
-    const arr = samples.map((s) => s[i]).sort((a, b) => a - b);
-    return arr[Math.floor(arr.length / 2)];
-  };
-  return rgbToHex(med(0), med(1), med(2));
+  const buckets = new Map();
+  for (const [x, y] of pts) {
+    const px = Math.round(x * ratioX);
+    const py = Math.round(y * ratioY);
+    if (px < 0 || py < 0 || px >= canvas.width || py >= canvas.height) continue;
+    try {
+      const d = ctx.getImageData(px, py, 1, 1).data;
+      if (d[3] <= 200) continue;
+      const key = `${d[0] >> 4},${d[1] >> 4},${d[2] >> 4}`;
+      const e = buckets.get(key) || { n: 0, r: 0, g: 0, b: 0 };
+      e.n++;
+      e.r += d[0];
+      e.g += d[1];
+      e.b += d[2];
+      buckets.set(key, e);
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!buckets.size) return '#ffffff';
+  let total = 0;
+  for (const e of buckets.values()) total += e.n;
+  let best = null;
+  // Papier blanc présent sur au moins 40 % du pourtour : c'est le fond (un gris
+  // intermédiaire vient alors du texte ou des traits voisins, jamais du papier).
+  for (const e of buckets.values()) {
+    if (e.n / total >= 0.4 && Math.min(e.r, e.g, e.b) / e.n > 245) best = e;
+  }
+  if (best) return rgbToHex(Math.round(best.r / best.n), Math.round(best.g / best.n), Math.round(best.b / best.n));
+  for (const e of buckets.values()) {
+    // À fréquence égale, on préfère le plus clair (papier plutôt que trait).
+    if (!best || e.n > best.n || (e.n === best.n && e.r + e.g + e.b > best.r + best.g + best.b)) best = e;
+  }
+  return rgbToHex(Math.round(best.r / best.n), Math.round(best.g / best.n), Math.round(best.b / best.n));
 }
