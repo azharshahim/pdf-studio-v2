@@ -169,6 +169,7 @@ export function createInlineEditor({
       edit.text = normalizeInlineText(readText());
       onChange?.(edit);
       scheduleRefresh();
+      requestAnimationFrame(keepCaretVisible);
     });
 
     // `input` : on met à jour le modèle, jamais le DOM de la surface.
@@ -196,6 +197,7 @@ export function createInlineEditor({
       lastCaret = after;
       lastLength = edit.text.length;
       onChange?.(edit);
+      if (!composing) requestAnimationFrame(keepCaretVisible);
     });
 
     el.addEventListener('beforeinput', () => {
@@ -351,8 +353,17 @@ export function createInlineEditor({
     // La boîte s'élargit pour contenir le texte saisi, sans déborder de la page.
     const base = Math.max(24, rect.width + padX * 2);
     const needed = textEl ? textEl.scrollWidth + padX * 2 : base;
-    const bound = Math.max(base, (overlay.clientWidth || base) - left - 2);
-    shell.style.width = `${Math.min(Math.max(base, needed), bound)}px`;
+    // Le bloc ne dépasse jamais la zone visible : une ligne plus large que
+    // l'écran après zoom défile à l'intérieur du champ, elle n'est pas coupée.
+    const scroller = document.getElementById('canvasScroll');
+    const overlayRect = overlay.getBoundingClientRect();
+    const viewRight = scroller
+      ? scroller.getBoundingClientRect().right - 8 - overlayRect.left
+      : (overlay.clientWidth || base) - 2;
+    const available = Math.max(48, Math.min(overlay.clientWidth - left - 2, viewRight - left));
+    // Une ligne d'origine plus large que l'écran est rognée au cadre visible :
+    // c'est le texte qui défile dans le champ, pas la page.
+    shell.style.width = `${Math.min(Math.max(base, needed), available)}px`;
     shell.style.minHeight = `${Math.max(4, rect.height + padY * 2)}px`;
     shell.style.padding = `${padY}px ${padX}px`;
     if (textEl?.tagName === 'TEXTAREA' && !composing) {
@@ -361,6 +372,65 @@ export function createInlineEditor({
       textEl.style.height = 'auto';
       const lineHeight = (Number(edit.lineHeight) || 1.16) * Math.max(4, (Number(edit.size) || 12) * scale);
       textEl.style.height = `${Math.max(lineHeight * 1.2, textEl.scrollHeight)}px`;
+    }
+  }
+
+  /* ───────────── Défilement horizontal : le curseur reste visible ───────────── */
+
+  let measureCtx = null;
+
+  function prefixWidth(value) {
+    if (!measureCtx) {
+      const canvas = document.createElement('canvas');
+      measureCtx = canvas.getContext('2d');
+    }
+    if (!measureCtx || !shell) return 0;
+    const cs = window.getComputedStyle(shell);
+    measureCtx.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    return measureCtx.measureText(value).width;
+  }
+
+  /** Position horizontale (écran) du curseur, ou null si indéterminable. */
+  function caretScreenX() {
+    if (!textEl) return null;
+    const box = textEl.getBoundingClientRect();
+    if (textEl.tagName === 'TEXTAREA') {
+      const offset = textEl.selectionStart ?? 0;
+      return box.left + prefixWidth(textEl.value.slice(0, offset)) - textEl.scrollLeft;
+    }
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return null;
+    const range = selection.getRangeAt(0);
+    let rect = range.getBoundingClientRect?.();
+    if (!rect || (!rect.width && !rect.height)) {
+      // Firefox ne fournit pas de rectangle pour un curseur simple : on pose
+      // un marqueur invisible dans une copie de la plage, retiré aussitôt.
+      const marker = document.createElement('span');
+      marker.textContent = '\u200b';
+      const copy = range.cloneRange();
+      copy.collapse(false);
+      copy.insertNode(marker);
+      rect = marker.getBoundingClientRect();
+      marker.remove();
+    }
+    return rect && rect.width + rect.height > 0 ? rect.left : null;
+  }
+
+  /**
+   * Fait défiler le champ horizontalement pour que le curseur reste visible
+   * (avant et pendant la saisie, clavier ouvert). Ne touche jamais à la
+   * sélection ni au contenu.
+   */
+  function keepCaretVisible() {
+    if (!textEl || !shell?.isConnected) return;
+    const box = textEl.getBoundingClientRect();
+    const x = caretScreenX();
+    if (x == null || !Number.isFinite(x)) return;
+    const margin = Math.min(36, Math.max(8, box.width / 3));
+    if (x < box.left + margin) {
+      textEl.scrollLeft = Math.max(0, textEl.scrollLeft - (box.left + margin - x));
+    } else if (x > box.right - margin) {
+      textEl.scrollLeft += x - (box.right - margin);
     }
   }
 
@@ -447,6 +517,7 @@ export function createInlineEditor({
     selection.removeAllRanges();
     selection.addRange(range);
     lastCaret = start;
+    requestAnimationFrame(keepCaretVisible);
     return { offset: target, word: !selectAll && word };
   }
 
@@ -465,6 +536,7 @@ export function createInlineEditor({
       if (!isOpen() || composing) return;
       applyStyle();
       position();
+      keepCaretVisible();
     });
   }
 
@@ -542,6 +614,13 @@ export function createInlineEditor({
       if (!correct) placeCaret({ offset: caret.offset, word: !!caret.word });
     }, 50);
   }
+
+  // Le curseur peut aussi bouger au clavier ou après un déplacement du doigt :
+  // on ne réécrit jamais la sélection, on se contente de faire défiler.
+  document.addEventListener('selectionchange', () => {
+    if (!isOpen() || document.activeElement !== textEl) return;
+    requestAnimationFrame(keepCaretVisible);
+  });
 
   // Quand le clavier apparaît, on garde la ligne visible au-dessus de la barre.
   function onViewportResize() {

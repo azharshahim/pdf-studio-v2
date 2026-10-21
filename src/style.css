@@ -2490,6 +2490,11 @@ body.editing .canvas-scroll {
   min-height: 1em;
   white-space: pre;
   caret-color: var(--accent);
+  /* Une ligne plus large que l'écran défile dans le bloc au lieu d'être
+     coupée ; le défilement est ajusté pour garder le curseur visible. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 /* Repli Samsung Internet : textarea superposé, rendu identique à la ligne. */
 .inline-textarea {
