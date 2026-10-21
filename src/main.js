@@ -1870,7 +1870,9 @@ function guessScanLineStyle(line) {
   for (let i = 0, p = 0; i < data.length; i += 4, p++) gray[p] = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
   const stats = inkStats(gray, w, h);
   if (!stats) return null;
-  const bold = looksBold(stats.stem, stats.inkBottom - stats.inkTop + 1);
+  // Graisse : celle mesurée mot par mot à l'OCR si elle existe, sinon la
+  // largeur médiane des traits (un seul mot gras ne rend pas la ligne grasse).
+  const bold = typeof line.bold === 'boolean' && line.source === 'ocr' ? line.bold : looksBold(stats.stem, stats.inkBottom - stats.inkTop + 1);
   const localScan = CATALOG.filter((c) => c.local && /^(Verdana|Arial|Calibri|Segoe UI|Tahoma|Trebuchet MS)$/.test(c.id)).map((c) => c.id);
   const ready = [...localScan, ...SCAN_FONTS].filter((id) => document.fonts?.check?.(`12px "${id}"`));
   const size = Math.max(4, line.fontSize || 12);
@@ -1882,7 +1884,6 @@ function guessScanLineStyle(line) {
   // Comparaison des formes : chaque police (normale et grasse) est dessinée à la
   // largeur de la ligne puis comparée pixel à pixel à l'encre réelle.
   let font = null;
-  let bestBold = bold;
   try {
     const thr = otsuThreshold(gray);
     const target = new Uint8Array(w * h);
@@ -1895,7 +1896,7 @@ function guessScanLineStyle(line) {
       const sx = sc.getContext('2d', { willReadFrequently: true });
       let best = -1;
       for (const id of candidates) {
-        for (const isBold of [false, true]) {
+        for (const isBold of [bold]) {
           const family = U.cssFontFamily(id);
           sx.font = `${isBold ? 700 : 400} 100px ${family}`;
           const nat = sx.measureText(line.text).width;
@@ -1921,7 +1922,6 @@ function guessScanLineStyle(line) {
           if (score > best) {
             best = score;
             font = id;
-            bestBold = isBold;
           }
         }
       }
@@ -1929,10 +1929,10 @@ function guessScanLineStyle(line) {
   } catch {
     font = null;
   }
-  const pick = pickFontByWidth(measure, line.text, size, line.bbox.w, font ? [font] : candidates, font ? bestBold : bold);
+  const pick = pickFontByWidth(measure, line.text, size, line.bbox.w, font ? [font] : candidates, bold);
   if (!pick) return { bold, font: 'Arimo', scale: 1, size };
   return {
-    bold: font ? bestBold : bold,
+    bold,
     font: pick.font,
     scale: U.clamp(pick.scale, 0.3, 3),
     size: size * U.clamp(pick.scale, 0.3, 3),

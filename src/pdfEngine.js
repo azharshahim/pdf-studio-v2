@@ -65,6 +65,7 @@ export function buildLines(items, styles, pageNo, fontMap = {}) {
       fontFamily: styles?.[it.fontName]?.fontFamily || '',
       bold: !!traits?.bold,
       italic: !!traits?.italic,
+      traitsKnown: !!traits,
       traitsFamily: traits?.family || '',
     });
   }
@@ -104,8 +105,19 @@ export function buildLines(items, styles, pageNo, fontMap = {}) {
       continue;
     }
     const tol = Math.max(1.4, Math.min(it.fontSize, 48) * 0.42);
+    // Changement de style au milieu d'une ligne (« N° SS » gras puis un numéro
+    // normal) : un bloc par style, comme Acrobat, pour qu'éditer l'un ne
+    // transforme pas l'autre (graisse, taille).
+    const styleChange =
+      !!cur &&
+      cur.fontId !== it.fontId &&
+      (!cur.traitsKnown || !it.traitsKnown || cur.bold !== it.bold || cur.italic !== it.italic) &&
+      it.str.trim().length > 0;
+    const sizeChange = !!cur && Math.max(cur.fontSize, it.fontSize) / Math.max(0.1, Math.min(cur.fontSize, it.fontSize)) > 1.18;
     const startsNew =
       !cur ||
+      styleChange ||
+      sizeChange ||
       Math.abs(it.baseline - cur.baseline) > tol ||
       it.x - cur.endX > Math.max(6, it.fontSize * 1.05) ||
       it.x < cur.x - Math.max(10, it.fontSize * 1.5);
@@ -123,6 +135,7 @@ export function buildLines(items, styles, pageNo, fontMap = {}) {
         fontId: it.fontId,
         bold: it.bold,
         italic: it.italic,
+        traitsKnown: it.traitsKnown,
         traitsFamily: it.traitsFamily,
         hasEOL: it.hasEOL,
       };
