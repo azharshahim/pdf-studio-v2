@@ -4809,6 +4809,36 @@ window.__pdfStudio = {
    * de bout en bout vérifient ainsi l'édition d'un bloc OCR sans attendre la
    * reconnaissance complète (plusieurs minutes sur un scan).
    */
+  /**
+   * PDF d'exemple avec deux champs de formulaire, pour les tests de bout en
+   * bout du remplissage (aucun échantillon livré n'en contient).
+   */
+  async makeFormSample() {
+    const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([595, 842]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText('Formulaire de test', { x: 60, y: 760, size: 20, font });
+    const form = doc.getForm();
+    const fields = [
+      ['nom', 660, 'Nom et prénom'],
+      ['ville', 590, 'Ville'],
+    ];
+    for (const [name, y, label] of fields) {
+      page.drawText(label, { x: 60, y: y + 36, size: 12, font, color: rgb(0.2, 0.2, 0.24) });
+      const field = form.createTextField(name);
+      field.addToPage(page, {
+        x: 60,
+        y,
+        width: 320,
+        height: 28,
+        borderWidth: 1,
+        borderColor: rgb(0.55, 0.58, 0.65),
+      });
+    }
+    return new Uint8Array(await doc.save());
+  },
+
   setOcrLines(pageNo, lines) {
     const pd = getPageData(pageNo);
     const normalized = (lines || []).map((line, i) => ({
