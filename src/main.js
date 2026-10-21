@@ -1859,7 +1859,7 @@ function guessScanLineStyle(line) {
   };
   const pick = pickFontByWidth(measure, line.text, size, line.bbox.w, ready.length ? ready : ['Arimo'], bold);
   if (!pick) return { bold, font: 'Arimo', scale: 1 };
-  return { bold, font: pick.font, scale: U.clamp(pick.scale, 0.88, 1.12) };
+  return { bold, font: pick.font, scale: U.clamp(pick.scale, 0.4, 1.4) };
 }
 
 function makeEditFromLine(line, pageNo) {
@@ -1878,7 +1878,18 @@ function makeEditFromLine(line, pageNo) {
     originalText: line.text,
     text: line.text,
     font: scanStyle ? scanStyle.font : line.font || 'Helvetica',
-    size: U.clamp(Math.round((line.fontSize || 12) * (scanStyle ? scanStyle.scale : 1) * 2) / 2, 4, 120),
+    // Scan : la taille se cale sur la largeur réelle de la ligne et ne dépasse
+    // jamais la hauteur visible du texte (sinon l'écriture grossit à l'édition).
+    size: U.clamp(
+      Math.round(
+        Math.min(
+          (line.fontSize || 12) * (scanStyle ? scanStyle.scale : 1),
+          scanStyle ? Math.max(4, line.bbox.h * 1.1) : Infinity
+        ) * 2
+      ) / 2,
+      4,
+      120
+    ),
     bold: scanStyle ? scanStyle.bold : !!line.bold,
     italic: !!line.italic,
     underline: false,
@@ -1886,7 +1897,7 @@ function makeEditFromLine(line, pageNo) {
     lineHeight: 1.16,
     color: fg,
     bg,
-    fit: false,
+    fit: !!scanStyle,
     confidence: typeof line.confidence === 'number' ? line.confidence : undefined,
   };
 }
