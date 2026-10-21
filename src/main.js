@@ -2941,7 +2941,7 @@ function groupOcrWords(words) {
       y1: w.bbox.y1,
       h: Math.max(1, w.bbox.y1 - w.bbox.y0),
       confidence: w.confidence || 0,
-      bold: w.bold,
+      ratio: w.ratio,
     }))
     .sort((a, b) => (a.y0 + a.y1) - (b.y0 + b.y1) || a.x0 - b.x0);
 
@@ -2966,6 +2966,23 @@ function groupOcrWords(words) {
   const segments = [];
   for (const row of rows) {
     row.items.sort((a, b) => a.x0 - b.x0);
+    // Graisse : comparaison des mots d'une même ligne entre eux (un « N° SS » gras
+    // devant un numéro normal), sinon seuils absolus.
+    const rated = row.items.filter((i) => typeof i.ratio === 'number');
+    if (rated.length) {
+      const vals = rated.map((i) => i.ratio);
+      const mn = Math.min(...vals);
+      const mx = Math.max(...vals);
+      if (rated.length >= 2 && mx / Math.max(mn, 0.01) > 1.3) {
+        const mid = (mn + mx) / 2;
+        for (const i of rated) i.bold = i.ratio > mid;
+      } else {
+        for (const i of rated) {
+          if (i.ratio > 0.2) i.bold = true;
+          else if (i.ratio < 0.14) i.bold = false;
+        }
+      }
+    }
     let seg = null;
     for (const it of row.items) {
       const gap = seg ? it.x0 - seg.x1 : 0;
@@ -2973,7 +2990,7 @@ function groupOcrWords(words) {
       // Changement net de graisse (« N° SS » gras, numéro normal…) : bloc à part,
       // pour que chaque style reste modifiable sans toucher à l'autre.
       const styleBreak = seg && typeof it.bold === 'boolean' && typeof seg.bold === 'boolean' && it.bold !== seg.bold;
-      if (!seg || styleBreak || gap > Math.max(maxH * 1.25, 14)) {
+      if (!seg || styleBreak || gap > Math.max(maxH * 0.85, 10)) {
         if (seg) segments.push(seg);
         seg = { x0: it.x0, y0: it.y0, x1: it.x1, y1: it.y1, h: it.h, items: [it], bold: it.bold };
       } else {
@@ -3026,8 +3043,7 @@ function markWordWeights(canvas, words) {
       const st = inkStats(gray, bw, bh);
       if (!st) continue;
       const ratio = st.stem / Math.max(1, st.inkBottom - st.inkTop + 1);
-      if (ratio > 0.2) w.bold = true;
-      else if (ratio < 0.14) w.bold = false;
+      w.ratio = ratio;
     } catch {
       /* mesure impossible : mot neutre */
     }
@@ -3037,7 +3053,8 @@ function markWordWeights(canvas, words) {
 async function runOcrOnPage(n, langs, onProgress) {
   const page = await state.engine.getPage(n);
   const base = page.getViewport({ scale: 1 });
-  const ocrScale = U.clamp(2200 / Math.max(base.width, base.height), 2, 3.5);
+  // Texte fin (bulletins, tableaux) : une définition élevée évite de perdre virgules et accents.
+  const ocrScale = U.clamp(3400 / Math.max(base.width, base.height), 2, 4.5);
   const vp = page.getViewport({ scale: ocrScale });
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(vp.width);

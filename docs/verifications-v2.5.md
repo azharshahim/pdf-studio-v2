@@ -285,3 +285,9 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - **Formulaires** : listes déroulantes/radios, « Valider » recharge le moteur et enregistre, export prend les valeurs du panneau.
 - **Autres** : nom du fichier téléchargé = nom renommé, surlignage de recherche visible en lecture, police du catalogue visible pendant la saisie, souligné/alignement/interligne conservés après validation, « Tout remplacer » sans accent sur toute la ligne, alerte à l'ouverture d'un PDF protégé.
 - Non traité (à planifier) : défilement continu, sélection de texte en lecture, historique annuler unifié, doublons dans « Fichiers » après opérations de pages, direction des flèches, espaces multiples monospace.
+
+### v2.11 — bulletin « image seule » (comparaison Acrobat)
+- OCR à ~3400 px (au lieu de ~2200) : virgules, accents et chiffres mieux lus.
+- Séparation des fragments plus fine (écart > 0,85 × hauteur), comme les boîtes pointillées d'Acrobat.
+- Graisse par mot comparée aux autres mots de la même ligne (« N° SS » gras, numéro normal).
+- Vérifié sur le bulletin fourni : vitest 145, Playwright chromium + samsung 126 OK.
