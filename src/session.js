@@ -412,6 +412,39 @@ export async function listDocuments() {
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+/** Tous les enregistrements, octets compris (pour la sauvegarde). */
+export async function exportRecords() {
+  const all = await withStore('readonly', (store) => store.getAll());
+  return Array.isArray(all) ? all : [];
+}
+
+/** Réécrit un enregistrement restauré tel quel (dates d'origine conservées). */
+export function restoreRecord(rec) {
+  return updateDocument(
+    rec.key,
+    {
+      name: rec.name,
+      size: rec.size,
+      numPages: rec.numPages || 0,
+      bytes: rec.bytes,
+      edits: rec.edits || [],
+      ocrPages: rec.ocrPages || [],
+      markup: rec.markup || [],
+      createdAt: rec.createdAt || Date.now(),
+      updatedAt: rec.updatedAt || Date.now(),
+    },
+    { touch: false }
+  );
+}
+
+/** Supprime les anciens enregistrements sans PDF ; renvoie leur nombre. */
+export async function purgeWithoutPdf() {
+  const docs = await listDocuments();
+  const orphans = docs.filter((d) => !d.hasBytes);
+  for (const d of orphans) await deleteDocument(d.key);
+  return orphans.length;
+}
+
 /** Compatibilité avec l'ancien nom. */
 export const listSessions = listDocuments;
 

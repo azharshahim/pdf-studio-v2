@@ -222,3 +222,9 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - Une signature/tampon/date agrandi(e) s'étire avec son contenu, proportions gardées.
 - Sur 390 px, langue/thème/Ouvrir sont masqués dans un document pour que Retour, Partager et ⋮ restent visibles.
 - Vérifié : Chromium, Samsung, WebKit (dock + rapide), 105 tests unitaires.
+
+## Sauvegarde, restauration, nettoyage (écran Fichiers)
+- « Tout sauvegarder » : un fichier .pdfstudio (PDF + modifications + annotations), partagé ou téléchargé.
+- « Restaurer » : relit un .pdfstudio ; un document déjà présent et plus récent est conservé ; fichier invalide refusé.
+- « Nettoyer (n) » : retire, après confirmation, les anciens documents sans PDF.
+- Vérifié : 114 tests unitaires, files.spec (Chromium et WebKit).

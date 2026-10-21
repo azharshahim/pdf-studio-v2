@@ -11,6 +11,7 @@ import { createUi } from './ui.js';
 import { createInlineEditor } from './inlineEditor.js';
 import { estimateOffsetFromFraction, offsetAtPoint } from './caretPoint.js';
 import * as Session from './session.js';
+import { buildBackup, parseBackup, planRestore } from './backup.js';
 import { CATALOG, BASE_FONTS, GROUP_LABELS, ensureCatalogFont } from './fonts.js';
 import { isQuotaError } from './session.js';
 import { describeBrowser, formatDiagnostic } from './diagnostic.js';
@@ -213,6 +214,11 @@ const els = {
   diagToggle: $('diagToggle'),
   diagBadge: $('diagBadge'),
   filesTotal: $('filesTotal'),
+  filesBackup: $('filesBackup'),
+  filesRestore: $('filesRestore'),
+  filesCleanup: $('filesCleanup'),
+  filesCleanupLabel: $('filesCleanupLabel'),
+  backupInput: $('backupInput'),
   filesRefresh: $('filesRefresh'),
   filesList: $('filesList'),
   filesCount: $('filesCount'),
@@ -4563,6 +4569,11 @@ async function renderFilesScreen() {
     return;
   }
   filesCache = items;
+  const orphans = items.filter((f) => !f.hasBytes).length;
+  if (els.filesCleanup) {
+    els.filesCleanup.hidden = orphans === 0;
+    if (els.filesCleanupLabel) els.filesCleanupLabel.textContent = t('files.cleanup', { n: String(orphans) });
+  }
   els.filesCount.textContent = String(items.length);
   els.filesEmpty.hidden = items.length > 0;
   els.filesList.hidden = items.length === 0;
@@ -4653,6 +4664,90 @@ async function renderFilesScreen() {
       );
     });
   });
+}
+
+/** Sauvegarde de tous les documents dans un seul fichier .pdfstudio. */
+async function backupAllDocuments() {
+  try {
+    const records = (await Session.exportRecords()).filter((r) => r.bytes);
+    if (!records.length) {
+      toast(t('files.backupEmpty'), 'warn');
+      return;
+    }
+    const blob = buildBackup(records);
+    const stamp = new Date().toISOString().slice(0, 10);
+    const name = `pdf-studio-sauvegarde-${stamp}.pdfstudio`;
+    const file = new File([blob], name, { type: 'application/octet-stream' });
+    let shared = false;
+    if (navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: name });
+        shared = true;
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+      }
+    }
+    if (!shared) U.downloadBlob(blob, name);
+    toast(t('files.backupDone', { n: String(records.length) }), 'success', { duration: 6000 });
+  } catch (err) {
+    console.warn('[backup]', err);
+    toast(t('files.storageError'), 'error');
+  }
+}
+
+async function restoreFromBackup(file) {
+  if (!file) return;
+  let incoming;
+  try {
+    incoming = parseBackup(await file.arrayBuffer());
+  } catch {
+    toast(t('files.restoreBad'), 'error', { duration: 8000 });
+    return;
+  }
+  try {
+    const existing = await Session.listDocuments();
+    const { restore, skipped } = planRestore(incoming, existing);
+    let done = 0;
+    let full = false;
+    for (const rec of restore) {
+      try {
+        await Session.restoreRecord(rec);
+        done++;
+      } catch (err) {
+        if (Session.isQuotaError(err)) {
+          full = true;
+          break;
+        }
+        throw err;
+      }
+    }
+    toast(t(full ? 'files.restoreFull' : 'files.restoreDone', { n: String(done), skipped: String(skipped) }), full ? 'warn' : 'success', {
+      duration: 7000,
+    });
+  } catch (err) {
+    console.warn('[restore]', err);
+    toast(t('files.storageError'), 'error');
+  }
+  await renderFilesScreen();
+}
+
+async function cleanupOrphans() {
+  const n = filesCache.filter((f) => !f.hasBytes).length;
+  if (!n) return;
+  const ok = await askConfirm({
+    title: t('files.cleanupTitle'),
+    message: t('files.cleanupText', { n: String(n) }),
+    confirmLabel: t('files.cleanup', { n: String(n) }),
+    cancelLabel: t('common.cancel'),
+  });
+  if (!ok) return;
+  try {
+    const removed = await Session.purgeWithoutPdf();
+    toast(t('files.cleanupDone', { n: String(removed) }), 'success');
+  } catch {
+    toast(t('files.storageError'), 'error');
+  }
+  await renderFilesScreen();
 }
 
 /** Routes des outils : ouvre le document si nécessaire, puis l'outil. */
@@ -4893,6 +4988,14 @@ function bindEvents() {
   els.filesOpen?.addEventListener('click', () => els.fileInput.click());
   els.filesBrowse?.addEventListener('click', () => els.fileInput.click());
   els.filesRefresh?.addEventListener('click', () => renderFilesScreen());
+  els.filesBackup?.addEventListener('click', () => backupAllDocuments());
+  els.filesRestore?.addEventListener('click', () => els.backupInput?.click());
+  els.filesCleanup?.addEventListener('click', () => cleanupOrphans());
+  els.backupInput?.addEventListener('change', async () => {
+    const file = els.backupInput.files?.[0];
+    els.backupInput.value = '';
+    await restoreFromBackup(file);
+  });
   els.homeDemoText?.addEventListener('click', () => openDemo('text'));
   els.homeDemoScan?.addEventListener('click', () => openDemo('scan'));
   els.homeResume?.addEventListener('click', () => routeTo('doc'));

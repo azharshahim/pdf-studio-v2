@@ -280,4 +280,68 @@ test.describe('Fichiers', () => {
       )
       .toEqual({ count: 10, oldest: false });
   });
+
+  test('sauvegarde de tous les documents, suppression puis restauration', async ({ page, context }) => {
+    await openTextDemo(page);
+    await editFirstLine(page, 'Texte sauvegardé');
+    await page.close();
+    page = await newPage(context);
+    await goFiles(page);
+
+    const download = page.waitForEvent('download', { timeout: 30_000 });
+    await page.locator('#filesBackup').click();
+    const dl = await download;
+    expect(dl.suggestedFilename()).toMatch(/\.pdfstudio$/);
+    const file = path.join(os.tmpdir(), `bk-${Date.now()}.pdfstudio`);
+    await dl.saveAs(file);
+
+    // Efface tout, puis restaure depuis le fichier.
+    await page.locator('[data-remove]').first().click();
+    await page.locator('#confirmOk').click();
+    await expect(page.locator('.file-row')).toHaveCount(0);
+
+    await page.locator('#backupInput').setInputFiles(file);
+    await expect(page.locator('.file-row').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('.file-row').first()).toContainText('modif.');
+    expect(await countRecords(page)).toBe(1);
+    fs.rmSync(file, { force: true });
+  });
+
+  test('un fichier qui n’est pas une sauvegarde est refusé', async ({ page }) => {
+    await gotoApp(page);
+    await page.evaluate(() => document.querySelector('[data-route="files"]')?.click());
+    const file = path.join(os.tmpdir(), `bad-${Date.now()}.pdfstudio`);
+    fs.writeFileSync(file, 'ceci n’est pas une sauvegarde');
+    await page.locator('#backupInput').setInputFiles(file);
+    await expect(page.locator('.toast').last()).toContainText('pas une sauvegarde');
+    fs.rmSync(file, { force: true });
+  });
+
+  test('Nettoyer retire les anciens documents sans PDF et garde les autres', async ({ page, context }) => {
+    await openTextDemo(page);
+    await editFirstLine(page, 'Je reste');
+    await page.close();
+    page = await newPage(context);
+    // Deux anciens enregistrements sans octets.
+    await page.evaluate(async () => {
+      const db = await new Promise((resolve) => {
+        const req = indexedDB.open('pdf-studio', 2);
+        req.onsuccess = () => resolve(req.result);
+      });
+      const tx = db.transaction('sessions', 'readwrite');
+      const st = tx.objectStore('sessions');
+      st.put({ key: 'old1', name: 'ancien 1.pdf', updatedAt: 1, edits: [] });
+      st.put({ key: 'old2', name: 'ancien 2.pdf', updatedAt: 2, edits: [] });
+      await new Promise((r) => (tx.oncomplete = r));
+    });
+    await goFiles(page);
+    await expect(page.locator('.file-row')).toHaveCount(3);
+    await expect(page.locator('#filesCleanup')).toBeVisible();
+    await expect(page.locator('#filesCleanup')).toContainText('2');
+    await page.locator('#filesCleanup').click();
+    await page.locator('#confirmOk').click();
+    await expect(page.locator('.file-row')).toHaveCount(1);
+    await expect(page.locator('#filesCleanup')).toBeHidden();
+    await expect(page.locator('.file-row').first()).toContainText('modif.');
+  });
 });
