@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 // pdf.js importe un worker (?url) : on le neutralise pour tester buildLines seul.
 import { vi } from 'vitest';
 vi.mock('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url', () => ({ default: '' }));
-vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({ GlobalWorkerOptions: {}, getDocument: () => ({}) }));
+vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({ GlobalWorkerOptions: {}, getDocument: () => ({}), OPS: {} }));
 
 const { buildLines } = await import('../src/pdfEngine.js');
 

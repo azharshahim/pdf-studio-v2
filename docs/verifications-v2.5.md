@@ -228,3 +228,7 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - « Restaurer » : relit un .pdfstudio ; un document déjà présent et plus récent est conservé ; fichier invalide refusé.
 - « Nettoyer (n) » : retire, après confirmation, les anciens documents sans PDF.
 - Vérifié : 114 tests unitaires, files.spec (Chromium et WebKit).
+
+## Scans avec couche de texte cachée
+- Un scan avec texte invisible (mode 3, souvent Courier) n'impose plus sa police : l'édition propose Helvetica (sans empattement), modifiable dans la liste de polices.
+- Vérifié : test e2e (échoue sans la correction), 117 tests unitaires, Chromium et WebKit.

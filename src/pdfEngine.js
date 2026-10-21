@@ -167,6 +167,27 @@ export function buildLines(items, styles, pageNo, fontMap = {}) {
   });
 }
 
+const OP = pdfjsLib.OPS || {};
+
+/**
+ * Vrai si la page contient du texte en mode « invisible » (3) : c'est la couche
+ * de reconnaissance cachée des scans. Sa police (souvent Courier) n'a rien à
+ * voir avec ce qu'on voit sur l'image.
+ */
+export function hasInvisibleText(fnArray = [], argsArray = [], ops = OP) {
+  const shows = new Set([ops.showText, ops.showSpacedText, ops.nextLineShowText, ops.nextLineSetSpacingShowText]);
+  let mode = 0;
+  const stack = [];
+  for (let i = 0; i < fnArray.length; i++) {
+    const fn = fnArray[i];
+    if (fn === ops.save) stack.push(mode);
+    else if (fn === ops.restore) mode = stack.pop() ?? 0;
+    else if (fn === ops.setTextRenderingMode) mode = Number(argsArray[i]?.[0]) || 0;
+    else if (mode === 3 && shows.has(fn)) return true;
+  }
+  return false;
+}
+
 export class PdfEngine {
   constructor(bytes) {
     this.bytes = bytes;
@@ -220,7 +241,28 @@ export class PdfEngine {
         /* police pas encore chargée */
       }
     }
-    return buildLines(tc.items, tc.styles, n, fontMap);
+    const lines = buildLines(tc.items, tc.styles, n, fontMap);
+    if (lines.length && (await this.pageHasHiddenText(page))) {
+      // Texte caché d'un scan : on propose une police nette plutôt que Courier.
+      for (const l of lines) {
+        l.font = 'Helvetica';
+        l.bold = false;
+        l.italic = false;
+        l.fontId = null;
+        l.traitsResolved = true;
+        l.hiddenLayer = true;
+      }
+    }
+    return lines;
+  }
+
+  async pageHasHiddenText(page) {
+    try {
+      const ops = await page.getOperatorList();
+      return hasInvisibleText(ops.fnArray, ops.argsArray);
+    } catch {
+      return false;
+    }
   }
 
   /**
