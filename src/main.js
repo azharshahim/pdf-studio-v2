@@ -19,7 +19,7 @@ import { isQuotaError } from './session.js';
 import { describeBrowser, formatDiagnostic } from './diagnostic.js';
 import { buildSampleTextPdf, buildSampleScanPdf } from './samples.js';
 import { icon, hydrateIcons } from './icons.js';
-import { applyLanguage, getLang, t } from './i18n.js';
+import { applyLanguage, getLang, t, uiLocale } from './i18n.js';
 import * as U from './utils.js';
 import { initShell, routeTo, openSheet, closeSheet, isSheetOpen, isMobile, renderTools, showOnboarding } from './shell.js';
 import { createMarkup, HIGHLIGHT_COLORS, STAMP_PRESETS } from './markup.js';
@@ -3700,7 +3700,7 @@ function openSignTool() {
       const kind = btn.dataset.quick;
       let text = '';
       if (kind === 'date') {
-        text = new Date().toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' });
+        text = new Date().toLocaleDateString(uiLocale(), { day: '2-digit', month: '2-digit', year: 'numeric' });
       } else if (kind === 'check') text = '✓';
       else if (kind === 'cross') text = '✗';
       else if (kind === 'name') {
@@ -3757,7 +3757,7 @@ function placeQuickText(text) {
 function openStampTool() {
   routeTo('doc');
   if (!state.engine) return;
-  const today = new Date().toLocaleDateString(undefined, { day: '2-digit', month: 'long', year: 'numeric' });
+  const today = new Date().toLocaleDateString(uiLocale(), { day: '2-digit', month: 'long', year: 'numeric' });
   const html = `
     <div class="stamp-grid">
       ${STAMP_PRESETS.map(
@@ -4045,7 +4045,7 @@ function insertMark(symbol) {
 }
 
 function insertToday() {
-  const today = new Date().toLocaleDateString();
+  const today = new Date().toLocaleDateString(uiLocale(), { day: '2-digit', month: '2-digit', year: 'numeric' });
   const scale = state.scale || 1;
   const center = viewCenterPdf();
   const { dx, dy } = cascadeOffset();
@@ -4593,7 +4593,7 @@ function takePendingReopen() {
 function fileDateLabel(ts) {
   if (!ts) return '';
   try {
-    const locale = getLang() === 'en' ? 'en-GB' : getLang() === 'ar' ? 'ar' : 'fr-FR';
+    const locale = uiLocale();
     const date = new Date(ts);
     const day = date.toLocaleDateString(locale, { day: '2-digit', month: '2-digit' });
     const time = date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
@@ -4708,12 +4708,12 @@ async function renderFilesScreen() {
   els.filesList.hidden = items.length === 0;
   if (els.filesTotal) {
     els.filesTotal.textContent = items.length
-      ? t('files.total', { size: U.formatBytes(used), n: String(items.length) })
+      ? t(items.length === 1 ? 'files.totalOne' : 'files.total', { size: U.formatBytes(used), n: String(items.length) })
       : '';
     Session.storageInfo().then((info) => {
       if (!items.length || !els.filesTotal) return;
       els.filesTotal.textContent =
-        t('files.total', { size: U.formatBytes(used), n: String(items.length) }) +
+        t(items.length === 1 ? 'files.totalOne' : 'files.total', { size: U.formatBytes(used), n: String(items.length) }) +
         (info.persisted ? ` · ${t('files.persistent')}` : '');
     });
   }

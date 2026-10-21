@@ -6,6 +6,7 @@
  */
 
 import { icon } from './icons.js';
+import { uiLocale } from './i18n.js';
 
 let seq = 0;
 const uid = (prefix) => `${prefix}-${Date.now().toString(36)}-${(seq++).toString(36)}`;
@@ -173,7 +174,7 @@ export function createMarkup({
       el.className = 'mk mk-date';
       el.style.color = o.color;
       el.style.fontSize = `${Math.max(6, (o.fontSize || 12) * scale)}px`;
-      el.textContent = o.text || new Date().toLocaleDateString();
+      el.textContent = o.text || new Date().toLocaleDateString(uiLocale());
     }
     if (o.id === selectedId) {
       el.classList.add('selected');

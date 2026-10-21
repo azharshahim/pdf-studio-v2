@@ -232,3 +232,10 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 ## Scans avec couche de texte cachée
 - Un scan avec texte invisible (mode 3, souvent Courier) n'impose plus sa police : l'édition propose Helvetica (sans empattement), modifiable dans la liste de polices.
 - Vérifié : test e2e (échoue sans la correction), 117 tests unitaires, Chromium et WebKit.
+
+## Cachets, photos en PDF, audit de conception
+- Cachets : créer (3 lignes, 4 formes, couleur) ou importer (fond blanc → transparent), rangés dans « Mes tampons ».
+- Photos en PDF : galerie (plusieurs) ou appareil photo, ordre, rotation, A4/Lettre/taille de la photo, couleur/document/N&B.
+- Texte caché sous l'image d'un scan (ou en mode invisible) : police sans empattement à l'édition.
+- Audit : nom du document dans la barre du haut ; Partager, ⋮ et « + Texte » masqués hors document ; « 1 document » ; dates dans la langue de l'interface ; description de Enregistrer ; messages au-dessus de la barre ; page PDF toujours de gauche à droite en arabe (lettres latines déformées auparavant) ; flèche Retour inversée en arabe.
+- Vérifié : 128 tests unitaires, e2e complets Chromium + Samsung (92) et WebKit (46).

@@ -4822,3 +4822,57 @@ body.editing .docdock {
 .home-actions .btn.soft.lg {
   min-height: 52px;
 }
+
+/* ───── Corrections de conception (audit) ───── */
+/* Partager et ⋮ n'ont de sens que dans un document. */
+body.on-screen #btnShare,
+body.on-screen #btnDocMenu,
+body.on-screen .fab {
+  display: none !important;
+}
+@media (max-width: 900px) {
+  /* Le nom du document reste visible dans la barre du haut. */
+  body[data-route='doc'] .topbar .file-chip {
+    display: flex !important;
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: none;
+    padding: 0 4px;
+    background: transparent;
+    border: 0;
+  }
+  body[data-route='doc'] .topbar .file-chip-icon,
+  body[data-route='doc'] .topbar .file-chip-meta {
+    display: none;
+  }
+  body[data-route='doc'] .topbar .file-chip-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  body[data-route='doc'] .topbar .topbar-spacer {
+    display: none;
+  }
+  /* Les messages ne cachent plus la barre d'onglets / d'outils. */
+  .toasts {
+    bottom: calc(78px + env(safe-area-inset-bottom));
+  }
+}
+
+/* La page PDF reste toujours de gauche à droite, même en interface arabe :
+   sinon le canevas inverse l'ordre des lettres latines (« STUD© LUM È RE »). */
+.stage,
+#pdfCanvas {
+  direction: ltr;
+}
+.stage .inline-text,
+.stage .inline-textarea,
+.stage .edit-text {
+  unicode-bidi: plaintext;
+}
+[dir='rtl'] #btnBack svg,
+[dir='rtl'] #editBack svg {
+  transform: scaleX(-1);
+}

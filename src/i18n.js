@@ -281,6 +281,7 @@ const DICT = {
     'files.rechoose': "Choisir le fichier à nouveau",
     'files.browse': "Parcourir mon appareil",
     'files.total': "{size} utilisés · {n} documents",
+    'files.totalOne': "{size} utilisés · 1 document",
     'files.backup': "Tout sauvegarder",
     'files.restore': "Restaurer",
     'files.cleanup': "Nettoyer ({n})",
@@ -381,7 +382,7 @@ const DICT = {
     'top.more': "Plus d’actions",
     'menu.title': "Document",
     'menu.save': "Enregistrer",
-    'menu.saveHint': "Télécharge le PDF modifié",
+    'menu.saveHint': "Garde le document dans Fichiers",
     'menu.export': "Exporter…",
     'menu.exportHint': "PDF, OCR, texte, images",
     'menu.share': "Partager",
@@ -800,6 +801,7 @@ const DICT = {
     'files.rechoose': "Choose the file again",
     'files.browse': "Browse my device",
     'files.total': "{size} used · {n} documents",
+    'files.totalOne': "{size} used · 1 document",
     'files.backup': "Back up everything",
     'files.restore': "Restore",
     'files.cleanup': "Clean up ({n})",
@@ -900,7 +902,7 @@ const DICT = {
     'top.more': "More actions",
     'menu.title': "Document",
     'menu.save': "Save",
-    'menu.saveHint': "Download the edited PDF",
+    'menu.saveHint': "Keeps the document in Files",
     'menu.export': "Export…",
     'menu.exportHint': "PDF, OCR, text, images",
     'menu.share': "Share",
@@ -1319,6 +1321,7 @@ const DICT = {
     'files.rechoose': "اختيار الملف مرة أخرى",
     'files.browse': "تصفّح جهازي",
     'files.total': "{size} مستخدمة · {n} مستندات",
+    'files.totalOne': "{size} مستخدمة · مستند واحد",
     'files.backup': "نسخ احتياطي للكل",
     'files.restore': "استعادة",
     'files.cleanup': "تنظيف ({n})",
@@ -1419,7 +1422,7 @@ const DICT = {
     'top.more': "المزيد من الإجراءات",
     'menu.title': "المستند",
     'menu.save': "حفظ",
-    'menu.saveHint': "تنزيل ملف PDF المعدّل",
+    'menu.saveHint': "يحفظ المستند في الملفات",
     'menu.export': "تصدير…",
     'menu.exportHint': "PDF والنص والصور",
     'menu.share': "مشاركة",
@@ -1574,6 +1577,11 @@ let currentLang = 'fr';
 
 export function getLang() {
   return currentLang;
+}
+
+/** Langue des dates et nombres : celle de l'interface, pas celle du navigateur. */
+export function uiLocale() {
+  return currentLang === 'en' ? 'en-GB' : currentLang === 'ar' ? 'ar' : 'fr-FR';
 }
 
 export function t(key, vars) {
