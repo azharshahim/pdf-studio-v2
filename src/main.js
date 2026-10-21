@@ -1751,8 +1751,12 @@ function bindFormatbar() {
 function showEditingUi() {
   const e = state.active?.edit;
   if (!e) return;
-  document.body.classList.add('editing');
-  if (els.editbar) els.editbar.hidden = false;
+  // Sur grand écran, la mise en page reste strictement la même qu'en lecture
+  // (panneaux, barre du haut, défilement) : seule la barre de mise en forme s'ajoute.
+  const wide = window.innerWidth >= 901;
+  document.body.classList.toggle('editing-wide', wide);
+  document.body.classList.toggle('editing', !wide);
+  if (els.editbar) els.editbar.hidden = wide;
   if (els.editTitle) {
     els.editTitle.textContent = e.kind === 'add' ? t('editbar.addTitle') : t('editbar.title');
   }
@@ -1762,7 +1766,7 @@ function showEditingUi() {
 }
 
 function hideEditingUi() {
-  document.body.classList.remove('editing');
+  document.body.classList.remove('editing', 'editing-wide');
   if (els.editbar) els.editbar.hidden = true;
   hideFormatbar();
 }
@@ -1813,7 +1817,7 @@ function editSignature(e) {
 /* ─────────────── Style des lignes de scan (police, gras) ─────────────── */
 
 /** Polices sans empattement proposées pour imiter un scan (par ordre de préférence). */
-const SCAN_FONTS = ['Arimo', 'Roboto', 'Open Sans', 'Lato', 'Source Sans 3', 'Fira Sans', 'PT Sans', 'Work Sans', 'IBM Plex Sans', 'Noto Sans', 'Cabin', 'Barlow'];
+const SCAN_FONTS = ['Arimo', 'Inter', 'DM Sans', 'Manrope', 'Nunito Sans', 'Roboto', 'Open Sans', 'Lato', 'Source Sans 3', 'Fira Sans', 'PT Sans', 'Work Sans', 'IBM Plex Sans', 'Noto Sans', 'Cabin', 'Barlow'];
 let scanFontsRequested = false;
 
 function preloadScanFonts() {
@@ -1991,7 +1995,7 @@ function focusLineInView(line) {
   const top = scroller.scrollTop + (stage.top - view.top) + rect.top;
   const usableH = Math.max(
     120,
-    view.height - keyboardInset() - (document.body.classList.contains('editing') ? 78 : 12)
+    view.height - keyboardInset() - (document.body.classList.contains('editing') || document.body.classList.contains('editing-wide') ? 78 : 12)
   );
   const margin = 14;
   const targetLeft = centerAxis({ start: left, size: rect.width, view: view.width, margin });
@@ -2877,6 +2881,7 @@ function groupOcrWords(words) {
       y1: w.bbox.y1,
       h: Math.max(1, w.bbox.y1 - w.bbox.y0),
       confidence: w.confidence || 0,
+      bold: w.bold,
     }))
     .sort((a, b) => (a.y0 + a.y1) - (b.y0 + b.y1) || a.x0 - b.x0);
 
@@ -2905,10 +2910,14 @@ function groupOcrWords(words) {
     for (const it of row.items) {
       const gap = seg ? it.x0 - seg.x1 : 0;
       const maxH = Math.max(it.h, seg ? seg.h : 0);
-      if (!seg || gap > Math.max(maxH * 1.25, 14)) {
+      // Changement net de graisse (« N° SS » gras, numéro normal…) : bloc à part,
+      // pour que chaque style reste modifiable sans toucher à l'autre.
+      const styleBreak = seg && typeof it.bold === 'boolean' && typeof seg.bold === 'boolean' && it.bold !== seg.bold;
+      if (!seg || styleBreak || gap > Math.max(maxH * 1.25, 14)) {
         if (seg) segments.push(seg);
-        seg = { x0: it.x0, y0: it.y0, x1: it.x1, y1: it.y1, h: it.h, items: [it] };
+        seg = { x0: it.x0, y0: it.y0, x1: it.x1, y1: it.y1, h: it.h, items: [it], bold: it.bold };
       } else {
+        if (typeof seg.bold !== 'boolean' && typeof it.bold === 'boolean') seg.bold = it.bold;
         seg.items.push(it);
         seg.x1 = Math.max(seg.x1, it.x1);
         seg.y0 = Math.min(seg.y0, it.y0);
@@ -2923,11 +2932,46 @@ function groupOcrWords(words) {
     .map((seg) => ({
       text: seg.items.map((i) => i.text).join(' ').replace(/\s+/g, ' ').trim(),
       bbox: { x0: seg.x0, y0: seg.y0, x1: seg.x1, y1: seg.y1 },
+      bold: seg.bold,
       confidence: Math.round(
         seg.items.reduce((sum, i) => sum + (i.confidence || 0), 0) / Math.max(1, seg.items.length)
       ),
     }))
     .filter((seg) => seg.text);
+}
+
+/**
+ * Épaisseur de trait de chaque mot reconnu : `bold` vaut true / false quand la
+ * mesure est nette, et reste indéfini pour les mots trop courts ou ambigus.
+ */
+function markWordWeights(canvas, words) {
+  let ctx;
+  try {
+    ctx = canvas.getContext('2d', { willReadFrequently: true });
+  } catch {
+    return;
+  }
+  if (!ctx) return;
+  for (const w of words) {
+    try {
+      if (!w.text || (w.text.match(/[\p{L}\p{N}]/gu) || []).length < 2) continue;
+      const x = Math.max(0, Math.floor(w.bbox.x0));
+      const y = Math.max(0, Math.floor(w.bbox.y0));
+      const bw = Math.min(canvas.width - x, Math.ceil(w.bbox.x1 - w.bbox.x0));
+      const bh = Math.min(canvas.height - y, Math.ceil(w.bbox.y1 - w.bbox.y0));
+      if (bw < 8 || bh < 6) continue;
+      const data = ctx.getImageData(x, y, bw, bh).data;
+      const gray = new Uint8ClampedArray(bw * bh);
+      for (let i = 0, p = 0; i < data.length; i += 4, p++) gray[p] = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+      const st = inkStats(gray, bw, bh);
+      if (!st) continue;
+      const ratio = st.stem / Math.max(1, st.inkBottom - st.inkTop + 1);
+      if (ratio > 0.2) w.bold = true;
+      else if (ratio < 0.14) w.bold = false;
+    } catch {
+      /* mesure impossible : mot neutre */
+    }
+  }
 }
 
 async function runOcrOnPage(n, langs, onProgress) {
@@ -2947,6 +2991,7 @@ async function runOcrOnPage(n, langs, onProgress) {
   if (els.ocrDeskew?.checked) prepared = deskewCanvas(prepared);
 
   const res = await recognizeCanvas(prepared, langs, onProgress);
+  markWordWeights(prepared, res.words);
 
   const mapBox = (b) => {
     const [x1, y1] = vp.convertToPdfPoint(b.x0, b.y0);
@@ -2972,6 +3017,7 @@ async function runOcrOnPage(n, langs, onProgress) {
         source: 'ocr',
         font: 'Helvetica',
         fontSize: U.clamp(bbox.h * 1.2, 5, 72),
+        ...(typeof seg.bold === 'boolean' ? { bold: seg.bold } : {}),
         baseline: bbox.y + bbox.h * 0.24,
         bbox,
         confidence: seg.confidence,

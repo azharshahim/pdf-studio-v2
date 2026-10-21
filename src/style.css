@@ -5341,3 +5341,7 @@ body:not([data-route='doc']) .doctabs {
 .ocr-pill[hidden]{display:none}
 
 .overlay.tool-eraser ~ .markup-ink path, .tool-eraser .markup-ink path{pointer-events:stroke;cursor:pointer}
+
+/* Surlignage : translucide, le texte reste lisible dessous */
+.mk-highlight{opacity:.4;mix-blend-mode:multiply}
+.mk-draft{mix-blend-mode:multiply}

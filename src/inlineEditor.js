@@ -440,7 +440,7 @@ export function createInlineEditor({
     if (!scroller) return;
     const vv = window.visualViewport;
     const keyboard = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
-    const bar = keyboard + (document.body.classList.contains('editing') ? 78 : 12);
+    const bar = keyboard + (document.body.classList.contains('editing') || document.body.classList.contains('editing-wide') ? 78 : 12);
     const rect = shell.getBoundingClientRect();
     const view = scroller.getBoundingClientRect();
     const margin = 14;
