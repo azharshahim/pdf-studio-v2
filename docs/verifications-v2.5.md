@@ -173,3 +173,11 @@ assertion en échec. Chaque test concerné repasse seul. La CI
   alors conservée mais le PDF doit être rechoisi.
 - Rien n'est synchronisé : un document enregistré sur un appareil n'existe pas
   sur un autre.
+
+
+## Correctif stockage (v2.5.1)
+
+- Cause du blocage « Enregistrement du PDF… » et « Chargement… » dans Fichiers : mise à niveau d'IndexedDB (v1 → v2) bloquée par une autre fenêtre ouverte, sans `onblocked` ni délai.
+- Corrigé : `onblocked`/`onversionchange`, délais (8 s ouverture, 20 s transaction), erreur `StorageError`, écran Fichiers avec Réessayer / Réinitialiser, enregistrement non bloquant, garde-fou de 120 s sur l'écran de chargement, stockage persistant, limite de 10 documents supprimée.
+- Vérifié dans Chromium : base v1 gardée ouverte → l'enregistrement se termine en < 1 s ; Fichiers affiche l'erreur après 8 s puis fonctionne après fermeture de l'autre fenêtre. 99 tests unitaires et 48 tests Chromium/Samsung verts.
+- Non testé : appareil Samsung réel, Firefox/WebKit (profils indisponibles ici).

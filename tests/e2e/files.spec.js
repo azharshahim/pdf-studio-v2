@@ -212,8 +212,21 @@ test.describe('Fichiers', () => {
   });
 
   test('demande confirmation avant d’évincer les plus anciens documents', async ({ page }) => {
+    // Quota du navigateur simulé à 200 Mo : le plafond utilisable est de 150 Mo.
+    await page.addInitScript(() => {
+      const real = navigator.storage;
+      Object.defineProperty(navigator, 'storage', {
+        configurable: true,
+        value: {
+          estimate: async () => ({ usage: 0, quota: 200 * 1024 * 1024 }),
+          persisted: async () => true,
+          persist: async () => true,
+          getDirectory: real?.getDirectory?.bind(real),
+        },
+      });
+    });
     await gotoApp(page);
-    // 10 documents factices (dont 9 sans octets) pour saturer la limite.
+    // 10 documents factices de 15 Mo (sans octets) pour saturer l'espace utilisable.
     await page.evaluate(async () => {
       const db = await new Promise((resolve) => {
         const req = indexedDB.open('pdf-studio', 2);
@@ -230,7 +243,7 @@ test.describe('Fichiers', () => {
         store.put({
           key: `ancien-${i}`,
           name: `Ancien document ${i}.pdf`,
-          size: 1024,
+          size: 15 * 1024 * 1024,
           createdAt: 1000 + i,
           updatedAt: 1000 + i,
           edits: [],

@@ -364,7 +364,7 @@ Le détail des mesures et des scénarios est dans
   (octets, nom, taille, date) avec ses modifications, ses annotations et ses pages OCR, dans un
   seul enregistrement fusionné. Toucher un document dans « Fichiers » le rouvre directement, avec
   ses modifications, une courte animation de chargement.
-- **Limites claires** : 10 documents ou 150 Mo ; les plus anciens ne sont évincés qu'après une
+- **Stockage fiable** : demandé « persistant » au navigateur, plafond = 60 % du quota réel (au moins 150 Mo, au plus 4 Go), plus de limite de 10 documents ; aucune opération locale ne peut rester bloquée (délais, base bloquée par une autre fenêtre → message + Réessayer / Réinitialiser) ; les plus anciens ne sont évincés qu'après une
   confirmation qui les nomme ; en cas de quota, un message explicite explique quoi supprimer.
 - **Écran Fichiers** : bouton « Parcourir mon appareil » en tête de liste, taille de chaque
   document et espace total utilisé, icônes partager / renommer / supprimer à 44 px, suppression

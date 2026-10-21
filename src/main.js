@@ -1569,7 +1569,7 @@ async function persistDocument(hash, bytes) {
   try {
     const plan = await Session.checkLimits(hash, bytes.byteLength);
     if (plan.blocked) {
-      toast(t('files.tooBig', { size: U.formatBytes(bytes.byteLength), max: '150 Mo' }), 'error', {
+      toast(t('files.tooBig', { size: U.formatBytes(bytes.byteLength), max: U.formatBytes(plan.maxBytes || Session.MAX_TOTAL_BYTES) }), 'error', {
         duration: 9000,
       });
       return false;
@@ -1584,7 +1584,7 @@ async function persistDocument(hash, bytes) {
       const ok = await askConfirm({
         title: t('files.limitTitle'),
         message: t('files.limitText', {
-          max: String(Session.MAX_DOCUMENTS),
+          max: U.formatBytes(plan.maxBytes || Session.MAX_TOTAL_BYTES),
           names: names || t('files.someOld'),
         }),
         confirmLabel: t('files.limitConfirm'),
@@ -1602,10 +1602,16 @@ async function persistDocument(hash, bytes) {
       name: state.fileName,
       numPages: state.numPages,
     });
+    // Demande au navigateur de ne pas effacer ces documents de lui-même.
+    Session.requestPersistence();
     return true;
   } catch (err) {
     console.warn('[store] enregistrement impossible', err);
-    toast(isQuotaError(err) ? t('files.quota') : t('files.saveFailed'), 'error', { duration: 9000 });
+    toast(
+      isQuotaError(err) ? t('files.quota') : err?.code === 'blocked' ? t('files.blocked') : t('files.saveFailed'),
+      'error',
+      { duration: 9000 }
+    );
     return false;
   }
 }
@@ -2571,7 +2577,8 @@ async function handleSave() {
     const blob = new Blob([result.bytes], { type: 'application/pdf' });
     lastSaved = { blob, name };
     U.downloadBlob(blob, name);
-    await scheduleAutosave(true);
+    // Le PDF est déjà téléchargé : la copie locale ne doit jamais bloquer l'écran.
+    Promise.resolve(scheduleAutosave(true)).catch(() => {});
     const canShare = !!navigator.canShare?.({ files: [new File([blob], name, { type: 'application/pdf' })] });
     toast(t('save.done'), 'success', {
       duration: 6500,
@@ -4053,11 +4060,7 @@ function fileDateLabel(ts) {
  * Le tri est fait par date de dernière ouverture.
  */
 async function loadFiles() {
-  try {
-    return await Session.listDocuments();
-  } catch {
-    return [];
-  }
+  return Session.listDocuments();
 }
 
 /** Ouvre un document enregistré (octets stockés) et reprend sa session. */
@@ -4097,27 +4100,69 @@ async function deleteStoredDocument(item) {
   await renderFilesScreen();
 }
 
+/** Stockage local indisponible : message clair, réessayer ou réinitialiser. */
+function renderFilesError(err) {
+  console.warn('[store] liste indisponible', err);
+  els.filesEmpty.hidden = true;
+  els.filesList.hidden = false;
+  els.filesCount.textContent = '!';
+  if (els.filesTotal) els.filesTotal.textContent = '';
+  els.filesList.innerHTML = `<div class="file-row">
+      <div class="file-main">
+        <strong>${t('files.storageError')}</strong>
+        <span class="file-meta">${t('files.storageErrorHelp')}</span>
+        <span class="file-actions">
+          <button class="btn primary" type="button" data-retry>${t('files.retry')}</button>
+          <button class="btn" type="button" data-reset>${t('files.reset')}</button>
+        </span>
+      </div>
+    </div>`;
+  els.filesList.querySelector('[data-retry]')?.addEventListener('click', () => renderFilesScreen());
+  els.filesList.querySelector('[data-reset]')?.addEventListener('click', async () => {
+    const ok = await askConfirm({
+      title: t('files.reset'),
+      message: t('files.resetText'),
+      confirmLabel: t('files.reset'),
+      cancelLabel: t('common.cancel'),
+    });
+    if (!ok) return;
+    try {
+      await Session.resetStorage();
+    } catch {
+      toast(t('files.blocked'), 'error', { duration: 9000 });
+      return;
+    }
+    await renderFilesScreen();
+  });
+}
+
 async function renderFilesScreen() {
   if (!els.filesList) return;
   els.filesList.hidden = false;
   els.filesEmpty.hidden = true;
   els.filesList.innerHTML = `<p class="muted small">${t('files.loading')}</p>`;
-  const [items, used] = await Promise.all([
-    loadFiles(),
-    Session.usedBytes().catch(() => 0),
-  ]);
+  let items;
+  let used = 0;
+  try {
+    [items, used] = await Promise.all([loadFiles(), Session.usedBytes().catch(() => 0)]);
+  } catch (err) {
+    renderFilesError(err);
+    return;
+  }
   filesCache = items;
   els.filesCount.textContent = String(items.length);
   els.filesEmpty.hidden = items.length > 0;
   els.filesList.hidden = items.length === 0;
   if (els.filesTotal) {
     els.filesTotal.textContent = items.length
-      ? t('files.total', {
-          size: U.formatBytes(used),
-          n: String(items.length),
-          max: String(Session.MAX_DOCUMENTS),
-        })
+      ? t('files.total', { size: U.formatBytes(used), n: String(items.length) })
       : '';
+    Session.storageInfo().then((info) => {
+      if (!items.length || !els.filesTotal) return;
+      els.filesTotal.textContent =
+        t('files.total', { size: U.formatBytes(used), n: String(items.length) }) +
+        (info.persisted ? ` · ${t('files.persistent')}` : '');
+    });
   }
   if (!items.length) {
     els.filesList.innerHTML = '';

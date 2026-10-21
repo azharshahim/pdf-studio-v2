@@ -9,16 +9,30 @@ import * as U from './utils.js';
 
 export function createUi(els) {
   let loadingDepth = 0;
+  let loadingWatchdog = null;
+  const LOADING_MAX_MS = 120000;
 
   function pushLoading(label = 'Chargement…') {
     loadingDepth++;
     els.loadingLabel.textContent = label;
     els.loadingScreen.hidden = false;
+    // Garde-fou : un écran de chargement ne reste jamais affiché indéfiniment.
+    clearTimeout(loadingWatchdog);
+    loadingWatchdog = setTimeout(() => {
+      loadingDepth = 0;
+      els.loadingScreen.hidden = true;
+      toast('Opération trop longue : écran de chargement fermé. Réessayez.', 'error', {
+        duration: 9000,
+      });
+    }, LOADING_MAX_MS);
   }
 
   function popLoading() {
     loadingDepth = Math.max(0, loadingDepth - 1);
-    if (!loadingDepth) els.loadingScreen.hidden = true;
+    if (!loadingDepth) {
+      clearTimeout(loadingWatchdog);
+      els.loadingScreen.hidden = true;
+    }
   }
 
   function toast(message, type = 'info', opts = {}) {
