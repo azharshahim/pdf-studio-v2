@@ -9,6 +9,7 @@ export const TOOLS = [
   { id: 'photos', icon: 'camera', color: 'emerald', title: 'tool.photos', desc: 'tool.photosDesc' },
   { id: 'form', icon: 'checkSquare', color: 'sky', title: 'tool.form', desc: 'tool.formDesc' },
   { id: 'stamp', icon: 'stamp', color: 'rose', title: 'tool.stamp', desc: 'tool.stampDesc' },
+  { id: 'combine', icon: 'layers', color: 'violet', title: 'tool.combine', desc: 'tool.combineDesc' },
   { id: 'pages', icon: 'layers', color: 'violet', title: 'tool.pages', desc: 'tool.pagesDesc' },
   { id: 'ocr', icon: 'scan', color: 'sky', title: 'tool.ocr', desc: 'tool.ocrDesc' },
   { id: 'compress', icon: 'compress', color: 'slate', title: 'tool.compress', desc: 'tool.compressDesc' },

@@ -5,6 +5,7 @@ import { recognizeCanvas, terminateOcr } from './ocrEngine.js';
 import { enhanceContrast, deskewCanvas } from './imagePrep.js';
 import * as PageOps from './pageOps.js';
 import { detectWatermarks, applyWatermarkChange } from './watermark.js';
+import { combinePdfs, countPages, nextCombinedName } from './combine.js';
 import { readFormFields, readFormWidgetsFromPage, fillFormFields, detectFillAreas } from './forms.js';
 import { findMatch } from './search.js';
 import { createHistory } from './history.js';
@@ -568,6 +569,7 @@ function updateThumbActive() {
 
 function updateFileChip() {
   if (!state.engine) return;
+  renderTabs();
   els.fileChip.hidden = false;
   els.fileName.textContent = state.fileName;
   els.fileMeta.textContent = `${state.numPages} page${state.numPages > 1 ? 's' : ''}${
@@ -1134,6 +1136,7 @@ function openRenameSheet() {
     closeSheet();
     state.fileName = name;
     if (state.hash) await Session.renameDocument(state.hash, name).catch(() => {});
+    if (state.hash) registerTab(state.hash, name);
     updateFileChip();
     document.title = `${U.baseName(name)} — PDF Studio`;
     toast(t('rename.done'), 'success', { duration: 1800 });
@@ -1155,6 +1158,7 @@ function openDocMenu() {
       ? { id: 'edit', icon: 'edit', title: 'menu.edit', hint: 'menu.editHint' }
       : { id: 'read', icon: 'eye', title: 'menu.read', hint: 'menu.readHint' },
     { id: 'rename', icon: 'edit', title: 'rename.title', hint: 'rename.label' },
+    { id: 'combine', icon: 'layers', title: 'tool.combine', hint: 'tool.combineDesc' },
     { id: 'save', icon: 'save', title: 'menu.save', hint: 'menu.saveHint' },
     { id: 'export', icon: 'download', title: 'menu.export', hint: 'menu.exportHint' },
     { id: 'download', icon: 'download', title: 'menu.download', hint: 'menu.downloadHint' },
@@ -1188,6 +1192,7 @@ function openDocMenu() {
         if (id === 'edit') setReadMode(false);
         else if (id === 'read') setReadMode(true);
         else if (id === 'rename') openRenameSheet();
+        else if (id === 'combine') openTool('combine');
         else if (id === 'save') handleSave();
         else if (id === 'download') downloadModifiedPdf();
         else if (id === 'export') els.btnExport.click();
@@ -2288,6 +2293,283 @@ async function persistDocument(hash, bytes) {
   }
 }
 
+
+/* ───────────────────────── Onglets (plusieurs PDF ouverts) ───────────────────────── */
+
+const TABS_KEY = 'pdf-studio-tabs';
+let openTabs = (() => {
+  try {
+    const v = JSON.parse(localStorage.getItem(TABS_KEY) || '[]');
+    return Array.isArray(v) ? v.filter((x) => x && x.key && x.name).slice(0, 30) : [];
+  } catch {
+    return [];
+  }
+})();
+
+function saveTabs() {
+  try {
+    localStorage.setItem(TABS_KEY, JSON.stringify(openTabs.slice(0, 30)));
+  } catch {
+    /* stockage indisponible */
+  }
+}
+
+/** Ajoute (ou renomme) l'onglet d'un document. */
+function registerTab(key, name) {
+  if (!key) return;
+  const tab = openTabs.find((x) => x.key === key);
+  if (tab) tab.name = name || tab.name;
+  else openTabs.push({ key, name: name || 'document.pdf' });
+  saveTabs();
+  renderTabs();
+}
+
+function renderTabs() {
+  const strip = document.getElementById('docTabs');
+  if (!strip) return;
+  const show = openTabs.length >= 2 || (openTabs.length >= 1 && window.innerWidth >= 901);
+  strip.hidden = !show;
+  if (!show) return;
+  strip.innerHTML =
+    openTabs
+      .map(
+        (tab) => `<div class="doc-tab${tab.key === state.hash ? ' active' : ''}" role="tab" aria-selected="${tab.key === state.hash}" data-tab-key="${U.escapeHtml(tab.key)}" title="${U.escapeHtml(tab.name)}">
+          <button class="doc-tab-label" type="button" data-tab-open="${U.escapeHtml(tab.key)}">${U.escapeHtml(U.baseName(tab.name))}</button>
+          <button class="doc-tab-close" type="button" data-tab-close="${U.escapeHtml(tab.key)}" aria-label="${t('tabs.close')}">×</button>
+        </div>`,
+      )
+      .join('') +
+    `<button class="doc-tab-add" type="button" data-tab-add aria-label="${t('tabs.add')}" title="${t('tabs.add')}">+</button>
+     <button class="doc-tab-combine" type="button" data-tab-combine>${icon('layers', 15)}<span>${t('tabs.combine')}</span></button>`;
+  strip.querySelector('.doc-tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+async function switchTab(key) {
+  if (!key || key === state.hash) return;
+  closeActive();
+  flushSession();
+  const tab = openTabs.find((x) => x.key === key);
+  const bytes = await Session.loadBytes(key).catch(() => null);
+  if (!bytes) {
+    openTabs = openTabs.filter((x) => x.key !== key);
+    saveTabs();
+    renderTabs();
+    toast(t('files.needFile'), 'warn');
+    return;
+  }
+  const docs = await Session.listDocuments().catch(() => []);
+  const name = docs.find((d) => d.key === key)?.name || tab?.name || 'document.pdf';
+  await openPdfBytes(new Uint8Array(bytes), name, '', { session: 'auto', readOnly: isReading() });
+}
+
+async function closeTab(key) {
+  const i = openTabs.findIndex((x) => x.key === key);
+  if (i < 0) return;
+  const wasActive = key === state.hash;
+  if (wasActive) {
+    closeActive();
+    flushSession();
+  }
+  openTabs.splice(i, 1);
+  saveTabs();
+  if (wasActive) {
+    const next = openTabs[Math.min(i, openTabs.length - 1)];
+    if (next) await switchTab(next.key);
+    else routeTo('files');
+  }
+  renderTabs();
+}
+
+/** Ouvre un ou plusieurs PDF : un onglet par fichier, le dernier est affiché. */
+async function openFiles(fileList) {
+  const files = [...(fileList || [])].filter((f) => f && (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)));
+  if (!files.length) {
+    if (fileList?.length) toast(t('msg.notPdf'), 'warn');
+    return;
+  }
+  if (files.length === 1) return handleFile(files[0]);
+  pushLoading(t('combine.reading'));
+  try {
+    for (const file of files.slice(0, -1)) {
+      if (!file.size) continue;
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const hash = await Session.hashBytes(bytes);
+      const pages = await countPages(bytes).catch(() => 0);
+      await Session.saveDocumentBytes(hash, bytes, { name: file.name, numPages: pages });
+      registerTab(hash, file.name);
+    }
+  } catch (err) {
+    console.warn('[tabs] fichier non ajouté', err);
+  } finally {
+    popLoading();
+  }
+  return handleFile(files[files.length - 1]);
+}
+
+/* ───────────────────────── Combiner des fichiers ───────────────────────── */
+
+const combineJob = { items: [], name: '' };
+let combineSeq = 0;
+
+async function pdfThumb(bytes) {
+  const { PdfEngine } = await import('./pdfEngine.js');
+  const eng = new PdfEngine(bytes.slice());
+  try {
+    await eng.load();
+    const canvas = document.createElement('canvas');
+    await eng.renderToCanvas(1, canvas, 0.3, 1);
+    return { thumb: canvas.toDataURL('image/jpeg', 0.7), pages: eng.numPages };
+  } finally {
+    eng.destroy();
+  }
+}
+
+async function addCombineItem(name, bytes, tabKey = null) {
+  try {
+    const info = await pdfThumb(bytes);
+    combineJob.items.push({ id: `c${++combineSeq}`, name, bytes, tabKey, pages: info.pages, thumb: info.thumb });
+  } catch (err) {
+    console.warn('[combine] fichier illisible', name, err);
+    toast(t('msg.openFailed', { msg: name }), 'warn', { duration: 3500 });
+  }
+}
+
+async function addCombineFiles(files) {
+  const list = [...(files || [])].filter((f) => f && (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)));
+  if (!list.length) return;
+  pushLoading(t('combine.reading'));
+  try {
+    for (const f of list) await addCombineItem(f.name, new Uint8Array(await f.arrayBuffer()));
+  } finally {
+    popLoading();
+  }
+  renderCombine();
+}
+
+function openCombineTool(reset = true, preset = []) {
+  if (reset) combineJob.items = [];
+  combineJob.name = '';
+  openSheet({ title: t('combine.title'), html: '<div id="combineBody"></div>', size: 'tall', className: 'combine-sheet' });
+  renderCombine();
+  if (preset.length) {
+    (async () => {
+      for (const p of preset) await addCombineItem(p.name, p.bytes, p.tabKey || null);
+      renderCombine();
+    })();
+  }
+}
+
+function renderCombine() {
+  const host = document.getElementById('combineBody');
+  if (!host) return;
+  const items = combineJob.items;
+  if (!combineJob.name) {
+    combineJob.name = nextCombinedName(openTabs.map((x) => x.name));
+  }
+  host.innerHTML = `
+    <p class="muted small">${t('combine.hint')}</p>
+    <div class="combine-add">
+      <button class="btn primary" id="combineAddFiles" type="button">${icon('plus', 17)}<span>${t('combine.addFiles')}</span></button>
+      <button class="btn" id="combineFromTabs" type="button">${icon('layers', 17)}<span>${t('combine.fromTabs')}</span></button>
+    </div>
+    <div class="combine-grid" id="combineGrid">
+      ${
+        items.length
+          ? items
+              .map(
+                (it, i) => `<div class="combine-card" data-cid="${it.id}">
+                  <div class="combine-thumb"><img src="${it.thumb}" alt="" /><span class="combine-n">${i + 1}</span></div>
+                  <div class="combine-name" title="${U.escapeHtml(it.name)}">${U.escapeHtml(U.baseName(it.name))}</div>
+                  <div class="combine-meta">${t('combine.pages', { n: it.pages })}</div>
+                  <div class="combine-actions">
+                    <button type="button" class="icon-btn tiny" data-cmove="-1" aria-label="${t('combine.left')}" ${i === 0 ? 'disabled' : ''}>${icon('chevronLeft', 16)}</button>
+                    <button type="button" class="icon-btn tiny" data-cmove="1" aria-label="${t('combine.right')}" ${i === items.length - 1 ? 'disabled' : ''}>${icon('chevronRight', 16)}</button>
+                    <button type="button" class="icon-btn tiny danger" data-cdel aria-label="${t('combine.remove')}">${icon('trash', 16)}</button>
+                  </div>
+                </div>`,
+              )
+              .join('')
+          : `<p class="muted combine-empty">${t('combine.empty')}</p>`
+      }
+    </div>
+    <label class="field"><span>${t('combine.name')}</span>
+      <input id="combineName" type="text" autocomplete="off" spellcheck="false" value="${U.escapeHtml(combineJob.name)}" /></label>
+    <button class="btn primary block" id="combineGo" type="button" ${items.length < 2 ? 'disabled' : ''}>${
+      items.length >= 2 ? t('combine.go', { n: items.length }) : t('combine.need2')
+    }</button>`;
+  host.querySelector('#combineAddFiles').addEventListener('click', () => document.getElementById('combineInput')?.click());
+  host.querySelector('#combineFromTabs').addEventListener('click', openCombineFromTabs);
+  host.querySelector('#combineName').addEventListener('input', (e) => {
+    combineJob.name = e.target.value;
+  });
+  host.querySelectorAll('.combine-card').forEach((card) => {
+    const id = card.dataset.cid;
+    card.querySelectorAll('[data-cmove]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const i = items.findIndex((x) => x.id === id);
+        const j = i + Number(b.dataset.cmove);
+        if (i < 0 || j < 0 || j >= items.length) return;
+        [items[i], items[j]] = [items[j], items[i]];
+        renderCombine();
+      }),
+    );
+    card.querySelector('[data-cdel]').addEventListener('click', () => {
+      combineJob.items = items.filter((x) => x.id !== id);
+      renderCombine();
+    });
+  });
+  host.querySelector('#combineGo').addEventListener('click', runCombine);
+}
+
+/** Choix parmi les documents déjà ouverts dans des onglets. */
+async function openCombineFromTabs() {
+  const used = new Set(combineJob.items.map((x) => x.tabKey).filter(Boolean));
+  const others = openTabs.filter((tab) => !used.has(tab.key));
+  const html = others.length
+    ? `<div class="combine-tabs">${others
+        .map(
+          (tab) => `<label class="combine-tab-row"><input type="checkbox" value="${U.escapeHtml(tab.key)}" /><span>${U.escapeHtml(tab.name)}</span></label>`,
+        )
+        .join('')}</div>
+      <button class="btn primary block" id="combineTabsOk" type="button">${t('combine.tabsAdd')}</button>`
+    : `<p class="muted">${t('combine.tabsNone')}</p>`;
+  const body = openSheet({ title: t('combine.tabsTitle'), html, size: 'auto', className: 'combine-tabs-sheet' });
+  body?.querySelector('#combineTabsOk')?.addEventListener('click', async () => {
+    const keys = [...body.querySelectorAll('input:checked')].map((c) => c.value);
+    closeSheet();
+    const preset = [];
+    for (const key of keys) {
+      const bytes = key === state.hash ? state.bytes : await Session.loadBytes(key).catch(() => null);
+      if (!bytes) continue;
+      const tab = openTabs.find((x) => x.key === key);
+      preset.push({ name: tab?.name || 'document.pdf', bytes: new Uint8Array(bytes), tabKey: key });
+    }
+    openCombineTool(false, preset);
+  });
+}
+
+async function runCombine() {
+  const items = combineJob.items;
+  if (items.length < 2) return;
+  const raw = (combineJob.name || '').trim().replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'Classeur1';
+  const name = /\.pdf$/i.test(raw) ? raw : `${raw}.pdf`;
+  closeSheet();
+  pushLoading(t('combine.working'));
+  try {
+    const bytes = await combinePdfs(items.map((x) => x.bytes));
+    popLoading();
+    combineJob.items = [];
+    combineJob.name = '';
+    await openPdfBytes(new Uint8Array(bytes), name, '', { readOnly: false, session: 'skip' });
+    toast(t('combine.done', { n: state.numPages }), 'success', { duration: 4000 });
+    openPagesGridTool();
+  } catch (err) {
+    popLoading();
+    console.error(err);
+    toast(t('combine.failed'), 'error');
+  }
+}
+
 /** Applique une session enregistrée au document courant (sans dialogue). */
 function applySessionData(saved) {
   state.restoring = true;
@@ -3198,6 +3480,7 @@ async function openPdfBytes(bytes, name, password = '', options = {}) {
       .then(async (hash) => {
         if (docToken !== state.docToken) return;
         state.hash = hash;
+        registerTab(hash, state.fileName);
         const pending = takePendingReopen();
         if (pending && pending.key === hash) {
           // Le fichier choisi correspond bien au document perdu : on reprend
@@ -5483,6 +5766,10 @@ function openPhotosTool(reset = true) {
 
 /** Routes des outils : ouvre le document si nécessaire, puis l'outil. */
 async function openTool(id) {
+  if (id === 'combine') {
+    const preset = state.engine && state.bytes ? [{ name: state.fileName, bytes: new Uint8Array(state.bytes), tabKey: state.hash }] : [];
+    return openCombineTool(true, preset);
+  }
   if (id === 'photos') return openPhotosTool();
   if (id === 'compress') return openCompressTool();
   if (id === 'protect') return openProtectTool();
@@ -5556,10 +5843,27 @@ function bindEvents() {
   // Fichier
   [els.btnOpen, els.btnEmptyOpen].forEach((b) => b.addEventListener('click', () => els.fileInput.click()));
   els.fileInput.addEventListener('change', () => {
-    const file = els.fileInput.files?.[0];
+    const files = [...(els.fileInput.files || [])];
     els.fileInput.value = '';
-    if (file) handleFile(file);
+    if (files.length) openFiles(files);
   });
+  document.getElementById('combineInput')?.addEventListener('change', (e) => {
+    const files = [...(e.target.files || [])];
+    e.target.value = '';
+    addCombineFiles(files);
+  });
+  document.getElementById('docTabs')?.addEventListener('click', (e) => {
+    const open = e.target.closest('[data-tab-open]');
+    const close = e.target.closest('[data-tab-close]');
+    if (close) return closeTab(close.dataset.tabClose);
+    if (open) return switchTab(open.dataset.tabOpen);
+    if (e.target.closest('[data-tab-add]')) return els.fileInput.click();
+    if (e.target.closest('[data-tab-combine]')) {
+      const preset = state.engine && state.bytes ? [{ name: state.fileName, bytes: new Uint8Array(state.bytes), tabKey: state.hash }] : [];
+      openCombineTool(true, preset);
+    }
+  });
+  window.addEventListener('resize', renderTabs);
   bindPageTools();
   bindFormTools();
   els.btnExportPng?.addEventListener('click', () => handleExportImage('png'));
@@ -5593,8 +5897,8 @@ function bindEvents() {
     e.preventDefault();
     dragDepth = 0;
     els.dropOverlay.hidden = true;
-    const file = e.dataTransfer.files?.[0];
-    if (file) handleFile(file);
+    const files = [...(e.dataTransfer.files || [])];
+    if (files.length) openFiles(files);
   });
 
   // Barre supérieure
@@ -6113,15 +6417,14 @@ function bindLaunchFiles() {
     const handles = params?.files || [];
     if (!handles.length) return;
     launchedWithFile = true;
-    for (const handle of handles) {
-      try {
-        const file = await handle.getFile();
-        routeTo('doc');
-        await handleFile(file);
-      } catch (err) {
-        console.warn('[launch] fichier illisible', err);
-        toast(t('msg.openFailed', { msg: err?.message || String(err) }), 'error');
-      }
+    try {
+      const files = [];
+      for (const handle of handles) files.push(await handle.getFile());
+      routeTo('doc');
+      await openFiles(files);
+    } catch (err) {
+      console.warn('[launch] fichier illisible', err);
+      toast(t('msg.openFailed', { msg: err?.message || String(err) }), 'error');
     }
   });
 }

@@ -63,7 +63,7 @@ test.describe('Barre d’outils du document', () => {
     });
     await openDemo(page);
     await page.locator('#btnDocMenu').tap();
-    await expect(page.locator('#sheet [data-doc-menu]')).toHaveCount(11);
+    await expect(page.locator('#sheet [data-doc-menu]')).toHaveCount(12);
 
     await page.locator('[data-doc-menu=share]').tap();
     await expect.poll(() => page.evaluate(() => window.__shared?.name)).toMatch(/-modifie\.pdf$/);

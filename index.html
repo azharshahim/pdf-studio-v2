@@ -128,6 +128,8 @@
         </div>
       </header>
 
+      <nav class="doctabs" id="docTabs" role="tablist" aria-label="Documents ouverts" hidden></nav>
+
       <!-- ══════════════ SEARCH ══════════════ -->
       <div class="searchbar" id="searchbar" hidden>
         <div class="search-inner">
@@ -672,7 +674,8 @@
 
     <div class="toasts" id="toasts"></div>
 
-    <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden />
+    <input type="file" id="fileInput" accept="application/pdf,.pdf" multiple hidden />
+    <input type="file" id="combineInput" accept="application/pdf,.pdf" multiple hidden />
     <dialog class="dialog" id="glyphDialog" aria-labelledby="glyphTitle">
     <h3 id="glyphTitle" data-i18n="glyph.title">Caractères non pris en charge</h3>
     <p class="dialog-text" id="glyphText"></p>

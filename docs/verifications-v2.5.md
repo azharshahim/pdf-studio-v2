@@ -267,3 +267,9 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 
 - Ordinateur : la palette est placée dans une colonne réservée à gauche de la page (la page est décalée, jamais recouverte), compacte et défilante si l'écran est bas.
 - Modification : bouton « Photos » (PDF depuis la galerie ou l'appareil photo) ajouté à la barre.
+
+## Onglets et combinaison (v2.9)
+
+- Plusieurs PDF ouverts d'un coup (sélection multiple, glisser-déposer, ouverture Windows) : un onglet par fichier, changement et fermeture d'onglet, session de chaque document conservée.
+- Combiner des fichiers (Outils, menu ⋮ ou bouton « Combiner » des onglets) : ajout depuis l'appareil ou depuis les fichiers déjà ouverts, ordre modifiable, nom « Classeur N.pdf » proposé ; après combinaison, la grille des pages s'ouvre pour ranger les pages (tests/combine.test.js, tests/e2e/onglets.spec.js).
+- Suites : vitest 140 OK ; Playwright Chromium + Samsung OK (dock mis à jour : 12 lignes dans ⋮).
