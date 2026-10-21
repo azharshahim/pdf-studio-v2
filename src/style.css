@@ -4354,3 +4354,38 @@ body.annotating .annobar {
   }
 }
 
+
+/* ═══════════════════ Mode diagnostic ═══════════════════ */
+.diag-row {
+  margin: 22px 0 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.diag-row .check {
+  font-size: 13px;
+  font-weight: 600;
+}
+.diag-row p {
+  margin: 6px 0 0;
+  max-width: 46ch;
+}
+.diag-badge {
+  position: fixed;
+  left: 8px;
+  /* Au-dessus de la barre d'onglets et de la barre de mise en forme. */
+  bottom: calc(env(safe-area-inset-bottom) + 76px);
+  z-index: 60;
+  max-width: calc(100vw - 16px);
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--muted);
+  font: 500 10.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  backdrop-filter: blur(4px);
+}

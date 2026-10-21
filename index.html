@@ -482,11 +482,20 @@
         <div class="screen-inner">
           <header class="screen-head"><h1 data-i18n="tools.title">Outils</h1></header>
           <div class="tool-grid tools-full" id="toolsGrid"></div>
+          <div class="diag-row">
+            <label class="check">
+              <input type="checkbox" id="diagToggle" />
+              <span data-i18n="diag.toggle">Mode diagnostic</span>
+            </label>
+            <p class="muted small" data-i18n="diag.hint">Affiche discrètement le navigateur détecté, le mode d’édition et la position du curseur. Utile pour signaler un problème.</p>
+          </div>
         </div>
       </section>
 
       <!-- ══════════════ NAVIGATION BASSE ══════════════ -->
-      <nav class="tabbar" id="tabbar" aria-label="Navigation principale">
+      <div class="diag-badge" id="diagBadge" hidden aria-live="off"></div>
+
+  <nav class="tabbar" id="tabbar" aria-label="Navigation principale">
         <button class="tabitem" data-route="home"><span data-icon="home"></span><span data-i18n="nav.home">Accueil</span></button>
         <button class="tabitem" data-route="files"><span data-icon="folder"></span><span data-i18n="nav.files">Fichiers</span></button>
         <button class="tabitem" data-route="tools"><span data-icon="grid"></span><span data-i18n="nav.tools">Outils</span></button>

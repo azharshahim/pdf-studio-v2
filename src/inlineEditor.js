@@ -705,11 +705,14 @@ export function createInlineEditor({
     sync,
     refresh,
     isOpen,
+    caretOffset,
     get edit() {
       return edit;
     },
+    /** « contenteditable », « textarea », ou null hors édition. */
     get surface() {
-      return surface;
+      if (!isOpen()) return null;
+      return surface === 'ta' ? 'textarea' : 'contenteditable';
     },
   };
 }

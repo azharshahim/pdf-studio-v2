@@ -12,6 +12,7 @@ import { createInlineEditor } from './inlineEditor.js';
 import { estimateOffsetFromFraction, offsetAtPoint } from './caretPoint.js';
 import * as Session from './session.js';
 import { isQuotaError } from './session.js';
+import { describeBrowser, formatDiagnostic } from './diagnostic.js';
 import { buildSampleTextPdf, buildSampleScanPdf } from './samples.js';
 import { icon, hydrateIcons } from './icons.js';
 import { applyLanguage, getLang, t } from './i18n.js';
@@ -197,6 +198,8 @@ const els = {
   homeRecentWrap: $('homeRecentWrap'),
   filesOpen: $('filesOpen'),
   filesBrowse: $('filesBrowse'),
+  diagToggle: $('diagToggle'),
+  diagBadge: $('diagBadge'),
   filesTotal: $('filesTotal'),
   filesRefresh: $('filesRefresh'),
   filesList: $('filesList'),
@@ -1709,6 +1712,52 @@ async function restoreSessionData(hash, { silent = false } = {}) {
 /** Propose de reprendre une session (ouverture manuelle d'un PDF). */
 function maybeRestoreSession() {
   return restoreSessionData(state.hash, { silent: false });
+}
+
+/* ── Mode diagnostic ─────────────────────────────────────────────── */
+
+const DIAG_KEY = 'pdf-studio-diagnostic';
+const diagnostic = { on: false, timer: 0 };
+
+/** Met à jour le badge : navigateur · mode d'édition · offset du curseur. */
+function updateDiagnostics() {
+  if (!diagnostic.on || !els.diagBadge) return;
+  els.diagBadge.textContent = formatDiagnostic({
+    browser: describeBrowser(navigator.userAgent),
+    surface: inline.isOpen() ? inline.surface : null,
+    offset: inline.isOpen() ? inline.caretOffset() : null,
+  });
+}
+
+function setDiagnostics(on) {
+  diagnostic.on = !!on;
+  try {
+    localStorage.setItem(DIAG_KEY, diagnostic.on ? '1' : '0');
+  } catch {
+    /* stockage indisponible */
+  }
+  if (els.diagToggle) els.diagToggle.checked = diagnostic.on;
+  if (els.diagBadge) els.diagBadge.hidden = !diagnostic.on;
+  clearInterval(diagnostic.timer);
+  diagnostic.timer = 0;
+  if (diagnostic.on) {
+    updateDiagnostics();
+    // Léger : suffisant pour suivre le curseur, sans écouter chaque frappe.
+    diagnostic.timer = setInterval(updateDiagnostics, 400);
+  }
+}
+
+function initDiagnostics() {
+  let saved = false;
+  try {
+    saved = localStorage.getItem(DIAG_KEY) === '1';
+  } catch {
+    /* stockage indisponible */
+  }
+  els.diagToggle?.addEventListener('change', () => setDiagnostics(els.diagToggle.checked));
+  setDiagnostics(saved);
+  document.addEventListener('selectionchange', updateDiagnostics);
+  document.addEventListener('input', updateDiagnostics, true);
 }
 
 /* ── Dialogue de mot de passe ─────────────────────────────────────── */
@@ -4774,6 +4823,7 @@ function init() {
   updateHistoryButtons();
   registerServiceWorker();
   initTheme();
+  initDiagnostics();
   initShell({
     onRoute: (name) => {
       if (name === 'doc' && !state.engine) {
