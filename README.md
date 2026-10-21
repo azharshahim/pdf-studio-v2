@@ -1,4 +1,4 @@
-# PDF Studio — OCR & édition de PDF · V2.3
+# PDF Studio — OCR & édition de PDF · V2.4
 
 Application web **100 % locale** : ouvrez un PDF, corrigez le texte **directement sur la page**,
 annotez-le, signez-le, remplissez ses formulaires, lancez l'OCR sur les pages scannées puis
@@ -115,8 +115,21 @@ panneau latéral à ouvrir, la page occupe l'écran.
 ## Tests
 
 ```bash
-npm test          # Vitest — 58 tests
+npm test          # Vitest — 78 tests (logique pure)
+npm run test:e2e  # Playwright — 9 parcours, 4 profils de navigateur
 ```
+
+Les tests de bout en bout ont besoin d'un navigateur :
+
+```bash
+npx playwright install --with-deps chromium firefox webkit
+```
+
+Ils se déroulent en **390 × 844 tactile**, avec un profil par moteur
+(**Chromium**, **Firefox**, **WebKit**) et un profil **Samsung Internet**
+(en-tête `SamsungBrowser`, moteur Chromium). Le serveur de développement est lancé
+automatiquement (ou réutilisé). Le workflow `.github/workflows/e2e.yml` les exécute à chaque
+push sur les trois moteurs.
 
 Les tests couvrent notamment :
 - la recherche insensible à la casse/aux accents (index d'origine, ligatures œ/æ) ;
@@ -169,7 +182,9 @@ fonctionner aussi bien à la racine que dans un sous-dossier.
   navigateurs sans `Map.prototype.getOrInsertComputed`, `Promise.try` ou `Promise.withResolvers`.
 - `src/polyfills.js` complète ces API pour le reste de l'application (Safari < 17.4,
   Firefox < 128, anciens Chrome).
-- Testé sur Chromium récent ; le build legacy couvre Safari iOS 15+ et Firefox ESR.
+- **Testés en 390 × 844 tactile** : Chromium 153, WebKit 26.6 (moteur de Safari) et,
+  pour la logique de garde-fous, un profil Samsung Internet ; Firefox 155 via la CI.
+- Le build legacy couvre Safari iOS 15+ et Firefox ESR.
 
 ---
 
@@ -195,7 +210,9 @@ fonctionner aussi bien à la racine que dans un sous-dossier.
 
 | Geste | Action |
 | --- | --- |
-| Toucher une ligne | ouvrir le texte à cet endroit, prêt à corriger |
+| Toucher une ligne | ouvrir le texte **à l'endroit touché**, le curseur sous le doigt |
+| Appui long sur une ligne | ouvrir le texte avec le **mot touché sélectionné** (poignées natives) |
+| Toucher ailleurs | fermer l'édition en gardant la frappe |
 | Pincer à deux doigts | zoomer / dézoomer dans la page |
 | Balayer horizontalement | page suivante / précédente |
 | Toucher un objet (tampon, signature) | afficher ses poignées : déplacer, redimensionner, pivoter, supprimer |
@@ -212,7 +229,7 @@ fonctionner aussi bien à la racine que dans un sous-dossier.
 | `Ctrl/Cmd + Maj + Z` (ou `Ctrl+Y`) | Rétablir |
 | `←` / `→` | Page précédente / suivante |
 | `+` / `−` | Zoom avant / arrière |
-| `Échap` | Fermer le panneau, annuler l'ajout de texte |
+| `Échap` | Fermer l'édition en cours (la frappe est conservée), annuler l'ajout de texte |
 | `Ctrl/Cmd + Entrée` | Valider l'édition en cours |
 
 ---
@@ -316,6 +333,27 @@ embarquées dans `public/fonts/` et intégrées avec `@pdf-lib/fontkit` :
 
 Le détail des mesures et des captures est dans [`docs/verifications-v2.3.md`](docs/verifications-v2.3.md).
 
+## Version 2.4 — édition directe au doigt
+
+- **le curseur se pose sous le doigt** : les coordonnées du contact sont mémorisées avant le zoom,
+  converties en index de caractère par `caretPositionFromPoint` / `caretRangeFromPoint`, puis le
+  curseur est replacé après le focus (rAF, puis second essai à 50 ms si le navigateur l'a remis à
+  zéro) ;
+- **appui long** (480 ms, 10 px de tolérance) : le mot touché est sélectionné, avec les poignées
+  natives du navigateur ;
+- **garde-fous Samsung Internet** : `autocorrect`, `autocapitalize`, `spellcheck`, `autocomplete`
+  et les extensions de correction sont désactivés, le contenu éditable n'est jamais réécrit
+  pendant la frappe ou une composition, aucun `focus()` ni recentrage n'est déclenché en cours de
+  saisie, et deux sauts de curseur consécutifs font basculer le champ sur un **`<textarea>`
+  superposé** (même police, taille, couleur, interligne) sans perdre le texte ;
+- **lignes plus larges que l'écran** : le bloc ne dépasse jamais la zone visible, le texte défile
+  à l'intérieur du champ et le défilement suit le curseur, clavier ouvert ;
+- **retour exact à la vue** après ✓ ou Échap : zoom, position et défilement sont restaurés au
+  pixel, y compris quand on passe d'une ligne à une autre.
+
+Le détail des mesures et des scénarios est dans
+[`docs/verifications-v2.4.md`](docs/verifications-v2.4.md).
+
 ## Ce qui a été vérifié, et comment
 
 Les tests automatiques (`npm test`, 58 tests) couvrent la logique pure : recherche, polices,
@@ -339,11 +377,18 @@ tactile) et en 1280 × 800 (ordinateur).
 | Aide au premier lancement | 3 écrans, mémorisée après fermeture |
 | Pincer pour zoomer, balayer pour changer de page | zoom 152 % après pincement, page suivante après balayage |
 
-**Ce qui n'a pas pu être testé ici** : Safari sur iPhone et iPad, Firefox, les appareils photo
+**Ce qui n'a pas pu être testé ici** : Safari sur iPhone et iPad, les appareils photo
 réels (l'entrée caméra est un simple champ fichier), le partage natif (`navigator.share`, absent du
 navigateur de test), l'installation PWA et le mode hors ligne (service worker inactif en
 développement), l'ouverture de PDF réellement chiffrés par mot de passe, et la qualité de l'OCR
 au-delà des deux exemples fournis.
+
+Pour la V2.4, s'y ajoutent : **un vrai Samsung Internet** (seul l'en-tête et le moteur ont été
+simulés), le **clavier natif** d'Android et d'iOS (le clavier est simulé en tests), une **vraie
+composition IME** (les événements `compositionstart` / `insertCompositionText` /
+`compositionend` sont émis par script), et **Firefox en local** : le processus de rendu est tué par
+le noyau de cette machine de test (≈ 2 Go de mémoire) dès l'ouverture d'un PDF ; la CI, qui
+dispose de plus de mémoire, exécute le profil Firefox.
 
 ## Limites connues
 
@@ -361,6 +406,13 @@ au-delà des deux exemples fournis.
   chiffrés avec un algorithme exotique peuvent échouer.
 - Les fichiers de plus de 200 Mo sont refusés (au-delà de 60 Mo, un avertissement s'affiche).
 - La qualité de l'OCR dépend de la résolution et de la propreté du scan.
+- **Édition au doigt** : sur une ligne très fine (7-8 px de haut avant zoom), le toucher doit viser
+  la ligne ; le curseur est placé au caractère le plus proche, à un caractère près.
+- Sur Samsung Internet, si le `contenteditable` se révèle instable, le champ bascule sur un
+  `textarea` : le rendu est identique mais la sélection au mot près est alors déléguée au
+  navigateur.
+- Le défilement horizontal interne au champ n'a pas d'indicateur visuel permanent : la ligne est
+  rognée au cadre et suit le curseur.
 
 ---
 
