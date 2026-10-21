@@ -6,6 +6,7 @@ export const TOOLS = [
   { id: 'edit', icon: 'edit', color: 'indigo', title: 'tool.edit', desc: 'tool.editDesc' },
   { id: 'annotate', icon: 'highlight', color: 'amber', title: 'tool.annotate', desc: 'tool.annotateDesc' },
   { id: 'sign', icon: 'signature', color: 'teal', title: 'tool.sign', desc: 'tool.signDesc' },
+  { id: 'photos', icon: 'camera', color: 'emerald', title: 'tool.photos', desc: 'tool.photosDesc' },
   { id: 'form', icon: 'checkSquare', color: 'sky', title: 'tool.form', desc: 'tool.formDesc' },
   { id: 'stamp', icon: 'stamp', color: 'rose', title: 'tool.stamp', desc: 'tool.stampDesc' },
   { id: 'pages', icon: 'layers', color: 'violet', title: 'tool.pages', desc: 'tool.pagesDesc' },

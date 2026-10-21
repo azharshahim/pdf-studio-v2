@@ -4719,3 +4719,106 @@ body.editing .docdock {
   justify-content: center;
   gap: 8px;
 }
+
+/* Photos → PDF */
+.photo-add {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.photo-add .btn,
+.photo-create {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+}
+.photo-empty {
+  margin: 8px 0 14px;
+  padding: 18px 14px;
+  border: 1.5px dashed var(--line-2);
+  border-radius: 12px;
+  text-align: center;
+}
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.photo-card {
+  position: relative;
+  margin: 0;
+  border: 1.5px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--panel-2, var(--panel));
+  overflow: hidden;
+}
+.photo-card img {
+  display: block;
+  width: 100%;
+  height: 118px;
+  object-fit: contain;
+  background: repeating-conic-gradient(rgba(127, 127, 127, 0.1) 0% 25%, transparent 0% 50%) 0 0 / 14px 14px;
+}
+.photo-card figcaption {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  min-width: 22px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font: 700 11px/16px var(--font);
+  text-align: center;
+}
+.photo-tools {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--line-2);
+}
+.photo-tools button {
+  display: grid;
+  place-items: center;
+  min-height: 40px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.photo-tools button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.photo-h {
+  margin: 14px 0 6px;
+  font: 700 12px/1 var(--font);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.photo-segs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.photo-name {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1.5px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 500 16px/1 var(--font);
+}
+.photo-create {
+  width: 100%;
+  margin-top: 16px;
+}
+.home-actions .btn.soft.lg {
+  min-height: 52px;
+}

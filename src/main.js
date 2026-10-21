@@ -13,6 +13,7 @@ import { estimateOffsetFromFraction, offsetAtPoint } from './caretPoint.js';
 import * as Session from './session.js';
 import { buildBackup, parseBackup, planRestore } from './backup.js';
 import { CACHET_SHAPES, fileToCachet, renderCachet } from './cachet.js';
+import { applyFilter, buildPdfFromJpegs, canvasToJpeg, fileToCanvas, rotateCanvas } from './photoPdf.js';
 import { CATALOG, BASE_FONTS, GROUP_LABELS, ensureCatalogFont } from './fonts.js';
 import { isQuotaError } from './session.js';
 import { describeBrowser, formatDiagnostic } from './diagnostic.js';
@@ -206,6 +207,7 @@ const els = {
   dropOverlay: $('dropOverlay'),
   fileInput: $('fileInput'),
   homeOpen: $('homeOpen'),
+  homePhotos: $('homePhotos'),
   homeResume: $('homeResume'),
   homeDemoText: $('homeDemoText'),
   homeDemoScan: $('homeDemoScan'),
@@ -4877,8 +4879,178 @@ async function cleanupOrphans() {
   await renderFilesScreen();
 }
 
+/* ─────────────────────── Photos → PDF (galerie / appareil photo) ─────────────────────── */
+
+const photoJob = { pages: [], size: 'a4', filter: 'document', name: '' };
+
+function photoThumb(page) {
+  // Miniature : rotation + filtre appliqués sur une petite image.
+  const rotated = rotateCanvas(page.small, page.rot);
+  return applyFilter(rotated, photoJob.filter).toDataURL('image/jpeg', 0.7);
+}
+
+async function addPhotoFiles(files) {
+  let bad = 0;
+  for (const file of files) {
+    try {
+      const full = await fileToCanvas(file, 2200);
+      const jpeg = await canvasToJpeg(full, 0.9);
+      const k = Math.min(1, 260 / Math.max(full.width, full.height));
+      const small = document.createElement('canvas');
+      small.width = Math.max(1, Math.round(full.width * k));
+      small.height = Math.max(1, Math.round(full.height * k));
+      small.getContext('2d').drawImage(full, 0, 0, small.width, small.height);
+      full.width = full.height = 1; // libère la mémoire du grand canevas
+      photoJob.pages.push({ id: U.uid('ph'), jpeg, small, rot: 0, thumb: '' });
+    } catch {
+      bad++;
+    }
+  }
+  if (bad) toast(t('photos.badImage'), 'warn');
+}
+
+async function buildPhotoPdf() {
+  const pages = [];
+  for (const p of photoJob.pages) {
+    const canvas = await fileToCanvas(new Blob([p.jpeg], { type: 'image/jpeg' }), 2200);
+    const rotated = rotateCanvas(canvas, p.rot);
+    const filtered = applyFilter(rotated, photoJob.filter);
+    pages.push({ jpeg: await canvasToJpeg(filtered, 0.85), width: filtered.width, height: filtered.height });
+    canvas.width = canvas.height = 1;
+  }
+  return buildPdfFromJpegs(pages, { size: photoJob.size });
+}
+
+function openPhotosTool(reset = true) {
+  if (reset) {
+    photoJob.pages = [];
+    photoJob.size = 'a4';
+    photoJob.filter = 'document';
+    photoJob.name = '';
+  }
+  const sizes = [['a4', 'photos.sizeA4'], ['letter', 'photos.sizeLetter'], ['fit', 'photos.sizeFit']];
+  const filters = [['color', 'photos.filterColor'], ['document', 'photos.filterDoc'], ['bw', 'photos.filterBw']];
+  const n = photoJob.pages.length;
+  const html = `
+    <div class="photo-add">
+      <button class="btn primary" id="photoCamera" type="button">${icon('camera', 17)}<span>${t('photos.camera')}</span></button>
+      <button class="btn soft" id="photoGallery" type="button">${icon('image', 17)}<span>${t('photos.gallery')}</span></button>
+    </div>
+    ${
+      n
+        ? `<div class="photo-grid">${photoJob.pages
+            .map(
+              (p, i) => `<figure class="photo-card" data-ph="${p.id}">
+        <img src="${p.thumb || (p.thumb = photoThumb(p))}" alt="${t('photos.page', { n: String(i + 1) })}" />
+        <figcaption>${i + 1}</figcaption>
+        <div class="photo-tools">
+          <button type="button" data-ph-act="left" aria-label="${t('photos.left')}" ${i === 0 ? 'disabled' : ''}>${icon('arrowLeft', 15)}</button>
+          <button type="button" data-ph-act="rotate" aria-label="${t('photos.rotate')}">${icon('rotate', 15)}</button>
+          <button type="button" data-ph-act="right" aria-label="${t('photos.right')}" ${i === n - 1 ? 'disabled' : ''}>${icon('arrowRight', 15)}</button>
+          <button type="button" data-ph-act="remove" aria-label="${t('photos.remove')}">${icon('trash', 15)}</button>
+        </div>
+      </figure>`
+            )
+            .join('')}</div>`
+        : `<p class="muted photo-empty">${t('photos.empty')}</p>`
+    }
+    <h4 class="photo-h">${t('photos.size')}</h4>
+    <div class="photo-segs">${sizes.map(([v, k]) => `<button class="seg ${photoJob.size === v ? 'on' : ''}" data-ph-size="${v}" type="button">${t(k)}</button>`).join('')}</div>
+    <h4 class="photo-h">${t('photos.filter')}</h4>
+    <div class="photo-segs">${filters.map(([v, k]) => `<button class="seg ${photoJob.filter === v ? 'on' : ''}" data-ph-filter="${v}" type="button">${t(k)}</button>`).join('')}</div>
+    <h4 class="photo-h">${t('photos.name')}</h4>
+    <input id="photoName" class="photo-name" value="${U.escapeHtml(photoJob.name)}" placeholder="${t('photos.defaultName')}" maxlength="80" />
+    <button class="btn primary photo-create" id="photoCreate" type="button" ${n ? '' : 'disabled'}>${icon('fileText', 17)}<span>${n === 1 ? t('photos.createOne') : t('photos.create', { n: String(n) })}</span></button>`;
+  const body = openSheet({ title: t('photos.title'), html, size: 'tall' });
+  if (!body) return;
+  const q = (sel) => body.querySelector(sel);
+  const keepName = () => {
+    photoJob.name = q('#photoName')?.value || '';
+  };
+  const rerender = () => {
+    keepName();
+    openPhotosTool(false);
+  };
+  const pick = (capture) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    if (capture) input.capture = 'environment';
+    else input.multiple = true;
+    input.addEventListener('change', async () => {
+      const files = [...(input.files || [])];
+      if (!files.length) return;
+      keepName();
+      pushLoading(t('photos.adding'));
+      try {
+        await addPhotoFiles(files);
+      } finally {
+        popLoading();
+      }
+      openPhotosTool(false);
+    });
+    input.click();
+  };
+  q('#photoCamera').addEventListener('click', () => pick(true));
+  q('#photoGallery').addEventListener('click', () => pick(false));
+  body.querySelectorAll('[data-ph-act]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const id = btn.closest('[data-ph]').dataset.ph;
+      const i = photoJob.pages.findIndex((p) => p.id === id);
+      if (i < 0) return;
+      const act = btn.dataset.phAct;
+      if (act === 'remove') photoJob.pages.splice(i, 1);
+      else if (act === 'rotate') {
+        photoJob.pages[i].rot = (photoJob.pages[i].rot + 1) % 4;
+        photoJob.pages[i].thumb = '';
+      } else {
+        const j = act === 'left' ? i - 1 : i + 1;
+        if (j >= 0 && j < photoJob.pages.length) [photoJob.pages[i], photoJob.pages[j]] = [photoJob.pages[j], photoJob.pages[i]];
+      }
+      rerender();
+    })
+  );
+  body.querySelectorAll('[data-ph-size]').forEach((b) =>
+    b.addEventListener('click', () => {
+      photoJob.size = b.dataset.phSize;
+      rerender();
+    })
+  );
+  body.querySelectorAll('[data-ph-filter]').forEach((b) =>
+    b.addEventListener('click', () => {
+      photoJob.filter = b.dataset.phFilter;
+      photoJob.pages.forEach((p) => (p.thumb = ''));
+      rerender();
+    })
+  );
+  q('#photoCreate').addEventListener('click', async () => {
+    if (!photoJob.pages.length) return;
+    keepName();
+    const count = photoJob.pages.length;
+    const base = (photoJob.name || '').trim() || `${t('photos.defaultName')} ${new Date().toISOString().slice(0, 10)}`;
+    const name = /\.pdf$/i.test(base) ? base : `${base}.pdf`;
+    closeSheet();
+    pushLoading(t('photos.working'));
+    let bytes;
+    try {
+      bytes = await buildPhotoPdf();
+    } catch (err) {
+      console.warn('[photos]', err);
+      toast(t('photos.badImage'), 'error');
+      return;
+    } finally {
+      popLoading();
+    }
+    photoJob.pages = [];
+    await openPdfBytes(new Uint8Array(bytes), name);
+    routeTo('doc');
+    toast(t('photos.done', { n: String(count) }), 'success', { duration: 5000 });
+  });
+}
+
 /** Routes des outils : ouvre le document si nécessaire, puis l'outil. */
 async function openTool(id) {
+  if (id === 'photos') return openPhotosTool();
   if (id === 'compress') return openCompressTool();
   if (id === 'protect') return openProtectTool();
   if (id === 'convert') return openConvertTool();
@@ -5112,6 +5284,7 @@ function bindEvents() {
 
   // Écrans
   els.homeOpen?.addEventListener('click', () => els.fileInput.click());
+  els.homePhotos?.addEventListener('click', () => openPhotosTool());
   els.filesOpen?.addEventListener('click', () => els.fileInput.click());
   els.filesBrowse?.addEventListener('click', () => els.fileInput.click());
   els.filesRefresh?.addEventListener('click', () => renderFilesScreen());
