@@ -44,7 +44,7 @@ export function fontTraits(font) {
 }
 
 /** Regroupe les fragments de texte de pdf.js en lignes éditables. */
-function buildLines(items, styles, pageNo, fontMap = {}) {
+export function buildLines(items, styles, pageNo, fontMap = {}) {
   const raw = [];
   for (const it of items) {
     if (typeof it.str !== 'string' || !it.str.length) continue;
@@ -107,7 +107,7 @@ function buildLines(items, styles, pageNo, fontMap = {}) {
     const startsNew =
       !cur ||
       Math.abs(it.baseline - cur.baseline) > tol ||
-      it.x - cur.endX > Math.max(22, it.fontSize * 2.4) ||
+      it.x - cur.endX > Math.max(6, it.fontSize * 1.05) ||
       it.x < cur.x - Math.max(10, it.fontSize * 1.5);
 
     if (startsNew) {
