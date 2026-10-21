@@ -14,7 +14,7 @@ import { createInlineEditor } from './inlineEditor.js';
 import { estimateOffsetFromFraction, offsetAtPoint } from './caretPoint.js';
 import * as Session from './session.js';
 import { buildBackup, parseBackup, planRestore } from './backup.js';
-import { inkStats, looksBold, pickFontByWidth } from './scanStyle.js';
+import { inkStats, looksBold, otsuThreshold, maskBox, maskIoU, pickFontByWidth } from './scanStyle.js';
 import { CACHET_SHAPES, fileToCachet, renderCachet } from './cachet.js';
 import { applyFilter, buildPdfFromJpegs, canvasToJpeg, fileToCanvas, rotateCanvas } from './photoPdf.js';
 import { CATALOG, BASE_FONTS, GROUP_LABELS, ensureCatalogFont } from './fonts.js';
@@ -1862,9 +1862,65 @@ function guessScanLineStyle(line) {
     scanMeasureCtx.font = `${isBold ? '700 ' : '400 '}${px}px ${U.cssFontFamily(id)}`;
     return scanMeasureCtx.measureText(text).width;
   };
-  const pick = pickFontByWidth(measure, line.text, size, line.bbox.w, ready.length ? ready : ['Arimo'], bold);
+  const candidates = ready.length ? ready : ['Arimo'];
+  // Comparaison des formes : chaque police (normale et grasse) est dessinée à la
+  // largeur de la ligne puis comparée pixel à pixel à l'encre réelle.
+  let font = null;
+  let bestBold = bold;
+  try {
+    const thr = otsuThreshold(gray);
+    const target = new Uint8Array(w * h);
+    for (let i = 0; i < target.length; i++) target[i] = gray[i] <= thr ? 1 : 0;
+    const tb = maskBox(target, w, h);
+    if (tb && tb.x1 - tb.x0 > 6 && tb.y1 - tb.y0 > 3) {
+      const sc = document.createElement('canvas');
+      sc.width = w;
+      sc.height = h;
+      const sx = sc.getContext('2d', { willReadFrequently: true });
+      let best = -1;
+      for (const id of candidates) {
+        for (const isBold of [false, true]) {
+          const family = U.cssFontFamily(id);
+          sx.font = `${isBold ? 700 : 400} 100px ${family}`;
+          const nat = sx.measureText(line.text).width;
+          if (!(nat > 0)) continue;
+          const fs = (100 * (tb.x1 - tb.x0 + 1)) / nat;
+          const draw = (dy) => {
+            sx.fillStyle = '#fff';
+            sx.fillRect(0, 0, w, h);
+            sx.fillStyle = '#000';
+            sx.font = `${isBold ? 700 : 400} ${fs}px ${family}`;
+            sx.textBaseline = 'alphabetic';
+            sx.fillText(line.text, tb.x0, h * 0.75 + dy);
+            const px = sx.getImageData(0, 0, w, h).data;
+            const m = new Uint8Array(w * h);
+            for (let i = 0, p = 0; p < m.length; i += 4, p++) m[p] = px[i] < 128 ? 1 : 0;
+            return m;
+          };
+          let m = draw(0);
+          const rb = maskBox(m, w, h);
+          if (!rb) continue;
+          m = draw(tb.y0 - rb.y0);
+          const score = maskIoU(target, m);
+          if (score > best) {
+            best = score;
+            font = id;
+            bestBold = isBold;
+          }
+        }
+      }
+    }
+  } catch {
+    font = null;
+  }
+  const pick = pickFontByWidth(measure, line.text, size, line.bbox.w, font ? [font] : candidates, font ? bestBold : bold);
   if (!pick) return { bold, font: 'Arimo', scale: 1, size };
-  return { bold, font: pick.font, scale: U.clamp(pick.scale, 0.3, 3), size: size * U.clamp(pick.scale, 0.3, 3) };
+  return {
+    bold: font ? bestBold : bold,
+    font: pick.font,
+    scale: U.clamp(pick.scale, 0.3, 3),
+    size: size * U.clamp(pick.scale, 0.3, 3),
+  };
 }
 
 function makeEditFromLine(line, pageNo) {
@@ -1998,6 +2054,10 @@ function focusLineInView(line) {
     view.height - keyboardInset() - (document.body.classList.contains('editing') || document.body.classList.contains('editing-wide') ? 78 : 12)
   );
   const margin = 14;
+  // Ligne déjà entièrement visible : on ne fait pas défiler (l'écran reste intact).
+  const inX = left >= scroller.scrollLeft + margin && left + rect.width <= scroller.scrollLeft + view.width - margin;
+  const inY = top >= scroller.scrollTop + 4 && top + rect.height <= scroller.scrollTop + usableH - 4;
+  if (inX && inY) return;
   const targetLeft = centerAxis({ start: left, size: rect.width, view: view.width, margin });
   const targetTop = centerAxis({ start: top, size: rect.height, view: usableH, margin: 0 });
   scroller.scrollTo({ left: targetLeft, top: targetTop, behavior: 'auto' });

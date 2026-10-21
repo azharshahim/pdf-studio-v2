@@ -32,5 +32,5 @@ test('Modifier lance l’OCR des pages scannées et garde la police à l’édit
   // pas d'agrandissement à l'édition
   expect(await page.locator('#pdfCanvas').evaluate((c) => c.style.width)).toBe(before);
   const fam = await page.locator('.inline-shell').evaluate((el) => getComputedStyle(el).fontFamily);
-  expect(fam.toLowerCase()).toMatch(/arimo|arial|helvetica|sans/);
+  expect(fam.toLowerCase()).toMatch(/arimo|arial|helvetica/); // police source Helvetica : la comparaison des formes retrouve son équivalent
 });

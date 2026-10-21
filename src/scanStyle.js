@@ -98,3 +98,35 @@ export function pickFontByWidth(measure, text, size, targetWidth, candidates, bo
   }
   return best ? { font: best.font, scale: best.scale } : null;
 }
+
+/** Boîte englobante de l'encre (pixels sombres) d'un masque 0/1, ou null. */
+export function maskBox(mask, width, height) {
+  let x0 = width;
+  let y0 = height;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (mask[y * width + x]) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  return x1 < 0 ? null : { x0, y0, x1, y1 };
+}
+
+/** Ressemblance (intersection / union) de deux masques de même taille. */
+export function maskIoU(a, b) {
+  let inter = 0;
+  let union = 0;
+  for (let i = 0; i < a.length; i++) {
+    const p = a[i] ? 1 : 0;
+    const q = b[i] ? 1 : 0;
+    inter += p & q;
+    union += p | q;
+  }
+  return union ? inter / union : 0;
+}

@@ -46,3 +46,19 @@ describe('style d’un scan', () => {
     expect(inkStats(new Uint8ClampedArray(0), 0, 0)).toBeNull();
   });
 });
+
+import { maskBox, maskIoU } from '../src/scanStyle.js';
+
+describe('comparaison de masques', () => {
+  it('boîte englobante et ressemblance', () => {
+    const a = new Uint8Array(16);
+    a[5] = 1;
+    a[6] = 1;
+    expect(maskBox(a, 4, 4)).toEqual({ x0: 1, y0: 1, x1: 2, y1: 1 });
+    expect(maskBox(new Uint8Array(4), 2, 2)).toBeNull();
+    expect(maskIoU(a, a)).toBe(1);
+    const b = new Uint8Array(16);
+    b[5] = 1;
+    expect(maskIoU(a, b)).toBe(0.5);
+  });
+});
