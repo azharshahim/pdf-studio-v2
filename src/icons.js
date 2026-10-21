@@ -52,6 +52,7 @@ const P = {
   arrowUpRight: '<path d="M7 17 17 7"/><path d="M8 7h9v9"/>',
   signature: '<path d="M4 17c3 0 3.5-9 6-9s1 7 3.5 7 2.5-6 4-6 1.5 3 2.5 3"/><path d="M4 20.5h16"/>',
   stamp: '<path d="M9 4h6a2 2 0 0 1 2 2v3l-1.5 2h-7L7 9V6a2 2 0 0 1 2-2z"/><path d="M7 13h10v3.5H7z"/><path d="M5 19.5h14"/>',
+  droplet: '<path d="M12 3.5S5.5 10.2 5.5 14.5a6.5 6.5 0 0 0 13 0C18.5 10.2 12 3.5 12 3.5z"/>',
   layers: '<path d="m12 3.5 8.5 4.5L12 12.5 3.5 8z"/><path d="m4 12 8 4.2 8-4.2M4 16l8 4.2 8-4.2"/>',
   more: '<circle cx="12" cy="5.5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="18.5" r="1.6"/>',
   printer: '<path d="M7 9V4.5h10V9"/><rect x="4" y="9" width="16" height="8" rx="2"/><path d="M7.5 14h9v6h-9z"/>',

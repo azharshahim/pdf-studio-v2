@@ -266,7 +266,7 @@ test.describe('validation et annulation', () => {
     const before = await readView(page);
     const tap = await tapLine(page, 0.45);
     const during = await readView(page);
-    expect(during.zoom, 'l’édition zoome la ligne').not.toBe(before.zoom);
+    expect(during.zoom, 'l’édition ne zoome plus la page').toBe(before.zoom);
 
     await page.keyboard.type('ZZ', { delay: 40 });
     await page.waitForTimeout(200);
@@ -422,7 +422,7 @@ test.describe('composition et stabilité de la saisie', () => {
       return { fontFamily: cs.fontFamily, fontSize: cs.fontSize, lineHeight: cs.lineHeight, color: cs.color };
     });
     expect(style.fontFamily).toContain('Helvetica');
-    expect(parseFloat(style.fontSize)).toBeGreaterThan(8);
+    expect(parseFloat(style.fontSize)).toBeGreaterThan(5);
 
     // On peut continuer à taper dans le repli.
     await page.keyboard.type('!', { delay: 40 });

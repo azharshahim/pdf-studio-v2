@@ -247,3 +247,12 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - Scans : le style (graisse, police) est déduit de l'image pour que les modifications gardent l'aspect d'origine (src/scanStyle.js).
 - Catalogue de 110 polices supplémentaires (OFL, chargées à la demande, non précachées) + sélecteur avec aperçu et recherche (tests/e2e/polices.spec.js).
 - Suites : vitest 133 OK ; Playwright Chromium + Samsung 100 OK.
+
+## Refonte lecture / modification (v2.6)
+
+- Annotations : un geste interrompu par le navigateur (défilement) ne laisse plus de tracé « fantôme » ; `touch-action: none` pendant un outil, fin de geste sur `pointercancel`, un seul doigt suivi (tests/e2e/annoter.spec.js, gestes tactiles CDP).
+- Lecture seule : ouverture à 125 % de la largeur, barre « Remplir et signer / Rechercher / Modifier », sans OCR.
+- Remplir et signer : Texte, Signer, Tampon, Date, Coche, Formulaire, Renommer, Terminer. Le fichier se renomme aussi depuis le titre et le menu ⋮.
+- Modification : plus de zoom automatique en touchant un texte ; Rechercher/Remplacer (style de la ligne conservé) ; bouton Filigrane (détection, renommer, supprimer) ; OCR, Pages, Plus dans la barre.
+- Filigranes : détection des textes inclinés ou très pâles (opérateurs pdf.js), suppression dans les flux de page et les objets de formulaire (tests/watermark.test.js + e2e).
+- Suites : vitest 138 OK ; Playwright Chromium + Samsung OK.

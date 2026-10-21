@@ -470,14 +470,18 @@ export function createMarkup({
     if (tool === 'ink') {
       const points = [start];
       const obj = { type: 'ink', points: [], color: state.inkColor, width: state.inkWidth };
+      const pid = ev.pointerId;
       const move = (e) => {
+        if (e.pointerId !== pid) return;
         points.push(localPoint(e));
         obj.points = points.map((p) => toPdf(p.x, p.y));
         drawInkDraft(obj);
       };
-      const up = () => {
+      const up = (e) => {
+        if (e && e.pointerId !== undefined && e.pointerId !== pid) return;
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
         draftEl?.remove();
         draftEl = null;
         if (points.length > 1) {
@@ -486,6 +490,7 @@ export function createMarkup({
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
       return;
     }
 
@@ -498,7 +503,9 @@ export function createMarkup({
         tool === 'rect' || tool === 'ellipse' || tool === 'arrow' ? `2px dashed ${state.color}` : 'none';
       if (tool === 'underline') draftEl.style.borderBottom = `3px solid ${state.color}`;
       overlay.appendChild(draftEl);
+      const pid = ev.pointerId;
       const move = (e) => {
+        if (e.pointerId !== pid) return;
         const p = localPoint(e);
         rect.left = Math.min(start.x, p.x);
         rect.top = Math.min(start.y, p.y);
@@ -511,9 +518,11 @@ export function createMarkup({
           height: `${rect.height}px`,
         });
       };
-      const up = () => {
+      const up = (e) => {
+        if (e && e.pointerId !== undefined && e.pointerId !== pid) return;
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
         draftEl?.remove();
         draftEl = null;
         if (rect.width < 8 || rect.height < 6) {
@@ -529,6 +538,7 @@ export function createMarkup({
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
     }
   }
 

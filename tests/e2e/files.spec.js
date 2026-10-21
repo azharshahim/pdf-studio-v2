@@ -66,7 +66,7 @@ async function newPage(context) {
 /** Attend que le document soit rendu (et non seulement chargé). */
 async function waitRendered(page) {
   // Les documents s'ouvrent en lecture seule : on passe en modification.
-  const edit = page.locator('#readEdit');
+  const edit = page.locator('#docDock [data-dock=edit]');
   await edit.waitFor({ state: 'visible', timeout: 45_000 }).catch(() => {});
   if (await edit.isVisible().catch(() => false)) await edit.evaluate((b) => b.click());
   await expect(page.locator('.line-block').first()).toBeVisible({ timeout: 45_000 });

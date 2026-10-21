@@ -27,8 +27,8 @@ test('le fond sous une cellule de tableau reste blanc (pas de grisé)', async ({
   });
   await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
   await page.locator('#fileInput').setInputFiles({ name: 'table.pdf', mimeType: 'application/pdf', buffer: await tablePdf() });
-  await page.locator('#readEdit').waitFor({ state: 'visible', timeout: 60_000 });
-  await page.locator('#readEdit').tap();
+  await page.locator('#docDock [data-dock=edit]').waitFor({ state: 'visible', timeout: 60_000 });
+  await page.locator('#docDock [data-dock=edit]').tap();
   await page.locator('.line-block').first().waitFor({ state: 'visible', timeout: 60_000 });
   await page.waitForTimeout(700);
   const target = page.locator('.line-block').nth(3);

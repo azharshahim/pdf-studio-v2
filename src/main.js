@@ -4,6 +4,7 @@ import { PdfEngine, pdfRectToViewportRect, fontTraits } from './pdfEngine.js';
 import { recognizeCanvas, terminateOcr } from './ocrEngine.js';
 import { enhanceContrast, deskewCanvas } from './imagePrep.js';
 import * as PageOps from './pageOps.js';
+import { detectWatermarks, applyWatermarkChange } from './watermark.js';
 import { readFormFields, readFormWidgetsFromPage, fillFormFields, detectFillAreas } from './forms.js';
 import { findMatch } from './search.js';
 import { createHistory } from './history.js';
@@ -446,11 +447,12 @@ async function renderCurrent() {
   const gutter = narrow ? 16 : 56;
   const availW = Math.max(280, els.canvasScroll.clientWidth - gutter);
   const availH = Math.max(240, els.canvasScroll.clientHeight - gutter);
+  const readBoost = isReading() ? 1.25 : 1;
   let scale =
     state.zoom == null
       ? narrow
-        ? Math.min(availW / base.width, 2)
-        : Math.min(availW / base.width, availH / base.height, 1.6)
+        ? Math.min(availW / base.width, 2) * readBoost
+        : Math.min(availW / base.width, availH / base.height, 1.6) * readBoost
       : state.zoom;
   scale = U.clamp(scale, 0.15, 6);
   state.scale = scale;
@@ -751,8 +753,33 @@ function dockAction(id) {
   if (state.addMode && id !== 'text') cancelAddMode();
   switch (id) {
     case 'edit':
+      if (isReading()) {
+        setReadMode(false);
+        break;
+      }
       closeAnnotate?.();
       toast(t('dock.editHint'), 'info', { duration: 3200 });
+      break;
+    case 'fillsign':
+      setFillSign(true);
+      break;
+    case 'done':
+      setFillSign(false);
+      break;
+    case 'search':
+      openSearch();
+      break;
+    case 'rename':
+      openRenameSheet();
+      break;
+    case 'date':
+      insertToday();
+      break;
+    case 'check':
+      insertMark('check');
+      break;
+    case 'watermark':
+      openWatermarkSheet();
       break;
     case 'text':
       startAddText();
@@ -961,6 +988,7 @@ function isReading() {
 function setReadMode(on) {
   const was = isReading();
   document.body.classList.toggle('reading', !!on);
+  if (!on) document.body.classList.remove('fillsign');
   if (on && !was) {
     try {
       closeActive();
@@ -974,7 +1002,132 @@ function setReadMode(on) {
       /* rien d'actif */
     }
   }
-  if (els.readEdit) els.readEdit.hidden = !on;
+  if (els.readEdit) els.readEdit.hidden = true;
+  updateDock();
+  // La lecture s'ouvre à 125 % de la largeur ; la modification à 100 %.
+  if (was !== !!on && state.engine) {
+    state.zoom = null;
+    renderCurrent().then(() => centerHorizontally());
+  }
+}
+
+/** Centre la page quand elle dépasse la largeur de l'écran (lecture à 125 %). */
+function centerHorizontally() {
+  const sc = els.canvasScroll;
+  if (!sc) return;
+  sc.scrollLeft = Math.max(0, (sc.scrollWidth - sc.clientWidth) / 2);
+}
+
+/** Remplir et signer : outils de saisie, sans passer en modification du texte. */
+function setFillSign(on) {
+  if (on && !isReading()) return;
+  document.body.classList.toggle('fillsign', !!on);
+  if (!on) {
+    try {
+      markup.setTool(null);
+      if (state.addMode) cancelAddMode();
+    } catch {
+      /* rien d'actif */
+    }
+  } else {
+    toast(t('read.fillHint'), 'info', { duration: 2600 });
+  }
+  updateDock();
+}
+
+/** Renomme le document ouvert (liste des fichiers, titre et exports). */
+/** Filigranes détectés : renommer ou supprimer, depuis la barre de modification. */
+async function openWatermarkSheet() {
+  if (!state.engine) return;
+  const body = openSheet({
+    title: t('wm.title'),
+    html: `<p class="muted" id="wmBusy">${t('wm.scanning')}</p><div id="wmList"></div>`,
+  });
+  if (!body) return;
+  let marks = [];
+  try {
+    marks = await detectWatermarks(state.engine);
+  } catch (err) {
+    console.warn('[watermark] détection impossible', err);
+  }
+  body.querySelector('#wmBusy')?.remove();
+  const list = body.querySelector('#wmList');
+  if (!list) return;
+  if (!marks.length) {
+    list.innerHTML = `<div class="wm-empty"><strong>${t('wm.none')}</strong><p class="muted">${t('wm.noneHint')}</p></div>`;
+    return;
+  }
+  list.innerHTML = marks
+    .map(
+      (m, i) => `<div class="wm-item" data-wm="${i}">
+        <div class="wm-meta">${t('wm.found', { n: m.pages.length })}</div>
+        <input class="wm-text" type="text" value="${U.escapeHtml(m.text)}" aria-label="${t('wm.renamePrompt')}" autocomplete="off" spellcheck="false" />
+        <div class="wm-actions">
+          <button class="btn" type="button" data-wm-act="rename">${t('wm.rename')}</button>
+          <button class="btn danger" type="button" data-wm-act="delete">${t('wm.delete')}</button>
+        </div>
+      </div>`,
+    )
+    .join('');
+  list.querySelectorAll('[data-wm-act]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const row = btn.closest('[data-wm]');
+      const mark = marks[Number(row.dataset.wm)];
+      const act = btn.dataset.wmAct;
+      const text = row.querySelector('.wm-text').value.trim();
+      if (act === 'rename' && (!text || text === mark.text)) return;
+      closeSheet();
+      changeWatermark(mark, act === 'delete' ? null : text);
+    });
+  });
+}
+
+async function changeWatermark(mark, newText) {
+  if (!(await confirmDiscard())) return;
+  pushLoading(t('wm.scanning'));
+  try {
+    const page = state.pageIndex + 1;
+    const bytes = await applyWatermarkChange(state.bytes, [mark], newText);
+    await openPdfBytes(new Uint8Array(bytes), state.fileName, '', { readOnly: false, session: 'skip' });
+    if (page > 1) await goToPage(Math.min(page, state.numPages));
+    toast(t(newText ? 'wm.renamed' : 'wm.removed'), 'success', { duration: 2400 });
+  } catch (err) {
+    console.error(err);
+    toast(t('wm.failed'), 'error');
+  } finally {
+    popLoading();
+  }
+}
+
+function openRenameSheet() {
+  if (!state.engine) return;
+  const body = openSheet({
+    title: t('rename.title'),
+    html: `<label class="field"><span>${t('rename.label')}</span>
+      <input id="renameInput" type="text" autocomplete="off" spellcheck="false" value="${U.escapeHtml(U.baseName(state.fileName))}" /></label>
+      <button class="btn primary block" id="renameOk" type="button">${t('rename.save')}</button>`,
+  });
+  if (!body) return;
+  const input = body.querySelector('#renameInput');
+  const apply = async () => {
+    const raw = input.value.trim().replace(/[\\/:*?"<>|]+/g, ' ').trim();
+    if (!raw) return;
+    const name = /\.pdf$/i.test(raw) ? raw : `${raw}.pdf`;
+    closeSheet();
+    state.fileName = name;
+    if (state.hash) await Session.renameDocument(state.hash, name).catch(() => {});
+    updateFileChip();
+    document.title = `${U.baseName(name)} — PDF Studio`;
+    toast(t('rename.done'), 'success', { duration: 1800 });
+  };
+  body.querySelector('#renameOk').addEventListener('click', apply);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') apply();
+  });
+  setTimeout(() => {
+    input.focus();
+    input.select();
+  }, 60);
 }
 
 function openDocMenu() {
@@ -983,6 +1136,7 @@ function openDocMenu() {
     isReading()
       ? { id: 'edit', icon: 'edit', title: 'menu.edit', hint: 'menu.editHint' }
       : { id: 'read', icon: 'eye', title: 'menu.read', hint: 'menu.readHint' },
+    { id: 'rename', icon: 'edit', title: 'rename.title', hint: 'rename.label' },
     { id: 'save', icon: 'save', title: 'menu.save', hint: 'menu.saveHint' },
     { id: 'export', icon: 'download', title: 'menu.export', hint: 'menu.exportHint' },
     { id: 'download', icon: 'download', title: 'menu.download', hint: 'menu.downloadHint' },
@@ -1015,6 +1169,7 @@ function openDocMenu() {
       setTimeout(() => {
         if (id === 'edit') setReadMode(false);
         else if (id === 'read') setReadMode(true);
+        else if (id === 'rename') openRenameSheet();
         else if (id === 'save') handleSave();
         else if (id === 'download') downloadModifiedPdf();
         else if (id === 'export') els.btnExport.click();
@@ -1459,6 +1614,11 @@ function bindFormatbar() {
   populateFontSelect();
   bindDock();
   els.btnDocMenu?.addEventListener('click', openDocMenu);
+  els.fileChip?.addEventListener('click', () => {
+    if (state.engine) openRenameSheet();
+  });
+  document.getElementById('replaceOne')?.addEventListener('click', () => replaceMatches(false));
+  document.getElementById('replaceAll')?.addEventListener('click', () => replaceMatches(true));
   els.btnShare?.addEventListener('click', () => shareCurrentPdf());
   els.editShare?.addEventListener('click', () => shareCurrentPdf());
   els.btnBack?.addEventListener('click', goBack);
@@ -1698,6 +1858,7 @@ function keyboardInset() {
  * précédent prend quelques dizaines de ms) ne peut pas écraser la capture
  * d'une édition ouverte entre-temps.
  */
+const ZOOM_ON_EDIT = false;
 let editViewSnapshot = null;
 let editViewSeq = 0;
 
@@ -1743,7 +1904,8 @@ async function restoreEditView(token = null) {
  * vertical dans la zone encore visible au-dessus du clavier.
  */
 async function zoomForLine(line) {
-  if (!state.scale) return false;
+  // Pas de zoom automatique : modifier ne doit pas bouger la page.
+  if (ZOOM_ON_EDIT === false || !state.scale) return false;
   const viewW = els.canvasScroll.clientWidth;
   const target = computeEditZoom({
     fontSize: line.fontSize,
@@ -2806,6 +2968,84 @@ async function stepMatch(dir) {
   await focusMatch(i);
 }
 
+/** Remplace le texte trouvé en gardant police, taille, couleur et fond de chaque ligne. */
+async function replaceMatches(all) {
+  const { matches, query, active } = state.search;
+  const repl = document.getElementById('replaceInput')?.value ?? '';
+  if (!query || !matches.length) {
+    toast(t('search.nothingToReplace'), 'info', { duration: 2200 });
+    return;
+  }
+  closeActive();
+  const targets = all ? matches : [matches[active]];
+  const seen = new Set();
+  const before = U.clone(state.edits);
+  let count = 0;
+  for (const m of targets) {
+    const key = `${m.page}:${m.lineId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const pd = getPageData(m.page);
+    const lines = pd.lines?.length ? pd.lines : pd.ocr?.lines || [];
+    const line = lines.find((l) => l.id === m.lineId);
+    if (!line) continue;
+    let edit = state.edits.find((e) => e.page === m.page && e.kind === 'edit' && e.lineId === m.lineId);
+    const source = edit ? edit.text : line.text;
+    const next = replaceInsensitive(source, query, repl, all);
+    if (next === source) continue;
+    if (!edit) {
+      edit = makeEditFromLine(line, m.page);
+      state.edits.push(edit);
+    }
+    edit.text = next;
+    count += all ? countOccurrences(source, query) : 1;
+  }
+  if (!count) return;
+  state.history.push(before);
+  renderOverlay();
+  renderEditList();
+  updateExportUi();
+  updateTextPanel();
+  updateHistoryButtons();
+  scheduleAutosave();
+  toast(t('search.replaced', { n: count }), 'success', { duration: 2600 });
+  await performSearch(query);
+}
+
+function countOccurrences(text, query) {
+  let n = 0;
+  let from = 0;
+  const hay = String(text).toLowerCase();
+  const needle = query.toLowerCase();
+  while (needle && (from = hay.indexOf(needle, from)) >= 0) {
+    n++;
+    from += needle.length;
+  }
+  return Math.max(1, n);
+}
+
+function replaceInsensitive(text, query, repl, all) {
+  const src = String(text);
+  const hay = src.toLowerCase();
+  const needle = query.toLowerCase();
+  let out = '';
+  let from = 0;
+  let idx = hay.indexOf(needle, from);
+  if (idx < 0) {
+    // Recherche tolérante aux accents : on remplace la première portion trouvée.
+    const f = findMatch(src, query);
+    if (f.index < 0) return src;
+    return src.slice(0, f.index) + repl + src.slice(f.index + f.length);
+  }
+  while (idx >= 0) {
+    out += src.slice(from, idx) + repl;
+    from = idx + needle.length;
+    if (!all) break;
+    idx = hay.indexOf(needle, from);
+  }
+  return out + src.slice(from);
+}
+
 function openSearch() {
   if (!state.engine) return;
   els.searchbar.hidden = false;
@@ -2910,11 +3150,13 @@ async function openPdfBytes(bytes, name, password = '', options = {}) {
     updateExportUi();
     setTab('text');
     buildThumbnails(token);
-    await renderCurrent();
-    els.canvasScroll.scrollTo({ top: 0, left: 0 });
     // Ouverture d'un fichier : lecture seule ; les opérations sur le document
     // ouvert (pages, compression…) gardent le mode en cours.
-    setReadMode(typeof options.readOnly === 'boolean' ? options.readOnly : isReading());
+    document.body.classList.toggle('reading', typeof options.readOnly === 'boolean' ? options.readOnly : isReading());
+    await renderCurrent();
+    els.canvasScroll.scrollTo({ top: 0, left: 0 });
+    centerHorizontally();
+    setReadMode(isReading());
     updatePanelsForPage();
     ensureAllLines().catch(() => {}); // indexation en arrière-plan
     toast(t('msg.opened', { name: state.fileName, n: state.numPages }), 'success', {
@@ -5458,7 +5700,6 @@ function bindEvents() {
   // Écrans
   els.homeOpen?.addEventListener('click', () => els.fileInput.click());
   els.homePhotos?.addEventListener('click', () => openPhotosTool());
-  els.readEdit?.addEventListener('click', () => setReadMode(false));
   els.filesOpen?.addEventListener('click', () => els.fileInput.click());
   els.filesBrowse?.addEventListener('click', () => els.fileInput.click());
   els.filesRefresh?.addEventListener('click', () => renderFilesScreen());

@@ -19,25 +19,83 @@ const init = (page) =>
   });
 
 test.describe('Lecture seule et démarrage', () => {
-  test('un PDF s’ouvre en lecture seule ; « Modifier » ouvre les outils ; le menu ramène en lecture', async ({ page }) => {
+  test('un PDF s’ouvre en lecture seule à 125 % ; Modifier ouvre les outils ; le menu ramène en lecture', async ({ page }) => {
     await init(page);
     await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
     await page.locator('#fileInput').setInputFiles({ name: 'lire.pdf', mimeType: 'application/pdf', buffer: await simplePdf() });
-    await expect(page.locator('#readEdit')).toBeVisible({ timeout: 60_000 });
-    await expect(page.locator('#docDock')).toBeHidden();
+    const dock = page.locator('#docDock');
+    await expect(dock.locator('[data-dock=fillsign]')).toBeVisible({ timeout: 60_000 });
+    await expect(dock.locator('[data-dock=edit]')).toBeVisible();
+    await expect(dock.locator('[data-dock=search]')).toBeVisible();
+    // Pas d'OCR ni d'outils de modification en lecture.
+    await expect(dock.locator('[data-dock=ocr]')).toBeHidden();
+    await expect(dock.locator('[data-dock=highlight]')).toBeHidden();
     await expect(page.locator('#btnSave')).toBeHidden();
-    await expect(page.locator('.line-block')).toHaveCount(0, { timeout: 15_000 }).catch(() => {});
     await expect(page.locator('.line-block:visible')).toHaveCount(0);
 
-    await page.locator('#readEdit').tap();
-    await expect(page.locator('#docDock')).toBeVisible();
-    await expect(page.locator('#readEdit')).toBeHidden();
+    // 125 % de la largeur ajustée.
+    const fit = await page.evaluate(() => {
+      const sc = document.getElementById('canvasScroll');
+      const base = window.__pdfStudio.state.scale;
+      return { base, avail: sc.clientWidth - 16 };
+    });
+    expect(fit.base).toBeGreaterThan(0);
+    const readW = await page.evaluate(() => document.getElementById('pdfCanvas').getBoundingClientRect().width);
+    await dock.locator('[data-dock=edit]').tap();
+    await expect(dock.locator('[data-dock=highlight]')).toBeVisible();
+    await expect(dock.locator('[data-dock=fillsign]')).toBeHidden();
     await expect(page.locator('.line-block').first()).toBeVisible({ timeout: 30_000 });
+    const editW = await page.evaluate(() => document.getElementById('pdfCanvas').getBoundingClientRect().width);
+    expect(readW / editW).toBeGreaterThan(1.15);
+    expect(readW / editW).toBeLessThan(1.35);
 
     await page.locator('#btnDocMenu').tap();
     await page.locator('[data-doc-menu=read]').tap();
-    await expect(page.locator('#readEdit')).toBeVisible();
-    await expect(page.locator('#docDock')).toBeHidden();
+    await expect(dock.locator('[data-dock=fillsign]')).toBeVisible();
+  });
+
+  test('Remplir et signer : outils de saisie, renommer le fichier, retour à la lecture', async ({ page }) => {
+    await init(page);
+    await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
+    await page.locator('#fileInput').setInputFiles({ name: 'contrat.pdf', mimeType: 'application/pdf', buffer: await simplePdf() });
+    const dock = page.locator('#docDock');
+    await dock.locator('[data-dock=fillsign]').tap();
+    for (const id of ['text', 'sign', 'stamp', 'date', 'check', 'rename', 'done']) {
+      await expect(dock.locator(`[data-dock=${id}]`), id).toBeVisible();
+    }
+    await expect(dock.locator('[data-dock=highlight]')).toBeHidden();
+    await expect(dock.locator('[data-dock=ocr]')).toBeHidden();
+
+    await dock.locator('[data-dock=check]').tap();
+    await expect.poll(() => page.evaluate(() => window.__pdfStudio.markup.objects.length)).toBe(1);
+
+    await dock.locator('[data-dock=rename]').tap();
+    await page.locator('#renameInput').fill('Contrat signé');
+    await page.locator('#renameOk').tap();
+    await expect.poll(() => page.evaluate(() => window.__pdfStudio.state.fileName)).toBe('Contrat signé.pdf');
+
+    await dock.locator('[data-dock=done]').tap();
+    await expect(dock.locator('[data-dock=fillsign]')).toBeVisible();
+    await expect(dock.locator('[data-dock=check]')).toBeHidden();
+  });
+
+  test('rechercher puis remplacer : le texte change, la police et la taille restent', async ({ page }) => {
+    await init(page);
+    await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
+    await page.locator('#fileInput').setInputFiles({ name: 'rempl.pdf', mimeType: 'application/pdf', buffer: await simplePdf('Facture Alpha et Alpha') });
+    const dock = page.locator('#docDock');
+    await dock.locator('[data-dock=edit]').tap();
+    await expect(page.locator('.line-block').first()).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(1500);
+    await page.evaluate(() => document.getElementById('btnSearch').click());
+    await page.locator('#searchInput').fill('alpha');
+    await expect(page.locator('.search-result').first()).toBeVisible({ timeout: 15_000 });
+    await page.locator('#replaceInput').fill('Beta');
+    await page.locator('#replaceAll').tap();
+    await expect.poll(() => page.evaluate(() => window.__pdfStudio.state.edits.at(-1)?.text)).toBe('Facture Beta et Beta');
+    const e = await page.evaluate(() => window.__pdfStudio.state.edits.at(-1));
+    expect(e.font).toBe('Helvetica');
+    expect(e.size).toBeGreaterThan(10);
   });
 
   test('un fichier ouvert par le système (double-clic Windows) s’ouvre en lecture', async ({ page }) => {
@@ -55,7 +113,7 @@ test.describe('Lecture seule et démarrage', () => {
       await window.__launch({ files: [{ getFile: async () => file }] });
     }, bytes);
     await expect.poll(() => page.evaluate(() => window.__pdfStudio.state.fileName), { timeout: 30_000 }).toBe('depuis-explorateur.pdf');
-    await expect(page.locator('#readEdit')).toBeVisible();
+    await expect(page.locator('#docDock [data-dock=fillsign]')).toBeVisible();
   });
 
   test('le démarrage affiche la liste des fichiers, récents en haut', async ({ page, context }) => {
@@ -77,5 +135,48 @@ test.describe('Lecture seule et démarrage', () => {
     await init(page);
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#screenHome')).toBeVisible();
+  });
+
+  test('filigrane : détecté dans la barre de modification, supprimé et renommé', async ({ page }) => {
+    await init(page);
+    await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
+    const { PDFDocument: D, StandardFonts: SF, degrees, rgb } = await import('pdf-lib');
+    const doc = await D.create();
+    const font = await doc.embedFont(SF.Helvetica);
+    const pg = doc.addPage([400, 300]);
+    pg.drawText('Rapport mensuel', { x: 30, y: 250, size: 14, font });
+    pg.drawText('BROUILLON', { x: 80, y: 80, size: 54, font, color: rgb(0.6, 0.6, 0.6), opacity: 0.3, rotate: degrees(35) });
+    const buffer = Buffer.from(await doc.save());
+    await page.locator('#fileInput').setInputFiles({ name: 'wm.pdf', mimeType: 'application/pdf', buffer });
+    const dock = page.locator('#docDock');
+    await dock.locator('[data-dock=edit]').tap();
+    await expect(dock.locator('[data-dock=watermark]')).toBeVisible({ timeout: 30_000 });
+    await dock.locator('[data-dock=watermark]').tap();
+    await expect(page.locator('.wm-item')).toHaveCount(1, { timeout: 30_000 });
+    await expect(page.locator('.wm-text')).toHaveValue('BROUILLON');
+    await page.locator('.wm-text').fill('COPIE');
+    await page.locator('[data-wm-act=rename]').tap();
+    await expect.poll(() => page.evaluate(() => window.__pdfStudio.getPageText?.(1) ?? ''), { timeout: 30_000 }).toBeDefined();
+    await page.waitForTimeout(1500);
+    const txt = await page.evaluate(async () => {
+      const { default: _ } = { default: 0 };
+      const doc = window.__pdfStudio.state.engine.doc;
+      const p = await doc.getPage(1);
+      return (await p.getTextContent()).items.map((i) => i.str).join(' ');
+    });
+    expect(txt).toContain('COPIE');
+    expect(txt).not.toContain('BROUILLON');
+    expect(txt).toContain('Rapport mensuel');
+
+    await dock.locator('[data-dock=watermark]').tap();
+    await expect(page.locator('.wm-item')).toHaveCount(1, { timeout: 30_000 });
+    await page.locator('[data-wm-act=delete]').tap();
+    await page.waitForTimeout(1500);
+    const txt2 = await page.evaluate(async () => {
+      const p = await window.__pdfStudio.state.engine.doc.getPage(1);
+      return (await p.getTextContent()).items.map((i) => i.str).join(' ');
+    });
+    expect(txt2).not.toContain('COPIE');
+    expect(txt2).toContain('Rapport mensuel');
   });
 });
