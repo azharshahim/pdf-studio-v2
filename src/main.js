@@ -4624,4 +4624,34 @@ window.__pdfStudio = {
   openPdfBytes,
   getPageText,
   exportPdf: (...args) => import('./exporter.js').then((m) => m.exportPdf(...args)),
+  /**
+   * Injecte un résultat d'OCR pour une page, sans lancer Tesseract. Les tests
+   * de bout en bout vérifient ainsi l'édition d'un bloc OCR sans attendre la
+   * reconnaissance complète (plusieurs minutes sur un scan).
+   */
+  setOcrLines(pageNo, lines) {
+    const pd = getPageData(pageNo);
+    const normalized = (lines || []).map((line, i) => ({
+      id: line.id || `p${pageNo}-o${i}`,
+      text: line.text,
+      source: 'ocr',
+      font: line.font || 'Helvetica',
+      fontSize: line.fontSize ?? 12,
+      baseline: line.baseline ?? line.bbox.y + line.bbox.h * 0.24,
+      bbox: line.bbox,
+      confidence: line.confidence ?? 0.92,
+    }));
+    pd.ocr = {
+      text: normalized.map((l) => l.text).join('\n'),
+      confidence: 0.92,
+      lines: normalized,
+      words: [],
+      langs: ['fra'],
+      at: Date.now(),
+    };
+    pd.ocrStatus = 'done';
+    renderOverlay();
+    renderEditList();
+    return normalized.length;
+  },
 };

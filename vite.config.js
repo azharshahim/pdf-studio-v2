@@ -47,6 +47,12 @@ export default defineConfig({
     cors: true,
     allowedHosts: true,
   },
+  test: {
+    // Les tests de bout en bout (Playwright) ne doivent pas être lancés par
+    // Vitest : ils ont besoin d'un navigateur et d'un serveur.
+    include: ['tests/*.test.js'],
+    exclude: ['tests/e2e/**'],
+  },
   build: {
     target: 'es2022',
     assetsInlineLimit: 0,

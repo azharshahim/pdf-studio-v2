@@ -5,3 +5,6 @@ release/
 .DS_Store
 tmp-*.mjs
 qa/
+tests/e2e/.artifacts/
+playwright-report/
+test-results/
