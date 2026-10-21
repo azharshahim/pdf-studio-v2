@@ -216,3 +216,9 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - Tampons : les tampons personnalisés peuvent être enregistrés (case cochée par défaut) et reviennent dans « Mes tampons », avec suppression.
 - Corrigé au passage : le `click` qui suit un appui sur la barre d'outils retombait sur le fond de la feuille et la refermait ; ce seul clic est maintenant ignoré.
 - Vérifié : 105 tests unitaires ; 68 tests Chromium + Samsung ; 34 tests WebKit.
+
+## Retour, Enregistrer sans téléchargement, Partager, signature redimensionnable
+- Enregistrer stocke dans Fichiers sans télécharger ; Télécharger est dans le menu ⋮ (9 entrées) ; Partager remplace Exporter sur téléphone ; Retour dans la barre et l'atelier.
+- Une signature/tampon/date agrandi(e) s'étire avec son contenu, proportions gardées.
+- Sur 390 px, langue/thème/Ouvrir sont masqués dans un document pour que Retour, Partager et ⋮ restent visibles.
+- Vérifié : Chromium, Samsung, WebKit (dock + rapide), 105 tests unitaires.

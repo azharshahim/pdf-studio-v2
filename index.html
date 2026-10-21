@@ -16,6 +16,7 @@
     <div class="app" id="app">
       <!-- ══════════════ TOP BAR ══════════════ -->
       <header class="topbar">
+        <button class="icon-btn back-btn" id="btnBack" title="Retour" aria-label="Retour" data-i18n-title="common.back" data-icon="arrowLeft"></button>
         <div class="brand">
           <div class="brand-mark" aria-hidden="true">
             <svg viewBox="0 0 64 64" width="34" height="34">
@@ -56,6 +57,7 @@
           <span data-icon="save"></span><span data-i18n="top.save">Enregistrer</span>
         </button>
 
+        <button class="icon-btn" id="btnShare" title="Partager" aria-label="Partager" data-i18n-title="common.share" data-icon="share" disabled></button>
         <button class="icon-btn" id="btnDocMenu" title="Plus d’actions" aria-label="Plus d’actions" data-i18n-title="top.more" data-icon="more" disabled></button>
         <div class="export-wrap">
           <button class="btn primary" id="btnExport" disabled>
@@ -113,12 +115,14 @@
       <!-- ══════════════ BARRE D'ÉDITION DIRECTE ══════════════ -->
       <header class="editbar" id="editbar" hidden>
         <div class="editbar-start">
+          <button class="icon-btn" id="editBack" aria-label="Retour" data-i18n-title="common.back" data-icon="arrowLeft"></button>
           <button class="icon-btn editbar-done" id="editDone" aria-label="Valider" data-i18n-title="editor.done" data-icon="check"></button>
         </div>
         <div class="editbar-title" id="editTitle" data-i18n="editbar.title">Modifier un PDF</div>
         <div class="editbar-actions">
           <span class="editbar-count" id="editbarCount" hidden>0</span>
-          <button class="btn primary small save-btn" id="editSave"><span data-icon="save"></span><span data-i18n="top.save">Enregistrer</span></button>
+          <button class="btn primary small save-btn" id="editSave" aria-label="Enregistrer"><span data-icon="save"></span><span class="save-label" data-i18n="top.save">Enregistrer</span></button>
+          <button class="icon-btn" id="editShare" aria-label="Partager" data-i18n-title="common.share" data-icon="share"></button>
           <button class="icon-btn" id="editUndo" aria-label="Annuler" data-i18n-title="common.undo" data-icon="undo"></button>
           <button class="icon-btn" id="editRedo" aria-label="Rétablir" data-i18n-title="common.redo" data-icon="redo"></button>
         </div>

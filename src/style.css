@@ -4567,3 +4567,43 @@ body.editing .docdock {
   position: relative;
   display: inline-flex;
 }
+
+/* Retour : visible sur téléphone seulement */
+.back-btn {
+  display: none;
+}
+@media (max-width: 900px) {
+  body[data-route='doc'] .back-btn {
+    display: inline-flex;
+  }
+  /* Partager remplace Télécharger ; le téléchargement est dans le menu ⋮. */
+  #btnExport {
+    display: none;
+  }
+}
+/* Atelier : la barre d'édition fait de la place à Retour et Partager. */
+@media (max-width: 520px) {
+  .editbar .save-label {
+    display: none;
+  }
+  .editbar #editSave {
+    padding: 0 12px;
+    min-width: 44px;
+  }
+}
+.save-btn.just-saved {
+  background: #059669;
+  border-color: #059669;
+}
+
+/* Téléphone étroit : dans un document, la langue et le thème (réglages) cèdent la place à Retour / Partager / ⋮. */
+@media (max-width: 520px) {
+  body[data-route='doc'] .topbar .lang-wrap,
+  body[data-route='doc'] #btnTheme,
+  body[data-route='doc'] #btnOpen {
+    display: none;
+  }
+  body[data-route='doc'] .topbar {
+    overflow: hidden;
+  }
+}

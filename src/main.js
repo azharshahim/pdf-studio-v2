@@ -142,6 +142,10 @@ const els = {
   fmtFont: $('fmtFont'),
   docDock: $('docDock'),
   btnDocMenu: $('btnDocMenu'),
+  btnShare: $('btnShare'),
+  btnBack: $('btnBack'),
+  editBack: $('editBack'),
+  editShare: $('editShare'),
   fmtColorBtn: $('fmtColorBtn'),
   fmtSwatch: $('fmtSwatch'),
   fmtColorPop: $('fmtColorPop'),
@@ -844,6 +848,21 @@ function bindDock() {
   updateDock();
 }
 
+/* ───────── Retour ───────── */
+
+let routeBeforeDoc = 'files';
+
+/**
+ * Retour : valide le texte en cours, enregistre le travail, puis revient à
+ * l'écran précédent (Fichiers ou Accueil). Le document reste ouvert.
+ */
+async function goBack() {
+  closeActive();
+  if (document.body.classList.contains('annotating')) closeAnnotate();
+  flushSession();
+  routeTo(routeBeforeDoc || 'files');
+}
+
 /* ───────── Menu ⋮ du document ───────── */
 
 /** Génère le PDF courant (modifications, OCR, annotations) sans le télécharger. */
@@ -924,6 +943,7 @@ function openDocMenu() {
   const items = [
     { id: 'save', icon: 'save', title: 'menu.save', hint: 'menu.saveHint' },
     { id: 'export', icon: 'download', title: 'menu.export', hint: 'menu.exportHint' },
+    { id: 'download', icon: 'download', title: 'menu.download', hint: 'menu.downloadHint' },
     { id: 'share', icon: 'share', title: 'menu.share', hint: 'menu.shareHint' },
     { id: 'print', icon: 'printer', title: 'menu.print', hint: 'menu.printHint' },
     { id: 'compress', icon: 'compress', title: 'menu.compress', hint: 'menu.compressHint' },
@@ -952,6 +972,7 @@ function openDocMenu() {
       // Laisse la feuille se fermer avant d'ouvrir l'action suivante.
       setTimeout(() => {
         if (id === 'save') handleSave();
+        else if (id === 'download') downloadModifiedPdf();
         else if (id === 'export') els.btnExport.click();
         else if (id === 'share') shareCurrentPdf();
         else if (id === 'print') printCurrentPdf();
@@ -1330,6 +1351,10 @@ function bindFormatbar() {
   populateFontSelect();
   bindDock();
   els.btnDocMenu?.addEventListener('click', openDocMenu);
+  els.btnShare?.addEventListener('click', () => shareCurrentPdf());
+  els.editShare?.addEventListener('click', () => shareCurrentPdf());
+  els.btnBack?.addEventListener('click', goBack);
+  els.editBack?.addEventListener('click', goBack);
   els.fmtFont?.addEventListener('change', () => {
     const value = els.fmtFont.value;
     // Charge la police avant de l'appliquer : l'aperçu et les mesures doivent
@@ -1815,25 +1840,36 @@ function collectOcrForSession() {
     .map(([pageNo, p]) => ({ pageNo, ocr: p.ocr }));
 }
 
+/** Écrit la session (modifications, annotations, OCR) dans le stockage local. */
+async function flushSession() {
+  if (!state.hash) return false;
+  const payload = {
+    name: state.fileName,
+    size: state.bytes?.byteLength || 0,
+    numPages: state.numPages,
+    edits: state.edits,
+    ocrPages: collectOcrForSession(),
+    markup: markup.objects,
+  };
+  try {
+    await Session.saveSession(state.hash, payload);
+    return true;
+  } catch (err) {
+    console.warn('[store] session non enregistrée', err);
+    return false;
+  }
+}
+
 function scheduleAutosave(now = false) {
   if (!state.hash || state.restoring) return;
   clearTimeout(state.autosaveTimer);
-  const run = () => {
-    const payload = {
-      name: state.fileName,
-      size: state.bytes?.byteLength || 0,
-      numPages: state.numPages,
-      edits: state.edits,
-      ocrPages: collectOcrForSession(),
-      markup: markup.objects,
-    };
-    // Même sans modification, l'enregistrement reste : il porte les octets du
-    // PDF et permet de le rouvrir depuis « Fichiers ». Seule la session
-    // d'édition est vidée.
-    return Session.saveSession(state.hash, payload).catch(() => {});
-  };
-  if (now) return run();
-  state.autosaveTimer = setTimeout(run, 900);
+  // Même sans modification, l'enregistrement reste : il porte les octets du
+  // PDF et permet de le rouvrir depuis « Fichiers ». Seule la session
+  // d'édition est vidée.
+  if (now) return flushSession();
+  state.autosaveTimer = setTimeout(() => {
+    flushSession();
+  }, 900);
 }
 
 /**
@@ -2472,6 +2508,7 @@ function updateExportUi() {
   if (els.btnSave) els.btnSave.disabled = !state.engine;
   els.btnSearch.disabled = !state.engine;
   if (els.btnDocMenu) els.btnDocMenu.disabled = !state.engine;
+  if (els.btnShare) els.btnShare.disabled = !state.engine;
 }
 
 /* ─────────────────────────── Recherche ─────────────────────────── */
@@ -2836,7 +2873,35 @@ async function shareBlob(blob, name) {
 let lastSaved = null; // { blob, name }
 
 /** Valide le bloc en cours puis télécharge le PDF modifié. */
+/**
+ * Enregistrer : copie le travail dans « Fichiers » (PDF + modifications,
+ * annotations, OCR), sans rien télécharger. Les modifications restent
+ * modifiables à la réouverture.
+ */
 async function handleSave() {
+  if (!state.engine) return;
+  closeActive();
+  const ok = await flushSession();
+  if (ok) Session.requestPersistence();
+  toast(ok ? t('save.stored') : t('save.storeFailed'), ok ? 'success' : 'error', {
+    duration: ok ? 4500 : 9000,
+    action: t('common.share'),
+    onAction: () => shareCurrentPdf(),
+  });
+  updateSaveState(ok);
+}
+
+/** Petit retour visuel sur le bouton Enregistrer (coche brève). */
+function updateSaveState(ok) {
+  for (const btn of [els.btnSave, els.editSave]) {
+    if (!btn) continue;
+    btn.classList.toggle('just-saved', !!ok);
+    if (ok) setTimeout(() => btn.classList.remove('just-saved'), 1800);
+  }
+}
+
+/** Télécharge le PDF avec les modifications (ancien comportement d'« Enregistrer »). */
+async function downloadModifiedPdf() {
   if (!state.engine) return;
   closeActive();
   const ocrPages = collectOcrForSession();
@@ -4353,7 +4418,7 @@ function openConvertTool() {
       const kind = btn.dataset.convert;
       closeSheet();
       if (kind === 'txt') return handleExportText();
-      if (kind === 'pdf') return handleSave();
+      if (kind === 'pdf') return downloadModifiedPdf();
       pushLoading(t('convert.working'));
       try {
         for (let n = 1; n <= state.numPages; n++) {
@@ -5224,6 +5289,7 @@ function init() {
         return;
       }
       els.homeResume.hidden = !state.engine;
+      if (name !== 'doc') routeBeforeDoc = name;
       if (name === 'files') renderFilesScreen();
     },
     onTool: (id) => openTool(id),

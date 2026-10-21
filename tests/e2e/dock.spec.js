@@ -63,7 +63,7 @@ test.describe('Barre d’outils du document', () => {
     });
     await openDemo(page);
     await page.locator('#btnDocMenu').tap();
-    await expect(page.locator('#sheet [data-doc-menu]')).toHaveCount(8);
+    await expect(page.locator('#sheet [data-doc-menu]')).toHaveCount(9);
 
     await page.locator('[data-doc-menu=share]').tap();
     await expect.poll(() => page.evaluate(() => window.__shared?.name)).toMatch(/-modifie\.pdf$/);
@@ -74,5 +74,23 @@ test.describe('Barre d’outils du document', () => {
     await page.locator('#btnDocMenu').tap();
     await page.locator('[data-doc-menu=compress]').tap();
     await expect(page.locator('#sheetTitle')).toContainText(/ompress/i);
+  });
+
+  test('Enregistrer ne télécharge pas ; Partager visible ; Télécharger dans ⋮ ; Retour', async ({ page }) => {
+    await openDemo(page);
+    let downloads = 0;
+    page.on('download', () => downloads++);
+    await expect(page.locator('#btnShare')).toBeVisible();
+    await expect(page.locator('#btnExport')).toBeHidden();
+    await expect(page.locator('#btnBack')).toBeVisible();
+    await page.locator('#btnSave, .save-btn').first().tap().catch(() => {});
+    await page.waitForTimeout(1200);
+    expect(downloads).toBe(0);
+    await page.locator('#btnDocMenu').tap();
+    const dl = page.waitForEvent('download', { timeout: 20_000 });
+    await page.locator('[data-doc-menu=download]').tap();
+    expect((await dl).suggestedFilename()).toMatch(/\.pdf$/);
+    await page.locator('#btnBack').tap();
+    await expect(page.locator('#docDock')).toBeHidden();
   });
 });

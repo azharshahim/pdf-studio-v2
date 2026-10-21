@@ -80,4 +80,56 @@ test.describe('Signatures et tampons enregistrés', () => {
     await expect.poll(async () => (await objects(page)).length).toBe(2);
     expect((await objects(page))[1]).toMatchObject({ type: 'stamp', text: 'REÇU PAR RAPID NET' });
   });
+
+  test('agrandir une signature agrandit la signature elle-même, proportions gardées', async ({ page }) => {
+    await openDemo(page, {
+      'pdf-studio-signatures': JSON.stringify([{ id: 'sig-test', src: PNG, ratio: 3, kind: 'draw', createdAt: 1 }]),
+    });
+    await page.locator('#docDock [data-dock=sign]').tap();
+    await page.locator('[data-sig-use=sig-test]').tap();
+    await expect.poll(async () => (await objects(page)).length).toBe(1);
+    await page.waitForTimeout(500);
+
+    const imgSize = () =>
+      page.locator('.mk-signature img').evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return { w: r.width, h: r.height };
+      });
+    const before = await imgSize();
+    const handle = await page.locator('[data-mk-handle="resize"]').boundingBox();
+    const x = handle.x + handle.width / 2;
+    const y = handle.y + handle.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 40, y + 26, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    const after = await imgSize();
+    expect(after.w).toBeGreaterThan(before.w + 20);
+    expect(after.h).toBeGreaterThan(before.h + 5);
+    // Les proportions ne bougent pas.
+    expect(Math.abs(after.w / after.h - before.w / before.h)).toBeLessThan(0.05);
+    const box = (await objects(page))[0].bbox;
+    expect(Math.abs(box.w / box.h - 3)).toBeLessThan(0.1);
+  });
+
+  test('glisser la signature elle-même la déplace', async ({ page }) => {
+    await openDemo(page, {
+      'pdf-studio-signatures': JSON.stringify([{ id: 'sig-test', src: PNG, ratio: 3, kind: 'draw', createdAt: 1 }]),
+    });
+    await page.locator('#docDock [data-dock=sign]').tap();
+    await page.locator('[data-sig-use=sig-test]').tap();
+    await expect.poll(async () => (await objects(page)).length).toBe(1);
+    await page.waitForTimeout(500);
+    const start = (await objects(page))[0].bbox;
+    const r = await page.locator('.mk-signature').boundingBox();
+    await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(r.x + r.width / 2 + 50, r.y + r.height / 2 + 30, { steps: 5 });
+    await page.mouse.up();
+    const end = (await objects(page))[0].bbox;
+    expect(end.x).toBeGreaterThan(start.x + 5);
+    expect(end.y).toBeLessThan(start.y - 3);
+    expect(end.w).toBeCloseTo(start.w, 3);
+  });
 });

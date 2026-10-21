@@ -178,6 +178,12 @@ export function createMarkup({
     if (o.id === selectedId) {
       el.classList.add('selected');
       el.appendChild(selectionHandles(o, scale));
+      if (o.type !== 'note') {
+        el.style.pointerEvents = 'auto';
+        el.style.touchAction = 'none';
+        el.style.cursor = 'grab';
+        el.addEventListener('pointerdown', (ev) => onObjectDown(o, ev));
+      }
     } else if (!state.tool) {
       el.style.pointerEvents = 'auto';
       el.style.cursor = 'pointer';
@@ -187,6 +193,117 @@ export function createMarkup({
       });
     }
     return el;
+  }
+
+  /** Types dont les proportions sont verrouillées (image, signature, texte). */
+  const RATIO_LOCKED = new Set(['image', 'signature', 'photo', 'check', 'stamp', 'date']);
+  const SCALES_FONT = new Set(['stamp', 'date']);
+  const MIN_SIDE = 12;
+
+  /**
+   * Nouvelle taille après glisser du coin bas-droit de (dx, dyDown) points PDF.
+   * Images, signatures, tampons et textes gardent leurs proportions ; le texte
+   * (tampon, date) change aussi de corps pour que ce qui est dessiné grandisse.
+   */
+  function resizePatch(o, box, fontSize, dx, dyDown) {
+    if (RATIO_LOCKED.has(o.type)) {
+      const minS = MIN_SIDE / Math.max(1, Math.min(box.w, box.h));
+      const s = Math.min(8, Math.max(minS, 1 + (dx / box.w + dyDown / box.h) / 2));
+      return scalePatch(o, box, fontSize, s, { x: box.x, y: box.y + box.h });
+    }
+    const w = Math.max(MIN_SIDE, box.w + dx);
+    const h = Math.max(MIN_SIDE, box.h + dyDown);
+    return { bbox: { ...box, w, h, y: box.y + box.h - h } };
+  }
+
+  /** Met `box` à l'échelle `s` autour de `anchor` (point fixe en coordonnées PDF). */
+  function scalePatch(o, box, fontSize, s, anchor) {
+    const w = box.w * s;
+    const h = box.h * s;
+    const patch = {
+      bbox: {
+        ...box,
+        w,
+        h,
+        x: anchor.x - (anchor.x - box.x) * s,
+        y: anchor.y - (anchor.y - box.y) * s,
+      },
+    };
+    if (SCALES_FONT.has(o.type) && fontSize) patch.fontSize = Math.max(4, fontSize * s);
+    return patch;
+  }
+
+  /* ───── Geste direct sur l'objet sélectionné : 1 doigt = déplacer, 2 doigts = agrandir ───── */
+
+  const touches = new Map();
+  let gesture = null;
+  let gestureBound = false;
+
+  const centroid = () => {
+    let x = 0;
+    let y = 0;
+    for (const p of touches.values()) {
+      x += p.x;
+      y += p.y;
+    }
+    return { x: x / touches.size, y: y / touches.size };
+  };
+  const spread = () => {
+    const pts = [...touches.values()];
+    return pts.length < 2 ? 0 : Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+  };
+  const rebase = (o) => {
+    gesture = { id: o.id, box: { ...o.bbox }, fontSize: o.fontSize, start: centroid(), dist: spread() };
+  };
+
+  function onGestureMove(e) {
+    if (!gesture || !touches.has(e.pointerId)) return;
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const o = state.objects.find((x) => x.id === gesture.id);
+    if (!o) return;
+    const sc = getScale() || 1;
+    const c = centroid();
+    const dx = (c.x - gesture.start.x) / sc;
+    const dy = -(c.y - gesture.start.y) / sc;
+    const { box } = gesture;
+    if (touches.size >= 2 && gesture.dist > 0) {
+      const s = Math.min(8, Math.max(0.15, spread() / gesture.dist));
+      const center = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+      const patch = scalePatch(o, box, gesture.fontSize, s, center);
+      patch.bbox = { ...patch.bbox, x: patch.bbox.x + dx, y: patch.bbox.y + dy };
+      update(o.id, patch);
+    } else {
+      update(o.id, { bbox: { ...box, x: box.x + dx, y: box.y + dy } });
+    }
+  }
+
+  function onGestureEnd(e) {
+    touches.delete(e.pointerId);
+    if (!touches.size) {
+      window.removeEventListener('pointermove', onGestureMove);
+      window.removeEventListener('pointerup', onGestureEnd);
+      window.removeEventListener('pointercancel', onGestureEnd);
+      gestureBound = false;
+      gesture = null;
+      return;
+    }
+    const o = gesture && state.objects.find((x) => x.id === gesture.id);
+    if (o) rebase(o);
+  }
+
+  function onObjectDown(o, ev) {
+    if (ev.target.closest('[data-mk-handle]')) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    touches.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    const current = state.objects.find((x) => x.id === o.id) || o;
+    rebase(current);
+    if (!gestureBound) {
+      gestureBound = true;
+      window.addEventListener('pointermove', onGestureMove);
+      window.addEventListener('pointerup', onGestureEnd);
+      window.addEventListener('pointercancel', onGestureEnd);
+    }
   }
 
   /** Poignées de déplacement / redimensionnement / rotation. */
@@ -218,7 +335,9 @@ export function createMarkup({
         if (kind === 'move') {
           update(o.id, { bbox: { ...box, x: box.x + dx, y: box.y + dy } });
         } else if (kind === 'resize') {
-          update(o.id, { bbox: { ...box, w: Math.max(12, box.w + dx), h: Math.max(12, box.h + dy) } });
+          // Coin bas-droit : glisser vers le bas / la droite agrandit, le coin
+          // haut-gauche reste en place. dy est orienté vers le haut (PDF).
+          update(o.id, resizePatch(o, box, o.fontSize, dx, -dy));
         } else if (kind === 'rotate') {
           update(o.id, { rotation: Math.round(startRotation + (e.clientX - start.x) * 0.6) });
         }
