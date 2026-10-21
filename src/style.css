@@ -4457,7 +4457,7 @@ body.editing .docdock {
   transform: translateX(-50%);
   bottom: calc(var(--kb-offset, 0px) + 74px + env(safe-area-inset-bottom));
   width: min(720px, calc(100vw - 12px));
-  height: 44px;
+  height: 54px;
   padding: 3px 4px;
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -4504,4 +4504,17 @@ body[data-route='doc'] .fab {
   body:not(.editing) .docdock {
     justify-content: center;
   }
+}
+
+/* Cibles tactiles agrandies pendant la modification (≥ 48 px). */
+body.editing .dockitem {
+  min-width: 48px;
+  min-height: 48px;
+}
+body.editing .dockitem svg {
+  width: 25px;
+  height: 25px;
+}
+body.editing .docdock {
+  padding: 3px;
 }
