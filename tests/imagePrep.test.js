@@ -105,3 +105,19 @@ describe('imagePrep', () => {
     expect(deskewCanvas(canvas)).toBe(canvas);
   });
 });
+
+describe('enhanceContrast sur page presque blanche', () => {
+  it('ne noircit pas une page au texte épars', () => {
+    const c = fakeCanvas(100, 100, (img) => {
+      img.data.fill(255);
+      for (let i = 0; i < 40; i++) {
+        const p = i * 4;
+        img.data[p] = img.data[p + 1] = img.data[p + 2] = 0;
+      }
+    });
+    enhanceContrast(c);
+    const out = c.getContext().getImageData(0, 0, 100, 100).data;
+    expect(out[4 * 5000]).toBe(255);
+  });
+});
+

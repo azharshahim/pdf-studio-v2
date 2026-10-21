@@ -4891,8 +4891,12 @@ body.reading #btnRedo,
 body.reading .inspector,
 body.reading .inspector-toggle,
 body.reading .fab:not(.read-edit),
-body.reading .line-block {
+body.reading .line-block:not(.hit):not(.hit-active) {
   display: none !important;
+}
+body.reading .line-block.hit,
+body.reading .line-block.hit-active {
+  pointer-events: none;
 }
 body.reading:not(.fillsign) .form-area {
   display: none !important;
@@ -5332,3 +5336,8 @@ body:not([data-route='doc']) .doctabs {
   color: var(--ink);
   font: 600 16px/1 var(--font);
 }
+
+.ocr-pill{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom));z-index:60;background:var(--surface-2,#1f2937);color:var(--text,#fff);border:1px solid var(--border,#374151);border-radius:999px;padding:6px 14px;font-size:12px;box-shadow:0 4px 16px #0004;max-width:90vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ocr-pill[hidden]{display:none}
+
+.overlay.tool-eraser ~ .markup-ink path, .tool-eraser .markup-ink path{pointer-events:stroke;cursor:pointer}

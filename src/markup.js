@@ -83,6 +83,7 @@ export function createMarkup({
         path.setAttribute('stroke-linecap', 'round');
         path.setAttribute('stroke-linejoin', 'round');
         path.dataset.inkId = o.id;
+        path.dataset.mkId = o.id;
         svg.appendChild(path);
       }
     } else {
@@ -343,12 +344,16 @@ export function createMarkup({
           update(o.id, { rotation: Math.round(startRotation + (e.clientX - start.x) * 0.6) });
         }
       };
-      const up = () => {
+      const up = (e) => {
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+        // Geste interrompu (défilement, geste système) : retour à l'état initial.
+        if (e?.type === 'pointercancel') update(o.id, { bbox: box, rotation: startRotation });
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
     });
     return handleEl;
   }
@@ -484,6 +489,7 @@ export function createMarkup({
         window.removeEventListener('pointercancel', up);
         draftEl?.remove();
         draftEl = null;
+        if (e?.type === 'pointercancel') return;
         if (points.length > 1) {
           add({ type: 'ink', points: obj.points, color: obj.color, width: obj.width });
         }
@@ -525,6 +531,7 @@ export function createMarkup({
         window.removeEventListener('pointercancel', up);
         draftEl?.remove();
         draftEl = null;
+        if (e?.type === 'pointercancel') return;
         if (rect.width < 8 || rect.height < 6) {
           // Un simple toucher pose une marque standard.
           const fallback =

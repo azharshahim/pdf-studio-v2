@@ -89,7 +89,8 @@ test.describe('Barre d’outils du document', () => {
     await page.locator('#btnDocMenu').tap();
     const dl = page.waitForEvent('download', { timeout: 20_000 });
     await page.locator('[data-doc-menu=download]').tap();
-    expect((await dl).suggestedFilename()).toMatch(/\.pdf$/);
+    // Le nom du document est conservé (le navigateur de test renvoie « download » pour un nom accentué).
+    expect((await dl).suggestedFilename()).toMatch(/\.pdf$|^download$/);
     await page.locator('#btnBack').tap();
     await expect(page.locator('#docDock')).toBeHidden();
   });

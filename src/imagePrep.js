@@ -19,7 +19,7 @@ export function enhanceContrast(canvas) {
     histogram[v]++;
   }
   const total = width * height;
-  const lowTarget = total * 0.02;
+  const lowTarget = total * 0.002;
   const highTarget = total * 0.98;
   let acc = 0;
   let low = 0;
@@ -39,6 +39,9 @@ export function enhanceContrast(canvas) {
       break;
     }
   }
+  // Page presque entièrement blanche (texte épars) : étirer l'histogramme
+  // noircirait tout. Sans contraste mesurable, on laisse l'image telle quelle.
+  if (high - low < 16) return canvas;
   const span = Math.max(1, high - low);
   for (let i = 0, p = 0; i < data.length; i += 4, p++) {
     const v = Math.max(0, Math.min(255, Math.round(((gray[p] - low) / span) * 255)));

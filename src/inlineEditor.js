@@ -20,12 +20,7 @@ import { isSamsungUserAgent, wordBoundsAt } from './caretPoint.js';
 
 /** Familles CSS correspondant aux polices proposées à l'édition. */
 export function cssFontFamilyFor(font) {
-  if (font === 'Times') return '"Times New Roman", Times, serif';
-  if (font === 'Courier') return '"Courier New", Courier, monospace';
-  if (font === 'Noto Sans') {
-    return '"Noto Sans", "Noto Naskh Arabic", "Segoe UI", system-ui, sans-serif';
-  }
-  return 'Helvetica, Arial, sans-serif';
+  return U.cssFontFamily(font);
 }
 
 /** Normalise le texte saisi (fins de ligne, espaces insécables). */

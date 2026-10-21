@@ -11,7 +11,16 @@
  *  - `mask` : ancien comportement (rectangle de couleur), conservé en option.
  */
 
-import { PDFDocument, PDFName, StandardFonts, rgb, degrees } from 'pdf-lib';
+import {
+  PDFDocument,
+  PDFName,
+  PDFHexString,
+  StandardFonts,
+  rgb,
+  pushGraphicsState,
+  popGraphicsState,
+  concatTransformationMatrix,
+} from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import { ArabicShaper } from 'arabic-persian-reshaper';
 import bidiFactory from 'bidi-js';
@@ -337,7 +346,9 @@ export async function exportPdf({
     const catFile = catalogFont(family) ? catalogFile(family, bold, italic) : null;
     if (catFile) {
       if (!catalogCache.has(catFile)) {
-        const bytes = await fetchFontBytes(catFile);
+        // Les fichiers .woff2 servent à l'écran ; pdf-lib ne sait pas sous-ensembler
+        // un WOFF2 (table loca vide), on embarque donc la version TrueType.
+        const bytes = await fetchFontBytes(catFile.replace(/\.woff2$/, '.ttf'));
         catalogCache.set(catFile, await pdfDoc.embedFont(bytes, { subset: true }));
       }
       const font = catalogCache.get(catFile);
@@ -419,7 +430,9 @@ export async function exportPdf({
     let masked = false;
     for (const e of sorted) {
       if (!e.bg || e.bg === 'none') continue;
-      if (removed.has(e.bbox)) continue;
+      // Texte réellement retiré du flux : rien à masquer. Couche cachée (scan) :
+      // l'image du scan reste dessous, il faut toujours la couvrir.
+      if (removed.has(e.bbox) && !e.hiddenLayer && e.source !== 'ocr') continue;
       const { r, g, b } = hexToRgb01(e.bg, { r: 1, g: 1, b: 1 });
       const padX = Math.max(1, (e.size || 10) * 0.12);
       const padY = Math.max(0.8, (e.size || 10) * 0.05);
@@ -598,6 +611,12 @@ export function pointsToSvgPath(points = []) {
 export async function drawObjects(pdfDoc, pages, objects) {
   let drawn = 0;
   const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  // Caractères hors WinAnsi (arabe, emoji…) : remplacés par « ? » plutôt que
+  // de faire échouer tout l'export.
+  const safeText = (text) =>
+    [...String(text)]
+      .map((ch) => (ch === '\n' ? ' ' : font.getCharacterSet().includes(ch.codePointAt(0)) ? ch : '?'))
+      .join('');
   const imageCache = new Map();
 
   const embedImage = async (src) => {
@@ -627,6 +646,21 @@ export async function drawObjects(pdfDoc, pages, objects) {
     drawn++;
     const { r, g, b } = hexToRgb01(obj.color || '#111827', { r: 0, g: 0, b: 0 });
     const color = rgb(r, g, b);
+
+    // Rotation affichée à l'écran : sens horaire autour du centre de la boîte.
+    const rot = Number(obj.rotation) || 0;
+    const rotated = rot % 360 !== 0 && obj.type !== 'ink' && obj.type !== 'note';
+    if (rotated) {
+      const a = (-rot * Math.PI) / 180;
+      const cx = x + w / 2;
+      const cy = y + h / 2;
+      const cos = Math.cos(a);
+      const sin = Math.sin(a);
+      page.pushOperators(
+        pushGraphicsState(),
+        concatTransformationMatrix(cos, sin, -sin, cos, cx - cx * cos + cy * sin, cy - cx * sin - cy * cos)
+      );
+    }
 
     if (obj.type === 'highlight') {
       page.drawRectangle({ x, y, width: w, height: h, color, opacity: 0.38, borderWidth: 0 });
@@ -689,14 +723,18 @@ export async function drawObjects(pdfDoc, pages, objects) {
         borderWidth: 0.8,
       });
       if (obj.text) {
-        page.drawText(obj.text.slice(0, 120), {
-          x: x + w + 4,
-          y: y + h / 2 - 3,
-          size: Math.max(6, Math.min(9, h * 0.8)),
-          font,
-          color: rgb(0.1, 0.12, 0.16),
-          maxWidth: 160,
+        // Le commentaire devient une vraie note PDF (Acrobat l'affiche en bulle),
+        // il n'est plus écrit sur la page.
+        const annot = pdfDoc.context.obj({
+          Type: 'Annot',
+          Subtype: 'Text',
+          Rect: [x, y, x + w, y + h],
+          Contents: PDFHexString.fromText(String(obj.text)),
+          Name: 'Comment',
+          C: [r, g, b],
+          F: 4,
         });
+        page.node.addAnnot(pdfDoc.context.register(annot));
       }
     } else if (obj.type === 'image' || obj.type === 'signature' || obj.type === 'photo') {
       const image = await embedImage(obj.src);
@@ -707,12 +745,11 @@ export async function drawObjects(pdfDoc, pages, objects) {
           width: w,
           height: h,
           opacity: obj.opacity ?? 1,
-          rotate: degrees(obj.rotation || 0),
         });
       }
     } else if (obj.type === 'stamp') {
       const size = obj.fontSize || Math.max(8, Math.min(h * 0.62, 34));
-      const text = obj.text || '';
+      const text = safeText(obj.text || '');
       const textWidth = font.widthOfTextAtSize(text, size);
       const boxW = Math.min(w || textWidth + 18, textWidth + 18);
       const boxH = Math.min(Math.max(h, size + 10), size * 1.9);
@@ -725,7 +762,6 @@ export async function drawObjects(pdfDoc, pages, objects) {
         borderWidth: Math.max(1, size * 0.09),
         opacity: 0,
         borderOpacity: obj.opacity ?? 0.9,
-        rotate: degrees(obj.rotation || 0),
       });
       page.drawText(text, {
         x: x + ((w || boxW) - boxW) / 2 + (boxW - textWidth) / 2,
@@ -734,7 +770,6 @@ export async function drawObjects(pdfDoc, pages, objects) {
         font,
         color,
         opacity: obj.opacity ?? 0.9,
-        rotate: degrees(obj.rotation || 0),
       });
     } else if (obj.type === 'check') {
       const size = Math.max(6, Math.min(w, h));
@@ -748,8 +783,9 @@ export async function drawObjects(pdfDoc, pages, objects) {
       }
     } else if (obj.type === 'date') {
       const size = obj.fontSize || Math.max(7, Math.min(h * 0.9, 16));
-      page.drawText(obj.text || '', { x, y, size, font, color });
+      page.drawText(safeText(obj.text || ''), { x, y, size, font, color });
     }
+    if (rotated) page.pushOperators(popGraphicsState());
   }
   return drawn;
 }

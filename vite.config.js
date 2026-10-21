@@ -19,6 +19,8 @@ function precacheManifest() {
           const nextRel = rel ? `${rel}/${entry.name}` : entry.name;
           // Polices supplémentaires : mises en cache à la première utilisation seulement.
           if (nextRel === 'fonts/more') continue;
+          // Versions TrueType (export PDF) : téléchargées à la demande.
+          if (nextRel.startsWith('fonts/catalog/') && nextRel.endsWith('.ttf')) continue;
           if (entry.isDirectory()) walk(path.join(dir, entry.name), nextRel);
           else files.push(`./${nextRel}`);
         }

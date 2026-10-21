@@ -273,3 +273,15 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - Plusieurs PDF ouverts d'un coup (sélection multiple, glisser-déposer, ouverture Windows) : un onglet par fichier, changement et fermeture d'onglet, session de chaque document conservée.
 - Combiner des fichiers (Outils, menu ⋮ ou bouton « Combiner » des onglets) : ajout depuis l'appareil ou depuis les fichiers déjà ouverts, ordre modifiable, nom « Classeur N.pdf » proposé ; après combinaison, la grille des pages s'ouvre pour ranger les pages (tests/combine.test.js, tests/e2e/onglets.spec.js).
 - Suites : vitest 140 OK ; Playwright Chromium + Samsung OK (dock mis à jour : 12 lignes dans ⋮).
+
+## Édition fidèle, OCR automatique, correctifs d'audit (v2.10)
+
+- **OCR automatique** : « Modifier » rend tout le fichier modifiable ; les pages sans texte sont reconnues d'elles-mêmes (pastille de progression), plus besoin de passer par l'onglet OCR.
+- **Cause des lignes géantes / écriture changée sur scan** : `enhanceContrast` étirait l'histogramme sur 98 % de pixels blancs → page entièrement noire → OCR illisible. Corrigé (seuil bas 0,2 %, aucune retouche sans contraste mesurable) + test.
+- **Export des polices du catalogue** : les `.woff2` ne peuvent pas être sous-ensemblés par pdf-lib (table `loca` vide) → texte invisible. Versions `.ttf` générées (`public/fonts/{catalog,more}/*.ttf`, non précachées) et utilisées à l'export. Test de rendu Poppler.
+- **Scans à couche cachée** : le rectangle de masquage est toujours dessiné (`hiddenLayer`).
+- **Annotations exportées** : rotation horaire autour du centre pour tous les types, notes = vraies annotations PDF `/Text`, textes non WinAnsi remplacés par « ? » au lieu de faire échouer l'export.
+- **Gestes** : `pointercancel` annule tracés/formes et restaure les poignées ; gomme active sur les tracés libres.
+- **Formulaires** : listes déroulantes/radios, « Valider » recharge le moteur et enregistre, export prend les valeurs du panneau.
+- **Autres** : nom du fichier téléchargé = nom renommé, surlignage de recherche visible en lecture, police du catalogue visible pendant la saisie, souligné/alignement/interligne conservés après validation, « Tout remplacer » sans accent sur toute la ligne, alerte à l'ouverture d'un PDF protégé.
+- Non traité (à planifier) : défilement continu, sélection de texte en lecture, historique annuler unifié, doublons dans « Fichiers » après opérations de pages, direction des flèches, espaces multiples monospace.

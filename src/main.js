@@ -930,7 +930,7 @@ async function buildCurrentPdf() {
   closeActive();
   const { exportPdf } = await import('./exporter.js');
   const result = await exportPdf({
-    sourceBytes: state.bytes,
+    sourceBytes: await bytesWithForm(),
     edits: state.edits,
     ocrPages: collectOcrForSession(),
     redactMode: 'stream',
@@ -1005,6 +1005,24 @@ function isReading() {
 }
 
 /** Lecture seule : on lit le document ; « Modifier » ouvre les outils d'édition. */
+/** Rend tout le fichier modifiable : OCR automatique des pages sans texte (scans). */
+async function autoOcrForEdit() {
+  if (!state.engine || state.ocr.running || isReading()) return;
+  const token = state.docToken;
+  await ensureAllLines();
+  if (token !== state.docToken || isReading()) return;
+  const todo = [];
+  for (let n = 1; n <= state.numPages; n++) {
+    const pd = getPageData(n);
+    const hasText = pd.lines && pd.lines.some((l) => !l.hiddenLayer);
+    const hasHidden = pd.lines && pd.lines.some((l) => l.hiddenLayer);
+    if (!hasText && !hasHidden && !(pd.ocr && pd.ocr.lines.length) && pd.ocrStatus === 'idle') todo.push(n);
+  }
+  if (!todo.length) return;
+  toast(t('edit.autoOcr', { n: todo.length }), 'info', { duration: 3500 });
+  await runOcr(todo);
+}
+
 function setReadMode(on) {
   const was = isReading();
   document.body.classList.toggle('reading', !!on);
@@ -1029,6 +1047,7 @@ function setReadMode(on) {
     state.zoom = null;
     renderCurrent().then(() => centerHorizontally());
   }
+  if (!on && was && state.engine) autoOcrForEdit().catch(() => {});
 }
 
 /** Centre la page quand elle dépasse la largeur de l'écran (lecture à 125 %). */
@@ -1367,9 +1386,14 @@ function renderOverlay() {
     span.style.whiteSpace = 'pre';
     span.style.fontFamily = fontFamily;
     span.style.fontSize = `${fontSizePx}px`;
-    span.style.lineHeight = '1.16';
+    span.style.lineHeight = String(e.lineHeight || 1.16);
     span.style.fontWeight = e.bold ? '700' : '400';
     span.style.fontStyle = e.italic ? 'italic' : 'normal';
+    if (e.underline) span.style.textDecoration = 'underline';
+    if (e.align && e.align !== 'left') {
+      span.style.textAlign = e.align;
+      span.style.width = '100%';
+    }
     span.style.color = e.color || '#111827';
     // compense la réduction de taille pour garder la ligne de base
     if (fontSizePx < basePx) span.style.paddingTop = `${0.88 * (basePx - fontSizePx)}px`;
@@ -1848,6 +1872,7 @@ function makeEditFromLine(line, pageNo) {
     kind: 'edit',
     lineId: line.id,
     source: line.source || 'pdf',
+    hiddenLayer: !!line.hiddenLayer,
     bbox: { ...line.bbox },
     baseline: line.baseline,
     originalText: line.text,
@@ -2798,6 +2823,18 @@ function setOcrProgress(progress, label) {
   els.ocrProgress.hidden = false;
   els.ocrProgressFill.style.width = `${Math.round(U.clamp(progress, 0, 1) * 100)}%`;
   if (label) els.ocrStatus.textContent = label;
+  let pill = document.getElementById('ocrPill');
+  if (!pill) {
+    pill = document.createElement('div');
+    pill.id = 'ocrPill';
+    pill.className = 'ocr-pill';
+    pill.setAttribute('role', 'status');
+    document.body.appendChild(pill);
+  }
+  pill.hidden = false;
+  pill.textContent = `${label || ''} ${Math.round(U.clamp(progress, 0, 1) * 100)} %`.trim();
+  clearTimeout(pill._t);
+  if (progress >= 1) pill._t = setTimeout(() => (pill.hidden = true), 1800);
 }
 
 function updateOcrButtons() {
@@ -2805,6 +2842,8 @@ function updateOcrButtons() {
   els.btnOcrPage.disabled = running;
   els.btnOcrAll.disabled = running;
   els.btnOcrCancel.disabled = !running;
+  const pill = document.getElementById('ocrPill');
+  if (pill && !running) pill.hidden = true;
 }
 
 /**
@@ -3333,9 +3372,16 @@ function replaceInsensitive(text, query, repl, all) {
   let idx = hay.indexOf(needle, from);
   if (idx < 0) {
     // Recherche tolérante aux accents : on remplace la première portion trouvée.
-    const f = findMatch(src, query);
-    if (f.index < 0) return src;
-    return src.slice(0, f.index) + repl + src.slice(f.index + f.length);
+    let tolerant = '';
+    let rest = src;
+    for (let guard = 0; guard < 500; guard++) {
+      const f = findMatch(rest, query);
+      if (f.index < 0) break;
+      tolerant += rest.slice(0, f.index) + repl;
+      rest = rest.slice(f.index + Math.max(1, f.length));
+      if (!all) break;
+    }
+    return tolerant + rest;
   }
   while (idx >= 0) {
     out += src.slice(from, idx) + repl;
@@ -3459,6 +3505,13 @@ async function openPdfBytes(bytes, name, password = '', options = {}) {
     setReadMode(isReading());
     updatePanelsForPage();
     ensureAllLines().catch(() => {}); // indexation en arrière-plan
+    try {
+      const tail = new TextDecoder('latin1').decode(bytes.subarray(Math.max(0, bytes.length - 4096)));
+      if (/\/Encrypt\b/.test(tail)) toast(t('msg.encrypted'), 'warn', { duration: 9000 });
+    } catch {
+      /* détection facultative */
+    }
+    if (!isReading()) autoOcrForEdit().catch(() => {});
     toast(t('msg.opened', { name: state.fileName, n: state.numPages }), 'success', {
       duration: 2600,
     });
@@ -3626,6 +3679,16 @@ function updateSaveState(ok) {
   }
 }
 
+/** Octets du PDF avec les champs de formulaire saisis (panneau ou superposition). */
+async function bytesWithForm() {
+  if (!state.formFields?.length) return state.bytes;
+  try {
+    return new Uint8Array(await fillFormFields(state.bytes, state.formValues));
+  } catch {
+    return state.bytes;
+  }
+}
+
 /** Télécharge le PDF avec les modifications (ancien comportement d'« Enregistrer »). */
 async function downloadModifiedPdf() {
   if (!state.engine) return;
@@ -3635,14 +3698,14 @@ async function downloadModifiedPdf() {
   try {
     const { exportPdf } = await import('./exporter.js');
     const result = await exportPdf({
-      sourceBytes: state.bytes,
+      sourceBytes: await bytesWithForm(),
       edits: state.edits,
       ocrPages,
       redactMode: 'stream',
       renderPage: null,
       objects: markup.objects,
     });
-    const name = 'fichier-modifie.pdf';
+    const name = /\.pdf$/i.test(state.fileName || '') ? state.fileName : `${state.fileName || 'fichier-modifie'}.pdf`;
     const blob = new Blob([result.bytes], { type: 'application/pdf' });
     lastSaved = { blob, name };
     U.downloadBlob(blob, name);
@@ -3778,7 +3841,7 @@ async function handleExportPdf(options = {}) {
 
     // 2. Génération
     const result = await exportPdf({
-      sourceBytes: state.bytes,
+      sourceBytes: await bytesWithForm(),
       edits,
       ocrPages,
       redactMode,
@@ -4808,8 +4871,14 @@ function renderFormOverlay() {
   if (!formOverlay.active || !state.viewport) return;
   for (const field of formOverlay.fields) {
     const r = pdfRectToViewportRect(field.rect, state.viewport);
+    const opts = (field.options || []).filter(Boolean);
+    const current = state.formValues[field.name] ?? field.value ?? '';
     const input =
-      field.type === 'checkbox'
+      (field.type === 'select' || field.type === 'radio') && opts.length
+        ? `<select data-form-field="${U.escapeHtml(field.name)}"><option value=""></option>${opts
+            .map((o) => `<option value="${U.escapeHtml(o)}" ${String(current) === String(o) ? 'selected' : ''}>${U.escapeHtml(o)}</option>`)
+            .join('')}</select>`
+        : field.type === 'checkbox'
         ? `<input type="checkbox" data-form-field="${U.escapeHtml(field.name)}" ${field.value === 'true' ? 'checked' : ''} />`
         : `<input type="text" data-form-field="${U.escapeHtml(field.name)}" value="${U.escapeHtml(field.value || '')}" placeholder="${U.escapeHtml(field.name)}" />`;
     const wrap = document.createElement('label');
@@ -4926,10 +4995,25 @@ async function applyFormValues() {
   closeFormTool();
   pushLoading(t('form.applying'));
   try {
-    const bytes = await fillFormFields(state.bytes, state.formValues);
-    state.bytes = new Uint8Array(bytes);
+    const bytes = new Uint8Array(await fillFormFields(state.bytes, state.formValues));
+    // Nouveau moteur de rendu sur les octets remplis, sans toucher aux
+    // modifications ni aux annotations en cours.
+    const engine = new PdfEngine(bytes.slice());
+    await engine.load();
+    const old = state.engine;
+    state.engine = engine;
+    state.bytes = bytes;
+    old?.destroy();
     await renderCurrent();
-    scheduleAutosave();
+    try {
+      const hash = await Session.hashBytes(bytes);
+      state.hash = hash;
+      registerTab(hash, state.fileName);
+      await persistDocument(hash, bytes);
+    } catch {
+      /* copie locale facultative */
+    }
+    scheduleAutosave(true);
     toast(t('form.applied'), 'success');
   } catch (err) {
     console.error(err);
