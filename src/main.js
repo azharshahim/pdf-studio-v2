@@ -17,7 +17,7 @@ import { buildBackup, parseBackup, planRestore } from './backup.js';
 import { inkStats, looksBold, otsuThreshold, maskBox, maskIoU, pickFontByWidth } from './scanStyle.js';
 import { CACHET_SHAPES, fileToCachet, renderCachet } from './cachet.js';
 import { applyFilter, buildPdfFromJpegs, canvasToJpeg, fileToCanvas, rotateCanvas } from './photoPdf.js';
-import { CATALOG, BASE_FONTS, GROUP_LABELS, ensureCatalogFont } from './fonts.js';
+import { CATALOG, BASE_FONTS, GROUP_LABELS, ensureCatalogFont, localFontsSupported, localFontsEnabled, loadLocalFonts, restoreLocalFonts } from './fonts.js';
 import { isQuotaError } from './session.js';
 import { describeBrowser, formatDiagnostic } from './diagnostic.js';
 import { buildSampleTextPdf, buildSampleScanPdf } from './samples.js';
@@ -1239,6 +1239,9 @@ function openFontPicker() {
   const baseCss = { Helvetica: 'Helvetica, Arial, sans-serif', Times: '"Times New Roman", Times, serif', Courier: '"Courier New", monospace', 'Noto Sans': '"Noto Sans", sans-serif' };
   let html = `<input class="font-search" id="fontSearch" type="search" placeholder="${t('fonts.search')}" autocomplete="off" />
     <div class="font-list" id="fontList">`;
+  if (localFontsSupported() && !CATALOG.some((c) => c.local)) {
+    html += `<button class="btn font-local" id="fontLocal" type="button">${t('fonts.local')}</button>`;
+  }
   html += `<h4 class="font-group">PDF</h4>${BASE_FONTS.map((f) => row(f.id, f.label, baseCss[f.id])).join('')}`;
   for (const [group, label] of Object.entries(GROUP_LABELS)) {
     const items = CATALOG.filter((c) => c.group === group);
@@ -1249,6 +1252,17 @@ function openFontPicker() {
   const body = openSheet({ title: t('fonts.title'), html, size: 'tall', className: 'font-picker' });
   if (!body) return;
   const list = body.querySelector('#fontList');
+  body.querySelector('#fontLocal')?.addEventListener('click', async () => {
+    try {
+      const n = await loadLocalFonts();
+      populateFontSelect();
+      closeSheet();
+      toast(n ? t('fonts.localOk', { n }) : t('fonts.localNone'));
+      if (n) openFontPicker();
+    } catch (err) {
+      toast(t('fonts.localDenied'));
+    }
+  });
   // Chargement des polices au fil du défilement (aperçu réel de chaque police).
   const io = 'IntersectionObserver' in window
     ? new IntersectionObserver(
@@ -1660,6 +1674,7 @@ function bindFormatbar() {
   });
 
   populateFontSelect();
+  restoreLocalFonts().then((n) => n && populateFontSelect()).catch(() => {});
   bindDock();
   els.btnDocMenu?.addEventListener('click', openDocMenu);
   els.fileChip?.addEventListener('click', () => {
@@ -1817,7 +1832,7 @@ function editSignature(e) {
 /* ─────────────── Style des lignes de scan (police, gras) ─────────────── */
 
 /** Polices sans empattement proposées pour imiter un scan (par ordre de préférence). */
-const SCAN_FONTS = ['Arimo', 'Inter', 'DM Sans', 'Manrope', 'Nunito Sans', 'Roboto', 'Open Sans', 'Lato', 'Source Sans 3', 'Fira Sans', 'PT Sans', 'Work Sans', 'IBM Plex Sans', 'Noto Sans', 'Cabin', 'Barlow'];
+const SCAN_FONTS = ['Arimo', 'Inter', 'DM Sans', 'Manrope', 'Nunito Sans', 'Roboto', 'Open Sans', 'DejaVu Sans', 'Lato', 'Source Sans 3', 'Fira Sans', 'PT Sans', 'Work Sans', 'IBM Plex Sans', 'Noto Sans', 'Cabin', 'Barlow'];
 let scanFontsRequested = false;
 
 function preloadScanFonts() {
@@ -1856,7 +1871,8 @@ function guessScanLineStyle(line) {
   const stats = inkStats(gray, w, h);
   if (!stats) return null;
   const bold = looksBold(stats.stem, stats.inkBottom - stats.inkTop + 1);
-  const ready = SCAN_FONTS.filter((id) => document.fonts?.check?.(`12px "${id}"`));
+  const localScan = CATALOG.filter((c) => c.local && /^(Verdana|Arial|Calibri|Segoe UI|Tahoma|Trebuchet MS)$/.test(c.id)).map((c) => c.id);
+  const ready = [...localScan, ...SCAN_FONTS].filter((id) => document.fonts?.check?.(`12px "${id}"`));
   const size = Math.max(4, line.fontSize || 12);
   const measure = (id, isBold, px, text) => {
     scanMeasureCtx.font = `${isBold ? '700 ' : '400 '}${px}px ${U.cssFontFamily(id)}`;

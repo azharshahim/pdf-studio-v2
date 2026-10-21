@@ -73,9 +73,117 @@ export const GROUP_LABELS = {
   hand: 'Écriture',
   display: 'Titres',
   arabic: 'Arabe',
+  local: 'Polices de ce PC',
 };
 
 const byId = new Map(CATALOG.map((c) => [c.id, c]));
+
+/* ---------- Polices installées sur l'appareil (Windows, Acrobat…) ----------
+ * Jamais copiées dans l'application : on les lit à la demande via l'API
+ * « Local Font Access » (Chrome / Edge, après autorisation de l'utilisateur).
+ * Elles servent à l'aperçu, aux mesures et à l'export sur cet appareil seulement. */
+const LOCAL_KEY = 'studio-pdf-local-fonts';
+const LOCAL_WANTED =
+  /^(Verdana|Calibri|Segoe UI|Tahoma|Trebuchet MS|Georgia|Cambria|Consolas|Arial|Times New Roman|Courier New|Century Gothic|Candara|Corbel|Constantia|Franklin Gothic|Palatino Linotype|Garamond|Book Antiqua|Lucida Sans|Microsoft Sans Serif|Myriad|Minion|Adobe|Calisto|Gill Sans|Bookman|Rockwell|Comic Sans)/i;
+/** @type {Map<string, Record<string, any>>} id → { n, b, i, bi } (objets FontData) */
+const localFaces = new Map();
+
+export function localFontsSupported() {
+  return typeof window !== 'undefined' && typeof window.queryLocalFonts === 'function';
+}
+export function localFontsEnabled() {
+  try {
+    return localStorage.getItem(LOCAL_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+export function localFontIds() {
+  return [...localFaces.keys()];
+}
+
+function variantKey(style = '') {
+  const st = style.toLowerCase();
+  const bold = /bold|black|heavy/.test(st) && !/semi|demi/.test(st);
+  const italic = /italic|oblique/.test(st);
+  if (/^(regular|normal|book|roman)$/.test(st)) return 'n';
+  if (/semi|demi|light|thin|narrow|condensed|medium|extra|ultra/.test(st)) return null;
+  return bold && italic ? 'bi' : bold ? 'b' : italic ? 'i' : null;
+}
+
+/**
+ * Lit les polices de l'appareil (geste de l'utilisateur requis la première fois)
+ * et les ajoute au catalogue, groupe « local ». Renvoie le nombre de familles.
+ */
+export async function loadLocalFonts({ remember = true } = {}) {
+  if (!localFontsSupported()) return 0;
+  const list = await window.queryLocalFonts();
+  localFaces.clear();
+  for (const fd of list) {
+    if (!LOCAL_WANTED.test(fd.family)) continue;
+    const key = variantKey(fd.style);
+    if (!key) continue;
+    if (!localFaces.has(fd.family)) localFaces.set(fd.family, {});
+    localFaces.get(fd.family)[key] ||= fd;
+  }
+  for (const [family, faces] of [...localFaces]) {
+    if (!faces.n || CATALOG.some((c) => c.id === family && !c.local)) {
+      localFaces.delete(family);
+      continue;
+    }
+    if (byId.has(family)) continue;
+    const mono = /consolas|courier|lucida console/i.test(family);
+    const serif = /times|georgia|cambria|constantia|palatino|garamond|book antiqua|bookman|minion|calisto/i.test(family);
+    const entry = {
+      id: family,
+      label: family,
+      css: `"${family}", ${mono ? 'monospace' : serif ? 'serif' : 'sans-serif'}`,
+      group: 'local',
+      local: true,
+      files: {},
+      aliases: new RegExp(`^${family.replace(/[^a-z0-9]+/gi, '[ -]?')}`, 'i'),
+    };
+    CATALOG.push(entry);
+    byId.set(family, entry);
+  }
+  if (remember) {
+    try {
+      localStorage.setItem(LOCAL_KEY, '1');
+    } catch {
+      /* ignoré */
+    }
+  }
+  return localFaces.size;
+}
+
+/** Octets (TrueType/OpenType) d'une police locale, pour l'export. */
+export async function localFontBytes(id, bold, italic) {
+  const faces = localFaces.get(id);
+  if (!faces) return null;
+  const want = bold && italic ? 'bi' : bold ? 'b' : italic ? 'i' : 'n';
+  const chain = { bi: ['bi', 'b', 'i', 'n'], b: ['b', 'n'], i: ['i', 'n'], n: ['n'] }[want];
+  for (const k of chain) {
+    if (!faces[k]) continue;
+    const blob = await faces[k].blob();
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    // Collection TrueType (.ttc) : non prise en charge par l'embarquement.
+    if (String.fromCharCode(...buf.slice(0, 4)) === 'ttcf') return null;
+    return buf;
+  }
+  return null;
+}
+
+/** Redemande silencieusement les polices si l'autorisation a déjà été donnée. */
+export async function restoreLocalFonts() {
+  if (!localFontsSupported() || !localFontsEnabled()) return 0;
+  try {
+    const perm = await navigator.permissions?.query({ name: 'local-fonts' });
+    if (perm && perm.state !== 'granted') return 0;
+    return await loadLocalFonts({ remember: false });
+  } catch {
+    return 0;
+  }
+}
 
 export function catalogFont(id) {
   return byId.get(id) || null;
@@ -123,6 +231,7 @@ const loaded = new Map();
  */
 export function ensureCatalogFont(id) {
   const font = byId.get(id);
+  if (font?.local) return Promise.resolve(true); // déjà installée sur l'appareil
   if (!font || typeof FontFace === 'undefined' || typeof document === 'undefined') {
     return Promise.resolve(false);
   }

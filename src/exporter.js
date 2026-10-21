@@ -26,7 +26,7 @@ import { ArabicShaper } from 'arabic-persian-reshaper';
 import bidiFactory from 'bidi-js';
 import { assetUrl, clamp, hexToRgb01 } from './utils.js';
 import { removeTextInBBoxes } from './textRemoval.js';
-import { catalogFont, catalogFile } from './fonts.js';
+import { catalogFont, catalogFile, localFontBytes } from './fonts.js';
 
 const bidi = bidiFactory();
 
@@ -342,6 +342,24 @@ export async function exportPdf({
     if (run.arabic) {
       const file = fontFileFor('arabic', bold, false);
       return { font: await getUnicodeFont('arabic', bold, false), unicode: true, file };
+    }
+    if (catalogFont(family)?.local) {
+      const key = `local:${family}:${bold ? 'b' : ''}${italic ? 'i' : ''}`;
+      try {
+        if (!catalogCache.has(key)) {
+          const bytes = await localFontBytes(family, bold, italic);
+          catalogCache.set(key, bytes ? await pdfDoc.embedFont(bytes, { subset: true }) : null);
+        }
+        const font = catalogCache.get(key);
+        if (font && [...String(run.text)].every((ch) => font.getCharacterSet().includes(ch.codePointAt(0)))) {
+          return { font, unicode: true, file: key };
+        }
+      } catch (err) {
+        console.warn('[export] police locale inutilisable', family, err);
+        catalogCache.set(key, null);
+      }
+      const file = fontFileFor('sans', bold, italic);
+      return { font: await getUnicodeFont('sans', bold, italic), unicode: true, file };
     }
     const catFile = catalogFont(family) ? catalogFile(family, bold, italic) : null;
     if (catFile) {

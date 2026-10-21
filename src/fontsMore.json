@@ -1165,5 +1165,17 @@
    "n": "changa-n.woff2",
    "b": "changa-b.woff2"
   }
+ },
+ {
+  "id": "DejaVu Sans",
+  "label": "DejaVu Sans (≈ Verdana)",
+  "group": "sans",
+  "slug": "dejavu-sans",
+  "files": {
+   "n": "dejavu-sans-n.woff2",
+   "b": "dejavu-sans-b.woff2",
+   "i": "dejavu-sans-i.woff2",
+   "bi": "dejavu-sans-bi.woff2"
+  }
  }
 ]
