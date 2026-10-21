@@ -1,6 +1,7 @@
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import { assetUrl } from './utils.js';
+import { matchCatalogByName } from './fonts.js';
 
 // Le build `legacy` de pdf.js inclut les polyfills (Promise.try,
 // Map#getOrInsertComputed…) nécessaires aux navigateurs un peu anciens.
@@ -33,7 +34,9 @@ export function fontTraits(font) {
       ? font.italic
       : /italic|oblique/.test(lower);
   let family = 'Helvetica';
-  if (/courier|mono|consolas|menlo/.test(lower)) family = 'Courier';
+  const catalog = matchCatalogByName(name);
+  if (catalog) family = catalog;
+  else if (/courier|mono|consolas|menlo/.test(lower)) family = 'Courier';
   else if (/times|georgia|garamond|palatino|cambria|serif|bookman|book/.test(lower) && !/sans/.test(lower)) {
     family = 'Times';
   }

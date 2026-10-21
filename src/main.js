@@ -11,6 +11,7 @@ import { createUi } from './ui.js';
 import { createInlineEditor } from './inlineEditor.js';
 import { estimateOffsetFromFraction, offsetAtPoint } from './caretPoint.js';
 import * as Session from './session.js';
+import { CATALOG, BASE_FONTS, GROUP_LABELS, ensureCatalogFont } from './fonts.js';
 import { isQuotaError } from './session.js';
 import { describeBrowser, formatDiagnostic } from './diagnostic.js';
 import { buildSampleTextPdf, buildSampleScanPdf } from './samples.js';
@@ -712,6 +713,20 @@ function clearOverlay() {
   }
 }
 
+const fontsRendered = new Set();
+
+/** Remplit la liste des polices : polices de base, puis le catalogue par famille. */
+function populateFontSelect() {
+  if (!els.fmtFont) return;
+  const opt = (id, label) => `<option value="${U.escapeHtml(id)}">${U.escapeHtml(label)}</option>`;
+  let html = `<optgroup label="PDF">${BASE_FONTS.map((f) => opt(f.id, f.label)).join('')}</optgroup>`;
+  for (const [group, label] of Object.entries(GROUP_LABELS)) {
+    const items = CATALOG.filter((c) => c.group === group);
+    if (items.length) html += `<optgroup label="${label}">${items.map((c) => opt(c.id, c.label)).join('')}</optgroup>`;
+  }
+  els.fmtFont.innerHTML = html;
+}
+
 function renderOverlay() {
   if (!state.engine || !state.viewport) return;
   clearOverlay();
@@ -770,6 +785,7 @@ function renderOverlay() {
     d.style.padding = `${padY}px ${padX}px`;
     d.style.background = e.bg && e.bg !== 'none' ? e.bg : 'transparent';
 
+    if (e.font) ensureCatalogFont(e.font).then((ok) => ok && !fontsRendered.has(e.font) && (fontsRendered.add(e.font), renderOverlay()));
     const fontFamily = U.cssFontFamily(e.font);
     const basePx = Math.max(1, (e.size || 10) * scale);
     let fontSizePx = basePx;
@@ -1060,9 +1076,16 @@ function bindFormatbar() {
     });
   });
 
+  populateFontSelect();
   els.fmtFont?.addEventListener('change', () => {
-    applyFormat((e) => {
-      e.font = els.fmtFont.value;
+    const value = els.fmtFont.value;
+    // Charge la police avant de l'appliquer : l'aperçu et les mesures doivent
+    // correspondre à l'export.
+    ensureCatalogFont(value).finally(() => {
+      applyFormat((e) => {
+        e.font = value;
+      });
+      renderOverlay();
     });
   });
 

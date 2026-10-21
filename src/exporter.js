@@ -17,6 +17,7 @@ import { ArabicShaper } from 'arabic-persian-reshaper';
 import bidiFactory from 'bidi-js';
 import { assetUrl, clamp, hexToRgb01 } from './utils.js';
 import { removeTextInBBoxes } from './textRemoval.js';
+import { catalogFont, catalogFile } from './fonts.js';
 
 const bidi = bidiFactory();
 
@@ -307,6 +308,7 @@ export async function exportPdf({
 
   const standardCache = new Map();
   const unicodeCache = new Map();
+  const catalogCache = new Map();
   const missingChars = new Set();
 
   const getStandardFont = async (family, bold, italic) => {
@@ -332,7 +334,18 @@ export async function exportPdf({
       const file = fontFileFor('arabic', bold, false);
       return { font: await getUnicodeFont('arabic', bold, false), unicode: true, file };
     }
-    if (family === 'Noto Sans' || !isWinAnsiText(run.text)) {
+    const catFile = catalogFont(family) ? catalogFile(family, bold, italic) : null;
+    if (catFile) {
+      if (!catalogCache.has(catFile)) {
+        const bytes = await fetchFontBytes(catFile);
+        catalogCache.set(catFile, await pdfDoc.embedFont(bytes, { subset: true }));
+      }
+      const font = catalogCache.get(catFile);
+      // Caractère absent de la police (ex. alphabet non latin) : repli sur Noto Sans.
+      const covered = [...String(run.text)].every((ch) => font.getCharacterSet().includes(ch.codePointAt(0)));
+      if (covered) return { font, unicode: true, file: catFile };
+    }
+    if (family === 'Noto Sans' || catFile || !isWinAnsiText(run.text)) {
       const file = fontFileFor('sans', bold, italic);
       return { font: await getUnicodeFont('sans', bold, italic), unicode: true, file };
     }

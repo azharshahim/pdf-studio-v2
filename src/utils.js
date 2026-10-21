@@ -83,7 +83,15 @@ export function formatBytes(n) {
   return `${v.toFixed(digits).replace('.', ',')} ${units[i]}`;
 }
 
+let extraFontCss = () => null;
+/** Permet au catalogue de polices de fournir sa famille CSS (évite un import circulaire). */
+export function setFontCssResolver(fn) {
+  extraFontCss = typeof fn === 'function' ? fn : () => null;
+}
+
 export function cssFontFamily(font) {
+  const extra = extraFontCss(font);
+  if (extra) return extra;
   if (font === 'Times') return '"Times New Roman", Times, serif';
   if (font === 'Courier') return '"Courier New", Courier, monospace';
   if (font === 'Noto Sans') return '"Noto Sans", "Noto Naskh Arabic", "Segoe UI", system-ui, sans-serif';

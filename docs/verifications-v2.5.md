@@ -181,3 +181,10 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - Corrigé : `onblocked`/`onversionchange`, délais (8 s ouverture, 20 s transaction), erreur `StorageError`, écran Fichiers avec Réessayer / Réinitialiser, enregistrement non bloquant, garde-fou de 120 s sur l'écran de chargement, stockage persistant, limite de 10 documents supprimée.
 - Vérifié dans Chromium : base v1 gardée ouverte → l'enregistrement se termine en < 1 s ; Fichiers affiche l'erreur après 8 s puis fonctionne après fermeture de l'autre fenêtre. 99 tests unitaires et 48 tests Chromium/Samsung verts.
 - Non testé : appareil Samsung réel, Firefox/WebKit (profils indisponibles ici).
+
+## Polices (v2.6, en cours)
+
+- 12 familles libres (SIL OFL) intégrées, avec gras / italique : Arimo, Roboto, Open Sans, Lato, Montserrat, Tinos, Merriweather, Playfair Display, Cousine, Roboto Mono, Courier Prime, Dancing Script (1,1 Mo, hors ligne).
+- Aperçu à l'écran et PDF exporté utilisent la même police ; repli sur Noto Sans pour un caractère absent (arabe, etc.).
+- Un PDF texte dont la police est dans le catalogue (ex. Roboto) est reconnu et réédité avec cette police.
+- Non fait : choix automatique de la police d'un **scan** (le texte n'est qu'une image) ; la police par défaut d'une ligne OCR reste Helvetica, à changer dans la liste.
