@@ -348,6 +348,7 @@ const DICT = {
     'dock.form': "Formulaire",
     'dock.pages': "Pages",
     'dock.ocr': "OCR",
+    'dock.photos': "Photos",
     'dock.more': "Plus",
     'dock.editHint': "Touchez un texte du document pour le modifier.",
     'common.back': "Retour",

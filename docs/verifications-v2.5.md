@@ -262,3 +262,8 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - Surligner, Commenter et Tracer disponibles en lecture seule (barre : Remplir et signer, Surligner, Commenter, Tracer, Rechercher, Modifier).
 - Ordinateur : la barre devient une palette verticale flottante à gauche de la page (comme Acrobat) ; en lecture, plus de bouton « + Texte » ni d'astuce de modification.
 - Suites : vitest 138 OK ; Playwright Chromium + Samsung 122 OK.
+
+## Palette d'outils sans recouvrement (v2.8)
+
+- Ordinateur : la palette est placée dans une colonne réservée à gauche de la page (la page est décalée, jamais recouverte), compacte et défilante si l'écran est bas.
+- Modification : bouton « Photos » (PDF depuis la galerie ou l'appareil photo) ajouté à la barre.

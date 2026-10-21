@@ -442,6 +442,7 @@ async function renderCurrent() {
   const page = await state.engine.getPage(n);
   if (token !== state.renderToken) return;
 
+  positionDock();
   const base = page.getViewport({ scale: 1 });
   const narrow = window.matchMedia('(max-width: 900px)').matches;
   const gutter = narrow ? 16 : 56;
@@ -781,6 +782,9 @@ function dockAction(id) {
     case 'watermark':
       openWatermarkSheet();
       break;
+    case 'photos':
+      openPhotosTool();
+      break;
     case 'text':
       startAddText();
       break;
@@ -814,9 +818,23 @@ function dockAction(id) {
   updateDock();
 }
 
+/** Place la palette d'outils (ordinateur) dans la colonne réservée, à gauche de la page. */
+function positionDock() {
+  const dock = els.docDock;
+  const sc = els.canvasScroll;
+  if (!dock || !sc || window.innerWidth < 901) return;
+  const r = sc.getBoundingClientRect();
+  if (!r.width) return;
+  dock.style.setProperty('--dock-left', `${Math.round(r.left + 10)}px`);
+  dock.style.setProperty('--dock-top', `${Math.round(r.top + 10)}px`);
+  dock.style.setProperty('--dock-max', `${Math.max(160, Math.round(r.height - 20))}px`);
+}
+window.addEventListener('resize', () => positionDock());
+
 function updateDock() {
   const dock = els.docDock;
   if (!dock) return;
+  positionDock();
   const form = document.getElementById('dockForm');
   if (form) form.hidden = !state.formFields?.length;
   dock.querySelectorAll('[data-dock]').forEach((b) => {

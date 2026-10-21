@@ -5087,28 +5087,43 @@ body.reading .search-replace {
   text-align: center;
 }
 
-/* Ordinateur : la barre d'outils devient une palette verticale flottante, comme dans Acrobat. */
+/* Ordinateur : la barre d'outils devient une palette verticale à gauche de la page (comme Acrobat),
+   dans une colonne réservée : elle ne recouvre jamais le document. */
 @media (min-width: 901px) {
   body[data-route='doc']:not(.editing) .docdock {
     position: fixed;
-    left: 252px;
-    top: 150px;
+    left: var(--dock-left, 300px);
+    top: var(--dock-top, 150px);
+    max-height: var(--dock-max, 70vh);
     z-index: 60;
     flex-direction: column;
     height: auto;
     width: 76px;
     padding: 6px 4px;
     gap: 2px;
-    overflow: visible;
+    overflow-x: hidden;
+    overflow-y: auto;
     border: 1px solid var(--line);
     border-radius: 16px;
     box-shadow: var(--shadow-lg);
   }
   body[data-route='doc']:not(.editing) .dockitem {
     min-width: 0;
-    min-height: 58px;
+    min-height: 46px;
     max-width: none;
     flex: 0 0 auto;
+    gap: 1px;
+    font-size: 10px;
+  }
+  body[data-route='doc']:not(.editing) .dockitem svg {
+    width: 20px;
+    height: 20px;
+  }
+  body[data-route='doc']:not(.editing) .docdock {
+    justify-content: flex-start !important;
+  }
+  body[data-route='doc']:not(.annotating):not(.form-open) .canvas-scroll {
+    padding-left: 100px;
   }
   body.reading:not(.fillsign) .docdock {
     justify-content: flex-start;

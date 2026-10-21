@@ -76,6 +76,17 @@ test.describe('Lecture seule et démarrage', () => {
     expect(await page.evaluate(() => document.body.classList.contains('reading'))).toBe(true);
   });
 
+  test('modification : « Photos » crée un PDF depuis la galerie ou l’appareil photo', async ({ page }) => {
+    await init(page);
+    await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
+    await page.locator('#fileInput').setInputFiles({ name: 'ph.pdf', mimeType: 'application/pdf', buffer: await simplePdf() });
+    const dock = page.locator('#docDock');
+    await dock.locator('[data-dock=edit]').tap();
+    await dock.locator('[data-dock=photos]').evaluate((b) => b.scrollIntoView({ inline: 'center' }));
+    await dock.locator('[data-dock=photos]').tap();
+    await expect(page.locator('#photoCamera')).toBeVisible({ timeout: 15_000 });
+  });
+
   test('Remplir et signer : outils de saisie, renommer le fichier, retour à la lecture', async ({ page }) => {
     await init(page);
     await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
