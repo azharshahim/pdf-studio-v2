@@ -116,6 +116,10 @@ function expectButtonsUsable(state) {
 }
 
 test.describe('États grisés', () => {
+  test.beforeEach(({ browserName }) => {
+    test.slow(browserName === 'webkit', 'Rendu et initialisation OCR plus lents sous WebKit en CI');
+  });
+
   test('valider une modification ne grise ni la ligne ni les boutons', async ({ page }) => {
     await openDemo(page, '#homeDemoText', '.line-block');
     await tapBlock(page, '.line-block', 2);

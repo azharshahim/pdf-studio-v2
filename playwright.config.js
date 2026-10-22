@@ -99,6 +99,8 @@ export default defineConfig({
     },
     {
       name: 'webkit',
+      timeout: 240_000,
+      expect: { timeout: 25_000 },
       use: {
         ...devices['iPhone 14'],
         ...MOBILE,

@@ -9039,6 +9039,12 @@ window.__pdfStudio = {
   },
 
   setOcrLines(pageNo, lines) {
+    // Si un OCR automatique avait démarré en arrière-plan, on l'arrête pour
+    // qu'il ne sature pas le moteur (WebKit CI) ni n'écrase les lignes injectées.
+    if (state.ocr.running) {
+      state.ocr.cancel = true;
+      terminateOcr().catch(() => {});
+    }
     const pd = getPageData(pageNo);
     const normalized = (lines || []).map((line, i) => ({
       id: line.id || `p${pageNo}-o${i}`,
