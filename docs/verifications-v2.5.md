@@ -301,3 +301,9 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - Bloc sélectionné : cadre bleu, poignées rondes aux 4 coins (redimensionner, le texte passe à la ligne), bords du cadre pour le déplacer.
 - L'emplacement d'origine reste effacé (écran et export) ; export avec retour à la ligne dans la largeur du cadre.
 - Tests : vitest 150, Playwright chromium 64 (dont déplacement/redimensionnement sur grand écran).
+
+### v2.14 — fiabilité avant hébergement
+- Compresser / Protéger (filigrane) / Convertir en images partent du document modifié (texte, annotations).
+- Les anciennes lectures OCR (version < 3) sont refaites à l'ouverture, sauf si des modifications s'appuient dessus.
+- Annuler / Rétablir : un seul historique, dans l'ordre réel (texte et annotations).
+- Tests : vitest 150, Playwright chromium 66.

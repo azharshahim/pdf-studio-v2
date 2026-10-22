@@ -304,15 +304,67 @@ const markup = createMarkup({
   onPickNote: (obj) => editNote(obj),
 });
 
-/** Historique dédié aux annotations (annulable indépendamment du texte). */
+/** Historique dédié aux annotations ; l'ordre réel des actions texte/annotations est dans actionLog. */
 const markupHistory = { stack: [], index: -1 };
 
-function pushMarkupHistory() {
+/** Ordre des actions (« text » / « markup ») : Annuler défait toujours la dernière, quelle qu'elle soit. */
+let actionLog = [];
+let redoLog = [];
+function noteAction(kind) {
+  actionLog.push(kind);
+  if (actionLog.length > 160) actionLog.shift();
+  redoLog = [];
+}
+function pushTextHistory(snapshot) {
+  state.history.push(snapshot);
+  noteAction('text');
+}
+function clearHistories() {
+  state.history.clear();
+  actionLog = [];
+  redoLog = [];
+}
+
+function undoEdits() {
+  if (!state.engine) return;
+  const kind = actionLog.pop();
+  if (!kind) {
+    toast(t('msg.nothingUndo'), 'info', { duration: 1800 });
+    return;
+  }
+  redoLog.push(kind);
+  if (kind === 'markup') {
+    undoMarkup();
+    toast(t('msg.undone'), 'info', { duration: 1800 });
+  } else undoText();
+  updateHistoryButtons();
+}
+
+function redoEdits() {
+  if (!state.engine) return;
+  const kind = redoLog.pop();
+  if (!kind) {
+    toast(t('msg.nothingRedo'), 'info', { duration: 1800 });
+    return;
+  }
+  actionLog.push(kind);
+  if (kind === 'markup') {
+    redoMarkup();
+    toast(t('msg.redone'), 'info', { duration: 1800 });
+  } else redoText();
+  updateHistoryButtons();
+}
+
+function pushMarkupHistory({ silent = false } = {}) {
   const snapshot = JSON.stringify(markup.objects);
   if (markupHistory.stack[markupHistory.index] === snapshot) return;
   markupHistory.stack = markupHistory.stack.slice(0, markupHistory.index + 1);
   markupHistory.stack.push(snapshot);
   markupHistory.index = markupHistory.stack.length - 1;
+  if (!silent) {
+    actionLog.push('markup');
+    redoLog = [];
+  }
   if (markupHistory.stack.length > 80) {
     markupHistory.stack.shift();
     markupHistory.index--;
@@ -338,7 +390,8 @@ function redoMarkup() {
 
 function updateAnnoUndo() {
   const btn = document.getElementById('annoUndo');
-  if (btn) btn.disabled = markupHistory.index <= 0;
+  if (btn) btn.disabled = actionLog.length === 0;
+  updateHistoryButtons();
 }
 
 /* ─────────────────────────── UI helpers ─────────────────────────── */
@@ -938,6 +991,21 @@ async function buildCurrentPdf() {
     objects: markup.objects,
   });
   return new Blob([result.bytes], { type: 'application/pdf' });
+}
+
+/**
+ * Document tel qu'il est maintenant (texte modifié, annotations) : sert à
+ * Compresser, Protéger et Convertir pour que rien ne se perde. Sans
+ * modification, on réutilise directement le document ouvert.
+ */
+async function currentDocumentSource() {
+  const dirty = state.edits.length > 0 || (markup.objects?.length || 0) > 0;
+  if (!dirty) return { engine: state.engine, bytes: state.bytes, dispose() {} };
+  const blob = await buildCurrentPdf();
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const engine = new PdfEngine(bytes.slice());
+  await engine.load();
+  return { engine, bytes, dispose: () => engine.destroy() };
 }
 
 function docFileName(suffix = '') {
@@ -1902,8 +1970,8 @@ function updateEditbarCount() {
 }
 
 function updateHistoryButtons() {
-  const canUndo = state.history.canUndo();
-  const canRedo = state.history.canRedo();
+  const canUndo = actionLog.length > 0;
+  const canRedo = redoLog.length > 0;
   if (els.btnUndo) els.btnUndo.disabled = !canUndo;
   if (els.btnRedo) els.btnRedo.disabled = !canRedo;
   if (els.editUndo) els.editUndo.disabled = !canUndo;
@@ -2275,7 +2343,7 @@ function closeActive({ restore = true } = {}) {
   } else if (!hasText && a.isNew) {
     state.edits = state.edits.filter((x) => x.id !== a.edit.id);
   } else if (changed) {
-    state.history.push(a.before);
+    pushTextHistory(a.before);
   }
 
   state.active = null;
@@ -2295,7 +2363,7 @@ function deleteActiveEdit() {
   if (!a) return;
   const removed = a.edit;
   if (!a.isNew) {
-    state.history.push(a.before);
+    pushTextHistory(a.before);
     updateHistoryButtons();
   }
   state.edits = state.edits.filter((x) => x.id !== removed.id);
@@ -2334,7 +2402,7 @@ function duplicateActiveEdit() {
   copy.bbox = { ...copy.bbox, x: copy.bbox.x + 14, y: copy.bbox.y - 14 };
   copy.baseline = (copy.baseline ?? copy.bbox.y) - 14;
   copy.bg = null;
-  state.history.push(U.clone(state.edits));
+  pushTextHistory(U.clone(state.edits));
   state.edits.push(copy);
   closeActive();
   selectEdit(copy.id);
@@ -2405,7 +2473,7 @@ function applyEditsSnapshot(snapshot, { autosave = true } = {}) {
   if (autosave) scheduleAutosave();
 }
 
-function undoEdits() {
+function undoText() {
   if (!state.engine) return;
   closeActive();
   const previous = state.history.undo(state.edits);
@@ -2417,7 +2485,7 @@ function undoEdits() {
   toast(t('msg.undone'), 'info', { duration: 1800 });
 }
 
-function redoEdits() {
+function redoText() {
   if (!state.engine) return;
   closeActive();
   const next = state.history.redo(state.edits);
@@ -2816,11 +2884,15 @@ function applySessionData(saved) {
     }
     for (const entry of saved.ocrPages || []) {
       if (!entry?.ocr || entry.pageNo < 1 || entry.pageNo > state.numPages) continue;
+      // Lecture faite par une ancienne version : on la refait (sauf si des
+      // modifications s'appuient déjà sur ses blocs).
+      const usedByEdit = (saved.edits || []).some((e) => e && e.page === entry.pageNo && e.source === 'ocr');
+      if ((entry.ocr.v || 0) < OCR_VERSION && !usedByEdit) continue;
       const pd = getPageData(entry.pageNo);
       pd.ocr = entry.ocr;
       pd.ocrStatus = 'done';
     }
-    state.history.clear();
+    clearHistories();
     updateHistoryButtons();
     renderOverlay();
     renderEditList();
@@ -2969,7 +3041,7 @@ function deleteEditById(id) {
     inline.close();
     hideEditingUi();
   }
-  state.history.push(U.clone(state.edits));
+  pushTextHistory(U.clone(state.edits));
   updateHistoryButtons();
   state.edits = state.edits.filter((e) => e.id !== id);
   renderOverlay();
@@ -2991,7 +3063,7 @@ function deleteEditById(id) {
 function clearAllEdits() {
   if (!state.edits.length) return;
   const snapshot = [...state.edits];
-  state.history.push(U.clone(state.edits));
+  pushTextHistory(U.clone(state.edits));
   updateHistoryButtons();
   state.active = null;
   inline.close();
@@ -3178,6 +3250,9 @@ function markWordWeights(canvas, words) {
   }
 }
 
+/** Incrémenté quand la lecture OCR s'améliore : les anciennes lectures sont refaites. */
+const OCR_VERSION = 3;
+
 async function runOcrOnPage(n, langs, onProgress) {
   const page = await state.engine.getPage(n);
   const base = page.getViewport({ scale: 1 });
@@ -3237,6 +3312,7 @@ async function runOcrOnPage(n, langs, onProgress) {
     words,
     langs,
     at: Date.now(),
+    v: OCR_VERSION,
   };
 }
 
@@ -3606,7 +3682,7 @@ async function replaceMatches(all) {
     count += all ? countOccurrences(source, query) : 1;
   }
   if (!count) return;
-  state.history.push(before);
+  pushTextHistory(before);
   renderOverlay();
   renderEditList();
   updateExportUi();
@@ -3726,7 +3802,7 @@ async function openPdfBytes(bytes, name, password = '', options = {}) {
     state.ensuringAll = null;
     state.ocr = { running: false, cancel: false };
     state.hash = null;
-    state.history.clear();
+    clearHistories();
     updateHistoryButtons();
     state.formFields = [];
     state.formValues = {};
@@ -4467,7 +4543,7 @@ function buildAnnoBar() {
       if (kind === 'stamp') return openStampTool();
     });
   });
-  document.getElementById('annoUndo')?.addEventListener('click', undoMarkup);
+  document.getElementById('annoUndo')?.addEventListener('click', undoEdits);
   document.getElementById('annoClear')?.addEventListener('click', () => {
     markup.clearPage();
     toast(t('anno.cleared'), 'info', { duration: 2200 });
@@ -4538,7 +4614,7 @@ function openAnnotate() {
   els.annobar.hidden = false;
   document.body.classList.add('annotating');
   activateAnnoTool('highlight');
-  if (!markupHistory.stack.length) pushMarkupHistory();
+  if (!markupHistory.stack.length) pushMarkupHistory({ silent: true });
 }
 
 function closeAnnotate() {
@@ -5489,27 +5565,30 @@ async function openCompressTool() {
 
 async function compressDocument(level) {
   pushLoading(t('compress.working'));
+  let src = null;
   try {
     const { PDFDocument } = await import('pdf-lib');
+    src = await currentDocumentSource();
     const doc = await PDFDocument.create();
     for (let n = 1; n <= state.numPages; n++) {
       const canvas = document.createElement('canvas');
-      await state.engine.renderToCanvas(n, canvas, level.scale);
+      await src.engine.renderToCanvas(n, canvas, level.scale);
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', level.quality));
       const bytes = new Uint8Array(await blob.arrayBuffer());
       const img = await doc.embedJpg(bytes);
-      const size = await state.engine.getPageSize(n);
+      const size = await src.engine.getPageSize(n);
       const page = doc.addPage([size.width, size.height]);
       page.drawImage(img, { x: 0, y: 0, width: size.width, height: size.height });
     }
     const out = await doc.save({ useObjectStreams: true });
     const name = `${U.baseName(state.fileName)}-compresse.pdf`;
     U.downloadBlob(new Blob([out], { type: 'application/pdf' }), name);
-    toast(t('compress.done', { before: U.formatBytes(state.bytes.byteLength), after: U.formatBytes(out.byteLength) }), 'success', { duration: 6000 });
+    toast(t('compress.done', { before: U.formatBytes(src.bytes.byteLength), after: U.formatBytes(out.byteLength) }), 'success', { duration: 6000 });
   } catch (err) {
     console.error(err);
     toast(t('msg.opFailed', { msg: err?.message || err }), 'error');
   } finally {
+    src?.dispose();
     popLoading();
   }
 }
@@ -5567,7 +5646,9 @@ async function applyWatermark(text, opacity) {
   pushLoading(t('protect.working'));
   try {
     const { PDFDocument, StandardFonts, rgb, degrees } = await import('pdf-lib');
-    const doc = await PDFDocument.load(state.bytes, { ignoreEncryption: true });
+    const src = await currentDocumentSource();
+    src.dispose();
+    const doc = await PDFDocument.load(src.bytes, { ignoreEncryption: true });
     const font = await doc.embedFont(StandardFonts.HelveticaBold);
     for (const page of doc.getPages()) {
       const { width, height } = page.getSize();
@@ -5621,10 +5702,12 @@ function openConvertTool() {
       if (kind === 'txt') return handleExportText();
       if (kind === 'pdf') return downloadModifiedPdf();
       pushLoading(t('convert.working'));
+      let src = null;
       try {
+        src = await currentDocumentSource();
         for (let n = 1; n <= state.numPages; n++) {
           const canvas = document.createElement('canvas');
-          await state.engine.renderToCanvas(n, canvas, 2);
+          await src.engine.renderToCanvas(n, canvas, 2);
           const type = kind === 'jpg' ? 'image/jpeg' : 'image/png';
           const blob = await new Promise((resolve) => canvas.toBlob(resolve, type, 0.92));
           U.downloadBlob(blob, `${U.baseName(state.fileName)}-page-${n}.${kind}`);
@@ -5634,6 +5717,7 @@ function openConvertTool() {
         console.error(err);
         toast(t('msg.opFailed', { msg: err?.message || err }), 'error');
       } finally {
+        src?.dispose();
         popLoading();
       }
     });
@@ -6893,6 +6977,14 @@ init();
 window.__pdfStudio = {
   state,
   markup,
+  /** Tests : ajoute une annotation comme le ferait un geste (avec historique). */
+  addTestMarkup: (obj) => {
+    if (!markupHistory.stack.length) pushMarkupHistory({ silent: true });
+    markup.setObjects([...markup.objects, obj]);
+    pushMarkupHistory();
+  },
+  /** Tests : document tel qu'utilisé par Compresser / Protéger / Convertir. */
+  currentDocumentSource,
   openPdfBytes,
   getPageText,
   exportPdf: (...args) => import('./exporter.js').then((m) => m.exportPdf(...args)),
