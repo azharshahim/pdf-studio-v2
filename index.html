@@ -311,7 +311,8 @@
 
                   <div class="btn-row">
                     <button class="btn primary" id="btnOcrPage"><span data-icon="scan"></span><span data-i18n="ocr.page">Cette page</span></button>
-                    <button class="btn soft" id="btnOcrAll"><span data-i18n="ocr.all">Tout le PDF</span></button>
+                    <button class="btn soft" id="btnOcrAll"><span data-icon="scan"></span><span data-i18n="ocr.all">Tout le PDF</span></button>
+                    <button class="btn ghost small" id="btnCleanFromOcr" type="button"><span data-icon="sparkle"></span><span data-i18n="tool.clean">Nettoyer la feuille</span></button>
                   </div>
 
                   <div class="progress-box" id="ocrProgress" hidden>
@@ -335,6 +336,7 @@
                     <div class="btn-row">
                       <button class="btn ghost small" id="btnCopyOcr"><span data-icon="copy"></span><span data-i18n="ocr.copy">Copier</span></button>
                       <button class="btn ghost small" id="btnOcrFix"><span data-icon="edit"></span><span data-i18n="ocr.fix">Corriger sur la page</span></button>
+                      <button class="btn soft small" id="btnCleanAfterOcr" type="button"><span data-icon="sparkle"></span><span data-i18n="tool.clean">Nettoyer la feuille</span></button>
                     </div>
                   </div>
                   <p class="muted small" id="ocrNoResult" data-i18n="ocr.none">Aucune page analysée pour l'instant. Lancez l'OCR pour voir le texte reconnu apparaître ici.</p>
@@ -468,6 +470,7 @@
             <h3 class="ep-sec" data-i18n="ep.add">Ajouter un contenu</h3>
             <div class="ep-row">
               <button type="button" class="btn soft small" id="epAddText"><span data-icon="text"></span><span data-i18n="ep.text">Texte</span></button>
+              <button type="button" class="btn soft small" id="epCleanPage"><span data-icon="sparkle"></span><span data-i18n="tool.clean">Nettoyer la feuille</span></button>
             </div>
           </div>
         </aside>
@@ -566,6 +569,7 @@
         <button class="dockitem" type="button" data-dock="draw" data-modes="er" aria-label="Tracer" title="Tracer"><span data-icon="pen"></span><span data-i18n="dock.draw">Tracer</span></button>
         <button class="dockitem" type="button" data-dock="sign" data-modes="ef" aria-label="Signer" title="Signer"><span data-icon="signature"></span><span data-i18n="dock.sign">Signer</span></button>
         <button class="dockitem" type="button" data-dock="stamp" data-modes="ef" aria-label="Tampon" title="Tampon"><span data-icon="stamp"></span><span data-i18n="dock.stamp">Tampon</span></button>
+        <button class="dockitem dock-extra" type="button" data-dock="clean" id="dockClean" data-modes="e" hidden aria-label="Nettoyer la feuille" title="Nettoyer la feuille"><span data-icon="sparkle"></span><span data-i18n="dock.clean">Nettoyer</span></button>
         <button class="dockitem" type="button" data-dock="date" data-modes="ef" aria-label="Date" title="Date"><span data-icon="clock"></span><span data-i18n="dock.date">Date</span></button>
         <button class="dockitem" type="button" data-dock="check" data-modes="ef" aria-label="Coche" title="Coche"><span data-icon="check"></span><span data-i18n="dock.check">Coche</span></button>
         <button class="dockitem" type="button" data-dock="comment" data-modes="er" aria-label="Commenter" title="Commenter"><span data-icon="note"></span><span data-i18n="dock.comment">Commenter</span></button>

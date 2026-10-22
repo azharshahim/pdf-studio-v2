@@ -368,6 +368,7 @@ export function saveSession(key, payload) {
     edits: payload.edits || [],
     ocrPages: payload.ocrPages || [],
     markup: payload.markup || [],
+    cleanedPages: payload.cleanedPages || {},
   });
 }
 
@@ -407,6 +408,7 @@ export async function listDocuments() {
       edits: entry.edits?.length || 0,
       ocr: entry.ocrPages?.length || 0,
       markup: entry.markup?.length || 0,
+      cleaned: entry.cleanedPages ? Object.keys(entry.cleanedPages).length : 0,
       hasBytes: !!entry.bytes,
     }))
     .sort((a, b) => b.updatedAt - a.updatedAt);
@@ -430,6 +432,7 @@ export function restoreRecord(rec) {
       edits: rec.edits || [],
       ocrPages: rec.ocrPages || [],
       markup: rec.markup || [],
+      cleanedPages: rec.cleanedPages || {},
       createdAt: rec.createdAt || Date.now(),
       updatedAt: rec.updatedAt || Date.now(),
     },

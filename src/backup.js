@@ -5,7 +5,7 @@
  */
 const MAGIC = 'PDFSTUDIO1\n';
 
-const META_FIELDS = ['key', 'name', 'numPages', 'edits', 'ocrPages', 'markup', 'createdAt', 'updatedAt'];
+const META_FIELDS = ['key', 'name', 'numPages', 'edits', 'ocrPages', 'markup', 'cleanedPages', 'createdAt', 'updatedAt'];
 
 /** @param {Array<object>} records enregistrements IndexedDB (avec `bytes`) */
 export function buildBackup(records) {

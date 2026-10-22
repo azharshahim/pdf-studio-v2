@@ -12,6 +12,7 @@ export const TOOLS = [
   { id: 'combine', icon: 'layers', color: 'violet', title: 'tool.combine', desc: 'tool.combineDesc' },
   { id: 'pages', icon: 'layers', color: 'violet', title: 'tool.pages', desc: 'tool.pagesDesc' },
   { id: 'ocr', icon: 'scan', color: 'sky', title: 'tool.ocr', desc: 'tool.ocrDesc' },
+  { id: 'clean', icon: 'sparkle', color: 'amber', title: 'tool.clean', desc: 'tool.cleanDesc' },
   { id: 'compress', icon: 'compress', color: 'slate', title: 'tool.compress', desc: 'tool.compressDesc' },
   { id: 'convert', icon: 'convert', color: 'emerald', title: 'tool.convert', desc: 'tool.convertDesc' },
   { id: 'protect', icon: 'lock', color: 'orange', title: 'tool.protect', desc: 'tool.protectDesc' },

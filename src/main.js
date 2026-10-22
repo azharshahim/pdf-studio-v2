@@ -3,6 +3,14 @@ import './style.css';
 import { PdfEngine, pdfRectToViewportRect, fontTraits } from './pdfEngine.js';
 import { recognizeCanvas, recognizeLine, terminateOcr } from './ocrEngine.js';
 import { enhanceContrast, deskewCanvas } from './imagePrep.js';
+import {
+  CLEAN_PRESETS,
+  CLEAN_QUALITY_TIERS,
+  resolveCleanQuality,
+  cleanCanvas,
+  encodeCleanedCanvas,
+  detectScannedPages,
+} from './scanClean.js';
 import * as PageOps from './pageOps.js';
 import { detectWatermarks, applyWatermarkChange } from './watermark.js';
 import { combinePdfs, countPages, nextCombinedName } from './combine.js';
@@ -264,6 +272,9 @@ const state = {
   loadToken: 0,
   pages: new Map(), // n -> { lines, ocr, ocrStatus }
   edits: [],
+  cleanedPages: {}, // pageNo -> { preset, intensity, qualityTier, dataUrl, width, height }
+  scanPages: [], // pages détectées comme images scannées
+  cleanQualityTier: 'standard', // 'eco' | 'standard' (JPEG 0,88) | 'high'
   active: null, // { edit, snapshot, isNew }
   addMode: false,
   search: { query: '', matches: [], active: -1 },
@@ -304,10 +315,39 @@ const markup = createMarkup({
   onPickNote: (obj) => editNote(obj),
 });
 
-/** Historique dédié aux annotations ; l'ordre réel des actions texte/annotations est dans actionLog. */
+/** Historique dédié aux annotations et aux pages nettoyées ; l'ordre réel est dans actionLog. */
 const markupHistory = { stack: [], index: -1 };
+const cleanHistory = createHistory(30);
+const cleanedImageCache = new Map();
 
-/** Ordre des actions (« text » / « markup ») : Annuler défait toujours la dernière, quelle qu'elle soit. */
+function loadCleanedImage(dataUrl) {
+  if (!dataUrl) return Promise.resolve(null);
+  if (cleanedImageCache.has(dataUrl)) return cleanedImageCache.get(dataUrl);
+  const promise = new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => {
+      cleanedImageCache.delete(dataUrl);
+      reject(new Error('Image nettoyée illisible'));
+    };
+    img.src = dataUrl;
+  });
+  if (cleanedImageCache.size > 60) {
+    const oldest = cleanedImageCache.keys().next().value;
+    cleanedImageCache.delete(oldest);
+  }
+  cleanedImageCache.set(dataUrl, promise);
+  return promise;
+}
+
+function hasCleanedPages() {
+  return Object.keys(state.cleanedPages || {}).some((k) => {
+    const info = state.cleanedPages[k];
+    return info?.dataUrl && info.preset !== 'original';
+  });
+}
+
+/** Ordre des actions (« text » / « markup » / « clean ») : Annuler défait toujours la dernière, quelle qu'elle soit. */
 let actionLog = [];
 let redoLog = [];
 function noteAction(kind) {
@@ -319,8 +359,13 @@ function pushTextHistory(snapshot) {
   state.history.push(snapshot);
   noteAction('text');
 }
+function pushCleanHistory(snapshot) {
+  cleanHistory.push(Object.entries(snapshot || {}));
+  noteAction('clean');
+}
 function clearHistories() {
   state.history.clear();
+  cleanHistory.clear();
   actionLog = [];
   redoLog = [];
 }
@@ -336,6 +381,8 @@ function undoEdits() {
   if (kind === 'markup') {
     undoMarkup();
     toast(t('msg.undone'), 'info', { duration: 1800 });
+  } else if (kind === 'clean') {
+    undoClean();
   } else undoText();
   updateHistoryButtons();
 }
@@ -351,6 +398,8 @@ function redoEdits() {
   if (kind === 'markup') {
     redoMarkup();
     toast(t('msg.redone'), 'info', { duration: 1800 });
+  } else if (kind === 'clean') {
+    redoClean();
   } else redoText();
   updateHistoryButtons();
 }
@@ -386,6 +435,58 @@ function redoMarkup() {
   markup.setObjects(JSON.parse(markupHistory.stack[markupHistory.index]));
   scheduleAutosave();
   updateAnnoUndo();
+}
+
+/** Met à jour le fond échantillonné des blocs modifiés de la page courante après un nettoyage ou un retour à l'original. */
+function refreshPageEditBackgrounds(pageNo) {
+  if (!state.viewport || pageNo !== state.pageIndex + 1) return;
+  let updated = false;
+  for (const e of state.edits) {
+    if (e.page !== pageNo || e.kind === 'add' || !e.bg || e.bg === 'none') continue;
+    e.bg = sampleBackgroundForBbox(e.origBbox || e.bbox);
+    updated = true;
+  }
+  if (updated) renderOverlay();
+}
+
+function applyCleanedPagesSnapshot(snapshot, { autosave = true } = {}) {
+  const prevKeys = Object.keys(state.cleanedPages || {}).map(Number);
+  state.cleanedPages = U.clone(snapshot || {});
+  const nextKeys = Object.keys(state.cleanedPages || {}).map(Number);
+  updateExportUi();
+  updateHistoryButtons();
+  updateDock();
+  if (autosave) scheduleAutosave();
+  const changedSet = new Set([...prevKeys, ...nextKeys]);
+  renderCurrent().then(() => {
+    const cur = state.pageIndex + 1;
+    if (changedSet.has(cur)) refreshPageEditBackgrounds(cur);
+  });
+  for (const p of changedSet) {
+    refreshThumbForPage(p);
+  }
+}
+
+function undoClean() {
+  if (!state.engine) return;
+  const previous = cleanHistory.undo(Object.entries(state.cleanedPages || {}));
+  if (previous == null) {
+    toast(t('msg.nothingUndo'), 'info', { duration: 1800 });
+    return;
+  }
+  applyCleanedPagesSnapshot(Object.fromEntries(previous));
+  toast(t('msg.undone'), 'info', { duration: 1800 });
+}
+
+function redoClean() {
+  if (!state.engine) return;
+  const next = cleanHistory.redo(Object.entries(state.cleanedPages || {}));
+  if (next == null) {
+    toast(t('msg.nothingRedo'), 'info', { duration: 1800 });
+    return;
+  }
+  applyCleanedPagesSnapshot(Object.fromEntries(next));
+  toast(t('msg.redone'), 'info', { duration: 1800 });
 }
 
 /**
@@ -608,17 +709,30 @@ async function renderCurrent() {
     }
   }
 
-  try {
-    state.renderTask = page.render({
-      canvasContext: ctx,
-      viewport: vp,
-      transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
-      background: '#ffffff',
-    });
-    await state.renderTask.promise;
-  } catch (err) {
-    if (err?.name !== 'RenderingCancelledException' && err?.name !== 'AbortException') {
-      console.warn('render', err);
+  const cleanInfo = state.cleanedPages?.[n];
+  if (cleanInfo?.dataUrl && cleanInfo.preset !== 'original') {
+    try {
+      const img = await loadCleanedImage(cleanInfo.dataUrl);
+      if (token !== state.renderToken) return;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, els.pdfCanvas.width, els.pdfCanvas.height);
+      if (img) ctx.drawImage(img, 0, 0, els.pdfCanvas.width, els.pdfCanvas.height);
+    } catch (err) {
+      console.warn('clean render', err);
+    }
+  } else {
+    try {
+      state.renderTask = page.render({
+        canvasContext: ctx,
+        viewport: vp,
+        transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
+        background: '#ffffff',
+      });
+      await state.renderTask.promise;
+    } catch (err) {
+      if (err?.name !== 'RenderingCancelledException' && err?.name !== 'AbortException') {
+        console.warn('render', err);
+      }
     }
   }
   if (token !== state.renderToken) return;
@@ -758,7 +872,18 @@ async function renderThumbnail(btn, token) {
     // rendu à la taille réelle du cadre (netteté sur écrans HiDPI)
     const targetW = Math.max(120, frame.clientWidth || 172);
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    await state.engine.renderToCanvas(n, canvas, targetW / size.width, dpr);
+    const cleanInfo = state.cleanedPages?.[n];
+    if (cleanInfo?.dataUrl && cleanInfo.preset !== 'original') {
+      const img = await loadCleanedImage(cleanInfo.dataUrl);
+      canvas.width = Math.max(1, Math.round(targetW * dpr));
+      canvas.height = Math.max(1, Math.round((targetW * (size.height / size.width)) * dpr));
+      const tctx = canvas.getContext('2d');
+      tctx.fillStyle = '#ffffff';
+      tctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (img) tctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    } else {
+      await state.engine.renderToCanvas(n, canvas, targetW / size.width, dpr);
+    }
     if (token !== state.docToken) return;
     btn.dataset.rendered = '1';
     frame.innerHTML = '';
@@ -768,6 +893,14 @@ async function renderThumbnail(btn, token) {
   } finally {
     delete btn.dataset.rendering;
   }
+}
+
+function refreshThumbForPage(n) {
+  const btn = els.thumbs?.querySelector(`.thumb[data-page="${n}"]`);
+  if (!btn || !state.engine) return;
+  delete btn.dataset.rendered;
+  delete btn.dataset.rendering;
+  renderThumbnail(btn, state.docToken);
 }
 
 /* ─────────────────────────── Overlay de texte ─────────────────────────── */
@@ -928,6 +1061,7 @@ function dockAction(id) {
       break;
     case 'pages':
     case 'ocr':
+    case 'clean':
       openTool(id);
       break;
     default:
@@ -954,6 +1088,11 @@ function updateDock() {
   positionDock();
   const form = document.getElementById('dockForm');
   if (form) form.hidden = !state.formFields?.length;
+  const cleanBtn = document.getElementById('dockClean');
+  if (cleanBtn) {
+    const hasOcr = [...state.pages.values()].some((p) => p.ocr);
+    cleanBtn.hidden = !(state.scanPages?.length || hasOcr || hasCleanedPages());
+  }
   dock.querySelectorAll('[data-dock]').forEach((b) => {
     const id = b.dataset.dock;
     const active =
@@ -1040,28 +1179,66 @@ async function goBack() {
 
 /* ───────── Menu ⋮ du document ───────── */
 
-/** Génère le PDF courant (modifications, OCR, annotations) sans le télécharger. */
+/**
+ * Rassemble la couche OCR à embarquer à l'export.
+ * Pour toute page dont l'image a été remplacée (`cleanedPages`), la couche de
+ * texte existante (OCR reconnu ou couche cachée native du scan) est toujours
+ * conservée à sa position exacte pour rester cherchable et modifiable.
+ */
+async function collectOcrPagesForExport({ includeOcr = true, cleanedPages = null } = {}) {
+  const byPage = new Map();
+  if (includeOcr) {
+    for (const [pageNo, p] of state.pages.entries()) {
+      if (p.ocr) byPage.set(pageNo, { pageNo, ocr: p.ocr });
+    }
+  }
+  if (cleanedPages && typeof cleanedPages === 'object') {
+    for (const [rawKey, info] of Object.entries(cleanedPages)) {
+      const pageNo = Number(rawKey);
+      if (!info?.dataUrl || info.preset === 'original') continue;
+      if (byPage.has(pageNo)) continue;
+      await ensureLines(pageNo);
+      const pd = getPageData(pageNo);
+      if (pd.ocr) {
+        byPage.set(pageNo, { pageNo, ocr: pd.ocr });
+      } else if (pd.lines?.length) {
+        byPage.set(pageNo, {
+          pageNo,
+          ocr: {
+            lines: pd.lines.map((l) => ({ text: l.text, bbox: l.bbox })),
+          },
+        });
+      }
+    }
+  }
+  return [...byPage.values()];
+}
+
+/** Génère le PDF courant (modifications, pages nettoyées, OCR, annotations) sans le télécharger. */
 async function buildCurrentPdf() {
   closeActive();
   const { exportPdf } = await import('./exporter.js');
+  const cleanedPages = hasCleanedPages() ? state.cleanedPages : null;
+  const ocrPages = await collectOcrPagesForExport({ includeOcr: true, cleanedPages });
   const result = await exportPdf({
     sourceBytes: await bytesWithForm(),
     edits: state.edits,
-    ocrPages: collectOcrForSession(),
+    ocrPages,
     redactMode: 'stream',
     renderPage: null,
     objects: markup.objects,
+    cleanedPages,
   });
   return new Blob([result.bytes], { type: 'application/pdf' });
 }
 
 /**
- * Document tel qu'il est maintenant (texte modifié, annotations) : sert à
- * Compresser, Protéger et Convertir pour que rien ne se perde. Sans
+ * Document tel qu'il est maintenant (texte modifié, pages nettoyées, annotations) :
+ * sert à Compresser, Protéger et Convertir pour que rien ne se perde. Sans
  * modification, on réutilise directement le document ouvert.
  */
 async function currentDocumentSource() {
-  const dirty = state.edits.length > 0 || (markup.objects?.length || 0) > 0;
+  const dirty = state.edits.length > 0 || (markup.objects?.length || 0) > 0 || hasCleanedPages();
   if (!dirty) return { engine: state.engine, bytes: state.bytes, dispose() {} };
   const blob = await buildCurrentPdf();
   const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -1206,39 +1383,524 @@ function setFillSign(on) {
 }
 
 /** Renomme le document ouvert (liste des fichiers, titre et exports). */
-/** Filigranes détectés : renommer ou supprimer, depuis la barre de modification. */
+/* ─────────────── Nettoyage de feuille scannée & filigrane d'image ─────────────── */
+
+function nextPaint() {
+  return new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+}
+
+/** Rend la page d'origine (non modifiée) sur un canevas à la définition voulue. */
+async function renderOriginalPageCanvas(pageNo, maxSide = 1850) {
+  const page = await state.engine.getPage(pageNo);
+  const base = page.getViewport({ scale: 1 });
+  const scale = U.clamp(maxSide / Math.max(1, base.width, base.height), 0.5, 2.8);
+  const vp = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(vp.width));
+  canvas.height = Math.max(1, Math.round(vp.height));
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  await page.render({ canvasContext: ctx, viewport: vp, background: '#ffffff' }).promise;
+  return canvas;
+}
+
+/**
+ * Applique un préréglage de nettoyage (ou 'original' pour restaurer) sur une ou
+ * plusieurs pages tout en préservant la couche OCR et l'historique Annuler/Rétablir.
+ */
+async function applyCleanToPages(
+  pageNumbers,
+  preset,
+  { intensity = 0.72, qualityTier = state.cleanQualityTier || 'standard', onProgress } = {}
+) {
+  if (!state.engine || !pageNumbers?.length) return false;
+  const before = U.clone(state.cleanedPages || {});
+  const total = pageNumbers.length;
+  const qCfg = resolveCleanQuality(qualityTier);
+  state.cleanQualityTier = qCfg.id;
+
+  if (preset === 'original') {
+    for (let i = 0; i < total; i++) {
+      const p = pageNumbers[i];
+      onProgress?.((i + 1) / total, i + 1, total);
+      delete state.cleanedPages[p];
+    }
+  } else {
+    for (let i = 0; i < total; i++) {
+      const p = pageNumbers[i];
+      onProgress?.(i / total, i + 1, total);
+      await nextPaint();
+      const srcCanvas = await renderOriginalPageCanvas(p, qCfg.maxSide);
+      const outCanvas = cleanCanvas(srcCanvas, preset, { intensity });
+      const dataUrl = encodeCleanedCanvas(outCanvas, preset, qCfg.id);
+      const width = outCanvas.width;
+      const height = outCanvas.height;
+      srcCanvas.width = srcCanvas.height = 1;
+      outCanvas.width = outCanvas.height = 1;
+      await loadCleanedImage(dataUrl);
+      state.cleanedPages[p] = { preset, intensity, qualityTier: qCfg.id, dataUrl, width, height };
+      onProgress?.((i + 1) / total, i + 1, total);
+    }
+  }
+
+  const changed = JSON.stringify(before) !== JSON.stringify(state.cleanedPages);
+  if (!changed) return false;
+
+  pushCleanHistory(before);
+  updateHistoryButtons();
+  updateExportUi();
+  updateDock();
+  scheduleAutosave();
+  await renderCurrent();
+  const cur = state.pageIndex + 1;
+  if (pageNumbers.includes(cur)) refreshPageEditBackgrounds(cur);
+  for (const p of pageNumbers) refreshThumbForPage(p);
+  return true;
+}
+
+function drawCanvasCopy(src, dst) {
+  if (!src || !dst) return;
+  dst.width = src.width;
+  dst.height = src.height;
+  dst.getContext('2d').drawImage(src, 0, 0);
+}
+
+/**
+ * Relie un bouton « Comparer » et l'aperçu Avant / Après :
+ * - Clic court ou clavier : affiche Avant et Après côte à côte.
+ * - Appui maintenu (> 220 ms) : montre l'Original tant que le doigt reste posé.
+ */
+function bindPreviewCompare({
+  compareBtn,
+  stage,
+  paneBefore,
+  canvasBefore,
+  canvasAfter,
+  tagAfter,
+  getBeforeCanvas,
+  getAfterCanvas,
+  getAfterLabel,
+}) {
+  let split = false;
+  let holding = false;
+  let holdTimer = 0;
+  let holdTriggered = false;
+
+  const paint = () => {
+    const beforeC = getBeforeCanvas();
+    const afterC = getAfterCanvas();
+    if (!beforeC || !afterC) return;
+    stage.classList.toggle('is-split', split);
+    paneBefore.hidden = !split;
+    compareBtn.classList.toggle('active', split || holding);
+    compareBtn.setAttribute('aria-pressed', String(split));
+    if (split) {
+      drawCanvasCopy(beforeC, canvasBefore);
+      drawCanvasCopy(afterC, canvasAfter);
+      tagAfter.textContent = getAfterLabel();
+    } else if (holding) {
+      drawCanvasCopy(beforeC, canvasAfter);
+      tagAfter.textContent = t('clean.before');
+    } else {
+      drawCanvasCopy(afterC, canvasAfter);
+      tagAfter.textContent = getAfterLabel();
+    }
+  };
+
+  compareBtn.addEventListener('pointerdown', () => {
+    holdTriggered = false;
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(() => {
+      if (split) return;
+      holdTriggered = true;
+      holding = true;
+      paint();
+    }, 220);
+  });
+
+  const endHold = () => {
+    clearTimeout(holdTimer);
+    if (holding) {
+      holding = false;
+      paint();
+    }
+  };
+  compareBtn.addEventListener('pointerup', endHold);
+  compareBtn.addEventListener('pointercancel', endHold);
+  compareBtn.addEventListener('pointerleave', endHold);
+
+  compareBtn.addEventListener('click', (ev) => {
+    if (holdTriggered) {
+      holdTriggered = false;
+      ev.preventDefault();
+      return;
+    }
+    split = !split;
+    holding = false;
+    paint();
+  });
+
+  canvasAfter.addEventListener('pointerdown', () => {
+    if (split) return;
+    holding = true;
+    paint();
+  });
+  window.addEventListener('pointerup', endHold, { passive: true });
+
+  return { paint, isSplit: () => split };
+}
+
+/** Outil « Nettoyer la feuille » (façon CamScanner) : 8 préréglages + aperçu Avant/Après. */
+async function openCleanSheet({ initialPreset = null } = {}) {
+  routeTo('doc');
+  if (!state.engine) {
+    toast(t('tool.needDoc'), 'warn');
+    els.fileInput.click();
+    return;
+  }
+  if (isReading()) setReadMode(false);
+  closeActive();
+
+  const currentPage = state.pageIndex + 1;
+  const existing = state.cleanedPages?.[currentPage];
+  let preset = initialPreset || existing?.preset || 'magic';
+  let intensityPct = Math.round((existing?.intensity ?? 0.72) * 100);
+  let qualityTier = resolveCleanQuality(existing?.qualityTier || state.cleanQualityTier || 'standard').id;
+  let scope = 'page';
+
+  const presetButtons = CLEAN_PRESETS.map(
+    (id) => `<button class="clean-preset-btn ${id === preset ? 'on' : ''}" type="button" data-clean-preset="${id}">
+      <strong>${t(`clean.p.${id}`)}</strong>
+      <span>${t(`clean.d.${id}`)}</span>
+    </button>`
+  ).join('');
+
+  const qualityButtons = Object.keys(CLEAN_QUALITY_TIERS)
+    .map(
+      (id) =>
+        `<button class="${id === qualityTier ? 'on' : ''}" type="button" data-clean-quality="${id}">${t(`clean.q.${id}`)}</button>`
+    )
+    .join('');
+
+  const html = `<div class="clean-sheet">
+    ${toolHeader('sparkle', t('clean.title'), t('clean.subtitle'))}
+    <div class="clean-preview-wrap">
+      <div class="clean-preview-bar">
+        <span class="clean-preview-hint" id="cleanActiveDesc">${t(`clean.d.${preset}`)}</span>
+        <button class="clean-compare-btn" id="cleanCompare" type="button" aria-pressed="false">
+          ${icon('eye', 15)}<span>${t('clean.compare')}</span>
+        </button>
+      </div>
+      <div class="clean-preview-stage" id="cleanPreviewStage">
+        <div class="clean-preview-pane" id="cleanPaneBefore" hidden>
+          <canvas id="cleanCanvasBefore"></canvas>
+          <span class="clean-preview-tag">${t('clean.before')}</span>
+        </div>
+        <div class="clean-preview-pane" id="cleanPaneAfter">
+          <canvas id="cleanCanvasAfter"></canvas>
+          <span class="clean-preview-tag" id="cleanTagAfter">${t('clean.after')}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="clean-presets" role="group" aria-label="${t('clean.presets')}">
+      ${presetButtons}
+    </div>
+
+    <div class="clean-intensity-box" id="cleanIntensityBox" ${preset === 'nowatermark' ? '' : 'hidden'}>
+      <p class="wm-disclaimer">${t('clean.watermarkNote')}</p>
+      <div class="clean-intensity-head">
+        <label for="cleanIntensity">${t('clean.intensity')}</label>
+        <span id="cleanIntensityVal">${intensityPct} %</span>
+      </div>
+      <input type="range" id="cleanIntensity" min="10" max="100" step="5" value="${intensityPct}" />
+    </div>
+
+    <div class="clean-quality" id="cleanQualityRow">
+      <span class="clean-quality-label">${t('clean.qualityLabel')}</span>
+      <div class="clean-quality-seg" role="group" aria-label="${t('clean.qualityLabel')}">
+        ${qualityButtons}
+      </div>
+    </div>
+
+    <div class="clean-scope-row" role="group" aria-label="${t('clean.scope')}">
+      <button class="seg on" type="button" data-clean-scope="page">${t('clean.scopePage')}</button>
+      <button class="seg" type="button" data-clean-scope="all" ${state.numPages <= 1 ? 'disabled' : ''}>${t('clean.scopeAll', { n: state.numPages })}</button>
+    </div>
+
+    <div id="cleanProgressBox" hidden>${progressMarkup(t('clean.working', { i: 1, n: 1 }))}</div>
+
+    <div class="clean-actions">
+      <button class="btn ghost" type="button" id="cleanReset" ${existing || hasCleanedPages() ? '' : 'disabled'}>
+        ${icon('undo', 16)}<span>${t('clean.reset')}</span>
+      </button>
+      <button class="btn primary" type="button" id="cleanApply">
+        ${icon('check', 16)}<span>${t('clean.apply')}</span>
+      </button>
+    </div>
+  </div>`;
+
+  const body = openSheet({ title: t('clean.title'), html, size: 'tall', className: 'clean-sheet-host' });
+  if (!body) return;
+
+  const q = (sel) => body.querySelector(sel);
+  let beforePreviewCanvas = null;
+  let afterPreviewCanvas = null;
+
+  const compareCtrl = bindPreviewCompare({
+    compareBtn: q('#cleanCompare'),
+    stage: q('#cleanPreviewStage'),
+    paneBefore: q('#cleanPaneBefore'),
+    canvasBefore: q('#cleanCanvasBefore'),
+    canvasAfter: q('#cleanCanvasAfter'),
+    tagAfter: q('#cleanTagAfter'),
+    getBeforeCanvas: () => beforePreviewCanvas,
+    getAfterCanvas: () => afterPreviewCanvas,
+    getAfterLabel: () =>
+      preset === 'original' ? t('clean.p.original') : `${t('clean.after')} · ${t(`clean.p.${preset}`)}`,
+  });
+
+  const refreshPreview = () => {
+    if (!beforePreviewCanvas || !body.isConnected) return;
+    afterPreviewCanvas = cleanCanvas(beforePreviewCanvas, preset, { intensity: intensityPct / 100 });
+    q('#cleanActiveDesc').textContent = t(`clean.d.${preset}`);
+    q('#cleanIntensityBox').hidden = preset !== 'nowatermark';
+    const hasResettable = scope === 'all' ? hasCleanedPages() : !!state.cleanedPages?.[currentPage];
+    q('#cleanReset').disabled = !hasResettable;
+    compareCtrl.paint();
+  };
+
+  // Rendu initial de la miniature d'aperçu
+  renderOriginalPageCanvas(currentPage, 780)
+    .then((canvas) => {
+      if (!body.isConnected) return;
+      beforePreviewCanvas = canvas;
+      refreshPreview();
+    })
+    .catch((err) => console.warn('[clean] aperçu impossible', err));
+
+  body.querySelectorAll('[data-clean-preset]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      preset = btn.dataset.cleanPreset;
+      body.querySelectorAll('[data-clean-preset]').forEach((b) => b.classList.toggle('on', b === btn));
+      refreshPreview();
+    });
+  });
+
+  const range = q('#cleanIntensity');
+  const debouncedRefresh = U.debounce(refreshPreview, 45);
+  range?.addEventListener('input', () => {
+    intensityPct = Number(range.value) || 70;
+    q('#cleanIntensityVal').textContent = `${intensityPct} %`;
+    debouncedRefresh();
+  });
+
+  body.querySelectorAll('[data-clean-quality]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      qualityTier = btn.dataset.cleanQuality;
+      body.querySelectorAll('[data-clean-quality]').forEach((b) => b.classList.toggle('on', b === btn));
+    });
+  });
+
+  body.querySelectorAll('[data-clean-scope]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (btn.disabled) return;
+      scope = btn.dataset.cleanScope;
+      body.querySelectorAll('[data-clean-scope]').forEach((b) => b.classList.toggle('on', b === btn));
+      const hasResettable = scope === 'all' ? hasCleanedPages() : !!state.cleanedPages?.[currentPage];
+      q('#cleanReset').disabled = !hasResettable;
+    });
+  });
+
+  const setBusy = (busy) => {
+    body.querySelectorAll('button, input').forEach((el) => {
+      if (busy) el.dataset.wasDisabled = el.disabled ? '1' : '0';
+      el.disabled = busy ? true : el.dataset.wasDisabled === '1';
+    });
+  };
+
+  q('#cleanApply')?.addEventListener('click', async () => {
+    const pages =
+      scope === 'all'
+        ? Array.from({ length: state.numPages }, (_, i) => i + 1)
+        : [currentPage];
+    const progBox = q('#cleanProgressBox');
+    const progFill = progBox?.querySelector('[data-progress]');
+    const progLabel = progBox?.querySelector('[data-progress-label]');
+    if (progBox) progBox.hidden = false;
+    setBusy(true);
+    try {
+      await applyCleanToPages(pages, preset, {
+        intensity: intensityPct / 100,
+        qualityTier,
+        onProgress: (ratio, idx, tot) => {
+          if (progFill) progFill.style.width = `${Math.round(ratio * 100)}%`;
+          if (progLabel) progLabel.textContent = t('clean.working', { i: idx, n: tot });
+        },
+      });
+      closeSheet();
+      if (preset === 'original') {
+        toast(t('clean.restored'), 'info', { duration: 2400 });
+      } else {
+        const label = t(`clean.p.${preset}`);
+        toast(
+          pages.length > 1 ? t('clean.doneMany', { n: pages.length, preset: label }) : t('clean.done', { preset: label }),
+          'success',
+          { duration: 3000 }
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      setBusy(false);
+      toast(t('msg.opFailed', { msg: err?.message || err }), 'error');
+    }
+  });
+
+  q('#cleanReset')?.addEventListener('click', async () => {
+    const pages =
+      scope === 'all'
+        ? Object.keys(state.cleanedPages || {}).map(Number)
+        : [currentPage];
+    if (!pages.length) return;
+    setBusy(true);
+    try {
+      await applyCleanToPages(pages, 'original');
+      closeSheet();
+      toast(t('clean.restored'), 'info', { duration: 2400 });
+    } catch (err) {
+      console.error(err);
+      setBusy(false);
+    }
+  });
+}
+
+/** Filigranes détectés : renommer ou supprimer (texte PDF), ou atténuer sur une image scannée. */
 async function openWatermarkSheet() {
   if (!state.engine) return;
+  closeActive();
   const body = openSheet({
     title: t('wm.title'),
     html: `<p class="muted" id="wmBusy">${t('wm.scanning')}</p><div id="wmList"></div>`,
+    size: 'tall',
   });
   if (!body) return;
   let marks = [];
+  let scanPages = [];
   try {
-    marks = await detectWatermarks(state.engine);
+    const [detectedMarks, detectedScans] = await Promise.all([
+      detectWatermarks(state.engine).catch((err) => {
+        console.warn('[watermark] détection impossible', err);
+        return [];
+      }),
+      detectScannedPages(state.engine).catch(() => []),
+    ]);
+    marks = detectedMarks;
+    const scanSet = new Set(detectedScans);
+    for (const [pageNo, p] of state.pages.entries()) {
+      if (p?.ocr) scanSet.add(pageNo);
+    }
+    for (const k of Object.keys(state.cleanedPages || {})) {
+      const p = Number(k);
+      if (p >= 1 && p <= state.numPages) scanSet.add(p);
+    }
+    scanPages = [...scanSet].sort((a, b) => a - b);
   } catch (err) {
-    console.warn('[watermark] détection impossible', err);
+    console.warn('[watermark]', err);
   }
+  if (!body.isConnected) return;
   body.querySelector('#wmBusy')?.remove();
   const list = body.querySelector('#wmList');
   if (!list) return;
-  if (!marks.length) {
+
+  if (!marks.length && !scanPages.length) {
     list.innerHTML = `<div class="wm-empty"><strong>${t('wm.none')}</strong><p class="muted">${t('wm.noneHint')}</p></div>`;
     return;
   }
-  list.innerHTML = marks
-    .map(
-      (m, i) => `<div class="wm-item" data-wm="${i}">
-        <div class="wm-meta">${t('wm.found', { n: m.pages.length })}</div>
-        <input class="wm-text" type="text" value="${U.escapeHtml(m.text)}" aria-label="${t('wm.renamePrompt')}" autocomplete="off" spellcheck="false" />
-        <div class="wm-actions">
-          <button class="btn" type="button" data-wm-act="rename">${t('wm.rename')}</button>
-          <button class="btn danger" type="button" data-wm-act="delete">${t('wm.delete')}</button>
+
+  let html = '';
+  if (marks.length) {
+    html += marks
+      .map(
+        (m, i) => `<div class="wm-item" data-wm="${i}">
+          <div class="wm-meta">${t('wm.found', { n: m.pages.length })}</div>
+          <input class="wm-text" type="text" value="${U.escapeHtml(m.text)}" aria-label="${t('wm.renamePrompt')}" autocomplete="off" spellcheck="false" />
+          <div class="wm-actions">
+            <button class="btn" type="button" data-wm-act="rename">${t('wm.rename')}</button>
+            <button class="btn danger" type="button" data-wm-act="delete">${t('wm.delete')}</button>
+          </div>
+        </div>`
+      )
+      .join('');
+  }
+
+  const currentPage = state.pageIndex + 1;
+  const targetScanPage = scanPages.includes(currentPage) ? currentPage : scanPages[0];
+
+  if (scanPages.length) {
+    const existing = state.cleanedPages?.[targetScanPage];
+    const startIntensity = Math.round((existing?.preset === 'nowatermark' ? existing.intensity : 0.72) * 100);
+    const startQuality = resolveCleanQuality(existing?.qualityTier || state.cleanQualityTier || 'standard').id;
+    const wmQualityButtons = Object.keys(CLEAN_QUALITY_TIERS)
+      .map(
+        (id) =>
+          `<button class="${id === startQuality ? 'on' : ''}" type="button" data-wm-quality="${id}">${t(`clean.q.${id}`)}</button>`
+      )
+      .join('');
+    html += `<div class="wm-image-card" id="wmImageCard">
+      <h3>${t('wm.imgTitle')}</h3>
+      <p class="wm-disclaimer" id="wmImgDisclaimer">${t('wm.imgDisclaimer')}</p>
+      <div class="clean-preview-wrap">
+        <div class="clean-preview-bar">
+          <span class="clean-preview-hint">${t('pagesGrid.page', { n: targetScanPage })}</span>
+          <button class="clean-compare-btn" id="wmCompare" type="button" aria-pressed="false">
+            ${icon('eye', 15)}<span>${t('clean.compare')}</span>
+          </button>
         </div>
-      </div>`,
-    )
-    .join('');
+        <div class="clean-preview-stage" id="wmPreviewStage">
+          <div class="clean-preview-pane" id="wmPaneBefore" hidden>
+            <canvas id="wmCanvasBefore"></canvas>
+            <span class="clean-preview-tag">${t('clean.before')}</span>
+          </div>
+          <div class="clean-preview-pane" id="wmPaneAfter">
+            <canvas id="wmCanvasAfter"></canvas>
+            <span class="clean-preview-tag" id="wmTagAfter">${t('clean.after')}</span>
+          </div>
+        </div>
+      </div>
+      <div class="clean-intensity-box">
+        <div class="clean-intensity-head">
+          <label for="wmImgIntensity">${t('wm.imgIntensity')}</label>
+          <span id="wmImgIntensityVal">${startIntensity} %</span>
+        </div>
+        <input type="range" id="wmImgIntensity" min="10" max="100" step="5" value="${startIntensity}" />
+      </div>
+      <div class="clean-quality" id="wmQualityRow">
+        <span class="clean-quality-label">${t('clean.qualityLabel')}</span>
+        <div class="clean-quality-seg" role="group" aria-label="${t('clean.qualityLabel')}">
+          ${wmQualityButtons}
+        </div>
+      </div>
+      ${
+        scanPages.length > 1
+          ? `<div class="clean-scope-row">
+              <button class="seg on" type="button" data-wm-scope="page">${t('wm.imgScopePage')}</button>
+              <button class="seg" type="button" data-wm-scope="all">${t('wm.imgScopeAll', { n: scanPages.length })}</button>
+            </div>`
+          : ''
+      }
+      <div id="wmImgProgress" hidden>${progressMarkup(t('wm.imgWorking', { i: 1, n: 1 }))}</div>
+      <div class="clean-actions">
+        ${
+          existing
+            ? `<button class="btn ghost" type="button" id="wmImgReset">${icon('undo', 16)}<span>${t('clean.reset')}</span></button>`
+            : ''
+        }
+        <button class="btn primary" type="button" id="wmImgApply">${icon('sparkle', 16)}<span>${t('wm.imgAction')}</span></button>
+      </div>
+    </div>`;
+  }
+
+  list.innerHTML = html;
+
   list.querySelectorAll('[data-wm-act]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const row = btn.closest('[data-wm]');
@@ -1250,6 +1912,101 @@ async function openWatermarkSheet() {
       changeWatermark(mark, act === 'delete' ? null : text);
     });
   });
+
+  if (scanPages.length) {
+    const q = (sel) => list.querySelector(sel);
+    let intensityPct = Number(q('#wmImgIntensity')?.value || 72);
+    let wmQualityTier = resolveCleanQuality(
+      state.cleanedPages?.[targetScanPage]?.qualityTier || state.cleanQualityTier || 'standard'
+    ).id;
+    let wmScope = 'page';
+    let beforeCanvas = null;
+    let afterCanvas = null;
+
+    const compareCtrl = bindPreviewCompare({
+      compareBtn: q('#wmCompare'),
+      stage: q('#wmPreviewStage'),
+      paneBefore: q('#wmPaneBefore'),
+      canvasBefore: q('#wmCanvasBefore'),
+      canvasAfter: q('#wmCanvasAfter'),
+      tagAfter: q('#wmTagAfter'),
+      getBeforeCanvas: () => beforeCanvas,
+      getAfterCanvas: () => afterCanvas,
+      getAfterLabel: () => t('clean.after'),
+    });
+
+    const refreshWmPreview = () => {
+      if (!beforeCanvas || !body.isConnected) return;
+      afterCanvas = cleanCanvas(beforeCanvas, 'nowatermark', { intensity: intensityPct / 100 });
+      compareCtrl.paint();
+    };
+
+    renderOriginalPageCanvas(targetScanPage, 760)
+      .then((canvas) => {
+        if (!body.isConnected) return;
+        beforeCanvas = canvas;
+        refreshWmPreview();
+      })
+      .catch(() => {});
+
+    const debouncedWm = U.debounce(refreshWmPreview, 45);
+    q('#wmImgIntensity')?.addEventListener('input', (ev) => {
+      intensityPct = Number(ev.target.value) || 72;
+      q('#wmImgIntensityVal').textContent = `${intensityPct} %`;
+      debouncedWm();
+    });
+
+    list.querySelectorAll('[data-wm-quality]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        wmQualityTier = btn.dataset.wmQuality;
+        list.querySelectorAll('[data-wm-quality]').forEach((b) => b.classList.toggle('on', b === btn));
+      });
+    });
+
+    list.querySelectorAll('[data-wm-scope]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        wmScope = btn.dataset.wmScope;
+        list.querySelectorAll('[data-wm-scope]').forEach((b) => b.classList.toggle('on', b === btn));
+      });
+    });
+
+    q('#wmImgApply')?.addEventListener('click', async () => {
+      if (isReading()) setReadMode(false);
+      const targets = wmScope === 'all' ? scanPages : [targetScanPage];
+      const prog = q('#wmImgProgress');
+      const fill = prog?.querySelector('[data-progress]');
+      const lbl = prog?.querySelector('[data-progress-label]');
+      if (prog) prog.hidden = false;
+      q('#wmImgApply').disabled = true;
+      try {
+        await applyCleanToPages(targets, 'nowatermark', {
+          intensity: intensityPct / 100,
+          qualityTier: wmQualityTier,
+          onProgress: (ratio, idx, tot) => {
+            if (fill) fill.style.width = `${Math.round(ratio * 100)}%`;
+            if (lbl) lbl.textContent = t('wm.imgWorking', { i: idx, n: tot });
+          },
+        });
+        closeSheet();
+        toast(
+          targets.length > 1 ? t('wm.imgDoneMany', { n: targets.length }) : t('wm.imgDone'),
+          'success',
+          { duration: 3000 }
+        );
+      } catch (err) {
+        console.error(err);
+        q('#wmImgApply').disabled = false;
+        toast(t('wm.failed'), 'error');
+      }
+    });
+
+    q('#wmImgReset')?.addEventListener('click', async () => {
+      const targets = wmScope === 'all' ? scanPages : [targetScanPage];
+      await applyCleanToPages(targets, 'original');
+      closeSheet();
+      toast(t('clean.restored'), 'info', { duration: 2400 });
+    });
+  }
 }
 
 async function changeWatermark(mark, newText) {
@@ -1864,6 +2621,7 @@ function bindEditPanel() {
   document.getElementById('epDuplicate')?.addEventListener('click', () => duplicateActiveEdit());
   document.getElementById('epDelete')?.addEventListener('click', () => deleteActiveEdit());
   document.getElementById('epAddText')?.addEventListener('click', () => startAddText());
+  document.getElementById('epCleanPage')?.addEventListener('click', () => openCleanSheet());
   document.getElementById('epClose')?.addEventListener('click', () => {
     closeActive();
     setReadMode(true);
@@ -2592,7 +3350,7 @@ function collectOcrForSession() {
     .map(([pageNo, p]) => ({ pageNo, ocr: p.ocr }));
 }
 
-/** Écrit la session (modifications, annotations, OCR) dans le stockage local. */
+/** Écrit la session (modifications, annotations, OCR, pages nettoyées) dans le stockage local. */
 async function flushSession() {
   if (!state.hash) return false;
   const payload = {
@@ -2602,6 +3360,7 @@ async function flushSession() {
     edits: state.edits,
     ocrPages: collectOcrForSession(),
     markup: markup.objects,
+    cleanedPages: state.cleanedPages || {},
   };
   try {
     await Session.saveSession(state.hash, payload);
@@ -2979,8 +3738,22 @@ function applySessionData(saved) {
       pd.ocr = entry.ocr;
       pd.ocrStatus = 'done';
     }
+    if (saved.cleanedPages && typeof saved.cleanedPages === 'object') {
+      const cleaned = {};
+      for (const [k, info] of Object.entries(saved.cleanedPages)) {
+        const p = Number(k);
+        if (p >= 1 && p <= state.numPages && info?.dataUrl && info.preset !== 'original') {
+          cleaned[p] = info;
+          loadCleanedImage(info.dataUrl).catch(() => {});
+        }
+      }
+      state.cleanedPages = cleaned;
+    }
+    if ([...state.pages.values()].some((p) => p.ocr)) els.expOcr.checked = true;
     clearHistories();
     updateHistoryButtons();
+    renderCurrent();
+    for (const p of Object.keys(state.cleanedPages || {}).map(Number)) refreshThumbForPage(p);
     renderOverlay();
     renderEditList();
     updateExportUi();
@@ -3010,7 +3783,8 @@ async function restoreSessionData(hash, { silent = false } = {}) {
   const nEdits = saved.edits?.length || 0;
   const nOcr = saved.ocrPages?.length || 0;
   const nMarkup = saved.markup?.length || 0;
-  if (!nEdits && !nOcr && !nMarkup) return false;
+  const nClean = saved.cleanedPages ? Object.keys(saved.cleanedPages).length : 0;
+  if (!nEdits && !nOcr && !nMarkup && !nClean) return false;
 
   if (silent) {
     applySessionData(saved);
@@ -3020,6 +3794,7 @@ async function restoreSessionData(hash, { silent = false } = {}) {
 
   const parts = [];
   if (nEdits) parts.push(`${nEdits} modification${nEdits > 1 ? 's' : ''}`);
+  if (nClean) parts.push(`${nClean} page${nClean > 1 ? 's' : ''} nettoyée${nClean > 1 ? 's' : ''}`);
   if (nOcr) parts.push(`${nOcr} page${nOcr > 1 ? 's' : ''} OCRisée${nOcr > 1 ? 's' : ''}`);
   if (nMarkup) parts.push(`${nMarkup} annotation${nMarkup > 1 ? 's' : ''}`);
   els.resumeText.textContent = `Une session a été trouvée pour « ${saved.name || state.fileName} » : ${parts.join(
@@ -3052,6 +3827,7 @@ async function restoreSessionData(hash, { silent = false } = {}) {
       edits: [],
       ocrPages: [],
       markup: [],
+      cleanedPages: {},
     }).catch(() => {});
     return false;
   }
@@ -3430,7 +4206,15 @@ async function runOcrOnPage(n, langs, onProgress) {
   canvas.width = Math.round(vp.width);
   canvas.height = Math.round(vp.height);
   const ctx = canvas.getContext('2d');
-  await page.render({ canvasContext: ctx, viewport: vp, background: '#ffffff' }).promise;
+  const cleanInfo = state.cleanedPages?.[n];
+  if (cleanInfo?.dataUrl && cleanInfo.preset !== 'original') {
+    const img = await loadCleanedImage(cleanInfo.dataUrl);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (img) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  } else {
+    await page.render({ canvasContext: ctx, viewport: vp, background: '#ffffff' }).promise;
+  }
 
   // Prétraitement optionnel : contraste puis redressement
   let prepared = canvas;
@@ -3563,9 +4347,16 @@ async function runOcr(pageNumbers) {
   updateOcrPanel();
   updateOcrChips();
   updateExportUi();
+  updateDock();
   updateHint();
   renderOverlay();
-  if (done) toast(t('msg.ocrDone', { n: done }), 'success');
+  if (done) {
+    toast(t('msg.ocrDone', { n: done }), 'success', {
+      duration: 6000,
+      action: t('tool.clean'),
+      onAction: () => openCleanSheet(),
+    });
+  }
   if (state.search.query) performSearch(state.search.query);
 }
 
@@ -3696,7 +4487,11 @@ function updatePanelsForPage() {
 }
 
 function updateExportUi() {
-  const nEdits = state.edits.length;
+  const nClean = Object.keys(state.cleanedPages || {}).filter((k) => {
+    const info = state.cleanedPages[k];
+    return info?.dataUrl && info.preset !== 'original';
+  }).length;
+  const nEdits = state.edits.length + nClean;
   const ocrPages = [...state.pages.values()].filter((p) => p.ocr).length;
   els.expEditsCount.textContent = `(${nEdits})`;
   els.expOcrCount.textContent = ocrPages ? `(${ocrPages} page${ocrPages > 1 ? 's' : ''})` : '(0)';
@@ -3970,6 +4765,8 @@ async function openPdfBytes(bytes, name, password = '', options = {}) {
     state.viewport = null;
     state.pages = new Map();
     state.edits = [];
+    state.cleanedPages = {};
+    state.scanPages = [];
     state.active = null;
     state.addMode = false;
     state.search = { query: '', matches: [], active: -1 };
@@ -4032,6 +4829,15 @@ async function openPdfBytes(bytes, name, password = '', options = {}) {
     toast(t('msg.opened', { name: state.fileName, n: state.numPages }), 'success', {
       duration: 2600,
     });
+
+    // Détection des pages scannées (affiche « Nettoyer » dans la barre d'outils sans bloquer)
+    detectScannedPages(engine)
+      .then((pages) => {
+        if (token !== state.docToken) return;
+        state.scanPages = pages;
+        updateDock();
+      })
+      .catch(() => {});
 
     // Détection des champs AcroForm (sans bloquer le rendu)
     readFormFields(bytes)
@@ -4210,10 +5016,11 @@ async function bytesWithForm() {
 async function downloadModifiedPdf() {
   if (!state.engine) return;
   closeActive();
-  const ocrPages = collectOcrForSession();
   pushLoading(t('save.working'));
   try {
     const { exportPdf } = await import('./exporter.js');
+    const cleanedPages = hasCleanedPages() ? state.cleanedPages : null;
+    const ocrPages = await collectOcrPagesForExport({ includeOcr: true, cleanedPages });
     const result = await exportPdf({
       sourceBytes: await bytesWithForm(),
       edits: state.edits,
@@ -4221,6 +5028,7 @@ async function downloadModifiedPdf() {
       redactMode: 'stream',
       renderPage: null,
       objects: markup.objects,
+      cleanedPages,
     });
     const name = /\.pdf$/i.test(state.fileName || '') ? state.fileName : `${state.fileName || 'fichier-modifie'}.pdf`;
     const blob = new Blob([result.bytes], { type: 'application/pdf' });
@@ -4295,7 +5103,7 @@ function closeExportModal() {
 
 function fileNameSuffix(includeEdits, includeOcr) {
   const parts = [];
-  if (includeEdits && state.edits.length) parts.push('modifie');
+  if (includeEdits && (state.edits.length || hasCleanedPages())) parts.push('modifie');
   if (includeOcr) {
     const ocrPages = [...state.pages.values()].filter((p) => p.ocr).length;
     if (ocrPages) parts.push('ocr');
@@ -4319,9 +5127,20 @@ function closeExportMenu() {
 /** Rend une page du PDF source en canvas pour la rastérisation d'export. */
 async function renderPageForExport(pageNo) {
   const size = await state.engine.getPageSize(pageNo);
-  const scale = Math.min(3, 1800 / Math.max(1, size.width));
+  const scale = Math.max(1, Math.min(3, 1800 / Math.max(1, size.width)));
   const canvas = document.createElement('canvas');
-  await state.engine.renderToCanvas(pageNo, canvas, Math.max(1, scale));
+  const cleanInfo = state.cleanedPages?.[pageNo];
+  if (cleanInfo?.dataUrl && cleanInfo.preset !== 'original') {
+    const img = await loadCleanedImage(cleanInfo.dataUrl);
+    canvas.width = Math.max(1, Math.round(size.width * scale));
+    canvas.height = Math.max(1, Math.round(size.height * scale));
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (img) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas;
+  }
+  await state.engine.renderToCanvas(pageNo, canvas, scale);
   return canvas;
 }
 
@@ -4334,10 +5153,9 @@ async function handleExportPdf(options = {}) {
     return;
   }
   closeActive();
-  const ocrPages = includeOcr
-    ? [...state.pages.entries()].filter(([, p]) => p.ocr).map(([n, p]) => ({ pageNo: n, ocr: p.ocr }))
-    : [];
   const edits = includeEdits ? state.edits : [];
+  const cleanedPages = includeEdits && hasCleanedPages() ? state.cleanedPages : null;
+  const ocrPages = await collectOcrPagesForExport({ includeOcr, cleanedPages });
   const redactMode = els.expRedact?.value || 'stream';
 
   pushLoading(t('msg.exporting'));
@@ -4365,6 +5183,7 @@ async function handleExportPdf(options = {}) {
       renderPage: redactMode === 'raster' ? renderPageForExport : null,
       rasterQuality: Number(els.expQuality?.value || 1),
       objects: markup.objects,
+      cleanedPages,
     });
     const bytes = result.bytes;
     const suffix =
@@ -4397,9 +5216,20 @@ async function handleExportImage(format) {
   try {
     const n = state.pageIndex + 1;
     const size = await state.engine.getPageSize(n);
-    const scale = Math.min(3, 2200 / Math.max(1, size.width));
+    const scale = Math.max(1, Math.min(3, 2200 / Math.max(1, size.width)));
     const canvas = document.createElement('canvas');
-    await state.engine.renderToCanvas(n, canvas, Math.max(1, scale));
+    const cleanInfo = state.cleanedPages?.[n];
+    if (cleanInfo?.dataUrl && cleanInfo.preset !== 'original') {
+      const img = await loadCleanedImage(cleanInfo.dataUrl);
+      canvas.width = Math.max(1, Math.round(size.width * scale));
+      canvas.height = Math.max(1, Math.round(size.height * scale));
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (img) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    } else {
+      await state.engine.renderToCanvas(n, canvas, scale);
+    }
     const type = format === 'jpg' ? 'image/jpeg' : 'image/png';
     const quality = format === 'jpg' ? Number(els.expQuality?.value || 0.82) || 0.82 : 1;
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, type, quality));
@@ -4521,7 +5351,9 @@ function bindFormTools() {
 
 /** Confirmation avant de perdre les modifications en cours. */
 function confirmDiscard() {
-  if (!state.edits.length && ![...state.pages.values()].some((p) => p.ocr)) return Promise.resolve(true);
+  if (!state.edits.length && !hasCleanedPages() && ![...state.pages.values()].some((p) => p.ocr)) {
+    return Promise.resolve(true);
+  }
   return new Promise((resolve) => {
     const finish = (value) => {
       els.discardOk.removeEventListener('click', onOk);
@@ -5548,6 +6380,8 @@ async function applyFormValues() {
 /* ─────────────── Zoom de vignette pour la grille de pages ─────────────── */
 
 async function pageThumbDataUrl(n) {
+  const cleanInfo = state.cleanedPages?.[n];
+  if (cleanInfo?.dataUrl && cleanInfo.preset !== 'original') return cleanInfo.dataUrl;
   const canvas = document.createElement('canvas');
   try {
     await state.engine.renderToCanvas(n, canvas, 0.55);
@@ -5668,6 +6502,7 @@ function openOcrTool() {
     html: `${toolHeader('scan', t('ocr.oneGesture'), t('ocr.oneGestureHint'))}
       <div class="btn-row">
         <button class="btn primary" id="ocrOne" type="button">${icon('sparkle', 16)}<span>${t('ocr.makeEditable')}</span></button>
+        <button class="btn soft" id="ocrCleanSheet" type="button">${icon('sparkle', 16)}<span>${t('tool.clean')}</span></button>
       </div>
       <div id="ocrOneProgress" hidden>${progressMarkup(t('ocr.init'))}</div>
       <div class="ocr-langs-mini">
@@ -5676,6 +6511,10 @@ function openOcrTool() {
       </div>`,
   });
   if (!body) return;
+  body.querySelector('#ocrCleanSheet')?.addEventListener('click', () => {
+    closeSheet();
+    openCleanSheet();
+  });
   const langs = [...document.querySelectorAll('#ocrLang input:checked')].map((i) => i.value);
   const detected = body.querySelector('#ocrDetected');
   if (detected && langs.length) detected.textContent = langs.join(' · ');
@@ -6396,6 +7235,9 @@ async function openTool(id) {
     routeTo('doc');
     return openOcrTool();
   }
+  if (id === 'clean') {
+    return openCleanSheet();
+  }
   if (!state.engine) {
     toast(t('tool.needDoc'), 'warn', { duration: 4200 });
     els.fileInput.click();
@@ -6713,6 +7555,8 @@ function bindEvents() {
     const b = e.target.closest('[data-page]');
     if (b) goToPage(Number(b.dataset.page));
   });
+  document.getElementById('btnCleanFromOcr')?.addEventListener('click', () => openCleanSheet());
+  document.getElementById('btnCleanAfterOcr')?.addEventListener('click', () => openCleanSheet());
 
   // Texte
   els.btnCopyPageText.addEventListener('click', async () => {
@@ -7167,6 +8011,10 @@ window.__pdfStudio = {
   setReadMode,
   /** Tests : document tel qu'utilisé par Compresser / Protéger / Convertir. */
   currentDocumentSource,
+  buildCurrentPdf,
+  openCleanSheet,
+  applyCleanToPages,
+  openWatermarkSheet,
   openPdfBytes,
   getPageText,
   exportPdf: (...args) => import('./exporter.js').then((m) => m.exportPdf(...args)),
@@ -7226,8 +8074,13 @@ window.__pdfStudio = {
       at: Date.now(),
     };
     pd.ocrStatus = 'done';
+    if (els.expOcr) els.expOcr.checked = true;
     renderOverlay();
     renderEditList();
+    updateExportUi();
+    updateDock();
+    updateOcrPanel();
+    updateTextPanel();
     return normalized.length;
   },
 };

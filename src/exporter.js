@@ -292,6 +292,17 @@ async function canvasToImageBytes(canvas, quality = 1) {
   return { bytes: new Uint8Array(await blob.arrayBuffer()), type };
 }
 
+function dataUrlToBytes(dataUrl) {
+  const str = String(dataUrl || '');
+  const comma = str.indexOf(',');
+  if (!str.startsWith('data:') || comma < 0) throw new Error('dataUrl invalide');
+  const mime = str.slice(5, comma).split(';')[0] || 'image/jpeg';
+  const bin = atob(str.slice(comma + 1));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return { bytes, type: mime };
+}
+
 /**
  * @param {object} options
  * @param {Uint8Array} options.sourceBytes
@@ -299,6 +310,7 @@ async function canvasToImageBytes(canvas, quality = 1) {
  * @param {Array<{pageNo:number, ocr:object}>} options.ocrPages
  * @param {'stream'|'raster'|'mask'} [options.redactMode]
  * @param {(pageNo:number)=>Promise<HTMLCanvasElement>} [options.renderPage]
+ * @param {Record<number, {dataUrl:string, preset?:string}>} [options.cleanedPages]
  * @returns {Promise<{bytes:Uint8Array, stats:object, missingChars:Array}>}
  */
 export async function exportPdf({
@@ -309,6 +321,7 @@ export async function exportPdf({
   renderPage = null,
   rasterQuality = 1,
   objects = [],
+  cleanedPages = null,
 }) {
   const pdfDoc = await PDFDocument.load(sourceBytes, {
     ignoreEncryption: true,
@@ -389,7 +402,31 @@ export async function exportPdf({
     editsByPage.get(e.page).push(e);
   }
 
-  const stats = { removedPages: [], rasterizedPages: [], maskedPages: [] };
+  const stats = { removedPages: [], rasterizedPages: [], maskedPages: [], cleanedPages: [] };
+
+  // 0. Remplacement de l'image des pages nettoyées (« Nettoyer la feuille » / filigrane d'image)
+  if (cleanedPages && typeof cleanedPages === 'object') {
+    const entries = cleanedPages instanceof Map ? [...cleanedPages.entries()] : Object.entries(cleanedPages);
+    for (const [rawPage, info] of entries) {
+      const pageNo = Number(rawPage);
+      if (!info?.dataUrl || info.preset === 'original') continue;
+      const page = pages[pageNo - 1];
+      if (!page) continue;
+      try {
+        const { width: pageW, height: pageH } = page.getSize();
+        const encoded = dataUrlToBytes(info.dataUrl);
+        const image =
+          encoded.type === 'image/png'
+            ? await pdfDoc.embedPng(encoded.bytes)
+            : await pdfDoc.embedJpg(encoded.bytes);
+        page.node.delete(PDFName.of('Contents'));
+        page.drawImage(image, { x: 0, y: 0, width: pageW, height: pageH });
+        stats.cleanedPages.push(pageNo);
+      } catch (err) {
+        console.warn(`[exporter] page nettoyée ${pageNo} ignorée`, err);
+      }
+    }
+  }
 
   // 1. Suppression réelle du texte d'origine (ou rastérisation si demandée)
   let removedBoxes = new Map();
