@@ -827,7 +827,8 @@ const continuousState = {
   docToken: 0,
   numPages: 0,
   scale: 0,
-  defaultBase: null,
+  sizesEngine: null,
+  sizesPromise: null,
   baseSizes: new Map(),
   viewports: new Map(),
   renderTasks: new Map(),
@@ -836,6 +837,53 @@ const continuousState = {
   visible: new Set(),
   observer: null,
 };
+
+/**
+ * Lit la vraie taille de chaque page (getViewport({ scale: 1 }) de pdf.js,
+ * rapide et sans aucun rendu de pixels) afin qu'un document mélangeant portrait
+ * et paysage ne saute jamais pendant le défilement continu.
+ */
+async function ensureContinuousPageSizes(engine = state.engine) {
+  if (!engine || !engine.numPages) return;
+  if (continuousState.sizesEngine === engine && continuousState.baseSizes.size === engine.numPages) {
+    return;
+  }
+  if (continuousState.sizesPromise && continuousState.sizesEngine === engine) {
+    return continuousState.sizesPromise;
+  }
+  if (continuousState.sizesEngine !== engine) {
+    continuousState.baseSizes.clear();
+    continuousState.viewports.clear();
+    continuousState.sizesEngine = engine;
+  }
+  const job = (async () => {
+    const total = engine.numPages;
+    const BATCH = 24;
+    for (let start = 1; start <= total; start += BATCH) {
+      if (state.engine !== engine) return;
+      const end = Math.min(total, start + BATCH - 1);
+      const batch = [];
+      for (let p = start; p <= end; p++) {
+        if (continuousState.baseSizes.has(p)) continue;
+        batch.push(
+          engine.getPage(p).then((pageObj) => {
+            const vp = pageObj.getViewport({ scale: 1 });
+            continuousState.baseSizes.set(p, { width: vp.width, height: vp.height });
+          })
+        );
+      }
+      if (batch.length) await Promise.all(batch);
+    }
+  })();
+  continuousState.sizesPromise = job;
+  try {
+    await job;
+  } finally {
+    if (continuousState.sizesPromise === job) {
+      continuousState.sizesPromise = null;
+    }
+  }
+}
 
 function cleanSigForPage(pageNo) {
   const info = state.cleanedPages?.[pageNo];
@@ -946,7 +994,8 @@ function teardownContinuousRead({ resetCache = false } = {}) {
     continuousState.docToken = 0;
     continuousState.numPages = 0;
     continuousState.scale = 0;
-    continuousState.defaultBase = null;
+    continuousState.sizesEngine = null;
+    continuousState.sizesPromise = null;
     continuousState.baseSizes.clear();
     continuousState.viewports.clear();
   }
@@ -1107,16 +1156,14 @@ function refreshContinuousOverlays() {
 }
 
 async function renderContinuous(token) {
+  await ensureContinuousPageSizes(state.engine);
   const anchorPage = U.clamp(state.pageIndex + 1, 1, state.numPages);
   const page = await state.engine.getPage(anchorPage);
   if (token !== state.renderToken || !isContinuousRead()) return;
 
   positionDock();
-  const base = page.getViewport({ scale: 1 });
+  const base = continuousState.baseSizes.get(anchorPage) || page.getViewport({ scale: 1 });
   continuousState.baseSizes.set(anchorPage, { width: base.width, height: base.height });
-  if (!continuousState.defaultBase) {
-    continuousState.defaultBase = { width: base.width, height: base.height };
-  }
 
   const narrow = window.matchMedia('(max-width: 900px)').matches;
   const gutter = narrow ? 16 : 56;
@@ -1177,13 +1224,15 @@ async function renderContinuous(token) {
     els.overlay.dataset.staticMode = '1';
   }
 
-  const fallbackBase = continuousState.defaultBase || { width: base.width, height: base.height };
   for (let p = 1; p <= state.numPages; p++) {
     const { slot, canvas } = getReadSlotParts(p);
     if (!slot) continue;
-    const b = continuousState.baseSizes.get(p) || fallbackBase;
-    const w = b.width * scale;
-    const h = b.height * scale;
+    const pageObj = await state.engine.getPage(p);
+    if (token !== state.renderToken || !isContinuousRead()) return;
+    const vp = pageObj.getViewport({ scale });
+    continuousState.viewports.set(p, vp);
+    const w = vp.width;
+    const h = vp.height;
     slot.style.width = `${w}px`;
     slot.style.height = `${h}px`;
     if (canvas && !continuousState.rendered.has(p)) {
@@ -5626,6 +5675,7 @@ async function openPdfBytes(bytes, name, password = '', options = {}) {
     state.scale = 1;
     state.viewport = null;
     teardownContinuousRead({ resetCache: true });
+    await ensureContinuousPageSizes(engine);
     state.pages = new Map();
     state.edits = [];
     state.cleanedPages = {};
