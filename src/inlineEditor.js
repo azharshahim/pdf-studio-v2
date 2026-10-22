@@ -71,6 +71,7 @@ export function createInlineEditor({
   onCommit,
   onDelete,
   onDuplicate,
+  renderText = null,
 }) {
   let shell = null;
   let textEl = null;
@@ -138,7 +139,34 @@ export function createInlineEditor({
   function writeText(value) {
     if (!textEl) return;
     if (textEl.tagName === 'TEXTAREA') textEl.value = value;
+    else if (renderText && edit && value === (edit.text || '')) renderText(textEl, edit);
     else textEl.textContent = value;
+  }
+
+  /** Nœud texte et position correspondant à un indice dans le texte (styles = plusieurs nœuds). */
+  function domPointAt(offset) {
+    const walker = document.createTreeWalker(textEl, NodeFilter.SHOW_TEXT);
+    let rest = Math.max(0, offset);
+    let lastNode = null;
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (rest <= n.data.length) return { node: n, off: rest };
+      rest -= n.data.length;
+      lastNode = n;
+    }
+    return lastNode ? { node: lastNode, off: lastNode.data.length } : null;
+  }
+
+  /** Indice dans le texte d'une position du DOM de la surface. */
+  function offsetOf(node, off) {
+    if (!textEl || !node || !textEl.contains(node)) return 0;
+    const r = document.createRange();
+    r.selectNodeContents(textEl);
+    try {
+      r.setEnd(node, off);
+    } catch {
+      return 0;
+    }
+    return r.toString().length;
   }
 
   /** Position du curseur dans la surface courante. */
@@ -146,10 +174,43 @@ export function createInlineEditor({
     if (!textEl) return 0;
     if (textEl.tagName === 'TEXTAREA') return textEl.selectionStart ?? 0;
     const selection = window.getSelection();
-    const node = textEl.firstChild;
-    if (!selection || !selection.anchorNode || !node) return 0;
-    if (selection.anchorNode === node) return selection.anchorOffset;
-    return textEl.contains(selection.anchorNode) ? (selection.anchorOffset || 0) : 0;
+    if (!selection || !selection.anchorNode || !textEl.firstChild) return 0;
+    if (selection.anchorNode === textEl.firstChild && textEl.childNodes.length === 1) return selection.anchorOffset;
+    return offsetOf(selection.anchorNode, selection.anchorOffset || 0);
+  }
+
+  /** Sélection courante (indices de début et de fin dans le texte), ou null. */
+  function selectionOffsets() {
+    if (!textEl || !isOpen()) return null;
+    if (textEl.tagName === 'TEXTAREA') {
+      return { start: textEl.selectionStart ?? 0, end: textEl.selectionEnd ?? 0 };
+    }
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return null;
+    const r = sel.getRangeAt(0);
+    if (!textEl.contains(r.startContainer) || !textEl.contains(r.endContainer)) return null;
+    const a = offsetOf(r.startContainer, r.startOffset);
+    const b = offsetOf(r.endContainer, r.endOffset);
+    return { start: Math.min(a, b), end: Math.max(a, b) };
+  }
+
+  /** Redessine le texte stylé (après une mise en forme) en gardant la sélection. */
+  function rerenderText() {
+    if (!textEl || !edit || textEl.tagName === 'TEXTAREA') return;
+    const sel = selectionOffsets();
+    writeText(edit.text || '');
+    if (sel) {
+      const a = domPointAt(sel.start);
+      const b = domPointAt(sel.end);
+      const s2 = window.getSelection();
+      if (a && b && s2) {
+        const r = document.createRange();
+        r.setStart(a.node, a.off);
+        r.setEnd(b.node, b.off);
+        s2.removeAllRanges();
+        s2.addRange(r);
+      }
+    }
   }
 
   function buildSurfaceListeners(el) {
@@ -518,15 +579,17 @@ export function createInlineEditor({
     if (!selection) return { offset: 0, word: false };
     const range = document.createRange();
     const node = textEl.firstChild;
+    const pa = domPointAt(word && length ? start : target);
+    const pb = word && length ? domPointAt(end) : pa;
     if (selectAll && length) {
       range.selectNodeContents(textEl);
-    } else if (node && node.nodeType === Node.TEXT_NODE) {
+    } else if (node && pa && pb) {
       if (word && length) {
-        range.setStart(node, start);
-        range.setEnd(node, end);
+        range.setStart(pa.node, pa.off);
+        range.setEnd(pb.node, pb.off);
       } else {
         // Curseur dans le nœud texte : évite un décalage au début du bloc.
-        range.setStart(node, target);
+        range.setStart(pa.node, pa.off);
         range.collapse(true);
       }
     } else {
@@ -792,6 +855,8 @@ export function createInlineEditor({
     isOpen,
     isDragging: () => !!dragState || Date.now() - lastDragEndAt < 180,
     caretOffset,
+    selectionOffsets,
+    rerenderText,
     get edit() {
       return edit;
     },

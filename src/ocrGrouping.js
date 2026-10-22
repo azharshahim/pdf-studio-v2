@@ -237,6 +237,11 @@ export function groupOcrWords(words) {
       text: joinSegmentTokens(seg.items),
       bbox: { x0: seg.x0, y0: seg.y0, x1: seg.x1, y1: seg.y1 },
       bold: seg.bold,
+      words: seg.items.map((i) => ({
+        text: i.text,
+        bbox: { x0: i.x0, y0: i.y0, x1: i.x1, y1: i.y1 },
+        ...(typeof i.bold === 'boolean' ? { bold: i.bold } : {}),
+      })),
       confidence: Math.round(
         seg.items.reduce((sum, i) => sum + (i.confidence || 0), 0) / Math.max(1, seg.items.length)
       ),

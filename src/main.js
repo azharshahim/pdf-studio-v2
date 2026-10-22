@@ -37,6 +37,7 @@ import { createMarkup, HIGHLIGHT_COLORS, STAMP_PRESETS } from './markup.js';
 import { computeEditZoom, centerAxis } from './zoomView.js';
 import { groupLinesIntoParagraphs, buildUnitFromGroup, wrapTextToWidth } from './paragraphs.js';
 import { hyphenateText, stripShy, SHY } from './hyphenate.js';
+import { syncRuns, runsFromTokens, runsFromChars, hasMixedRuns, charStyles, applyStyleToAllRuns } from './styleRuns.js';
 import { groupOcrWords } from './ocrGrouping.js';
 import {
   renderPagesGrid,
@@ -305,6 +306,7 @@ const inline = createInlineEditor({
   onCommit: () => closeActive(),
   onDelete: () => deleteActiveEdit(),
   onDuplicate: () => duplicateActiveEdit(),
+  renderText: (el, e) => fillStyledText(el, e),
 });
 
 const markup = createMarkup({
@@ -1631,7 +1633,7 @@ function sampleBackgroundForBbox(bbox) {
 /** Échantillonne le fond et la couleur dominante du texte d'un bloc. */
 function sampleColorsForBbox(bbox) {
   const bg = sampleBackgroundForBbox(bbox);
-  const fallback = { bg, fg: '#111827' };
+  const fallback = { bg, fg: '#111827', found: false };
   if (!state.viewport) return fallback;
   const rect = pdfRectToViewportRect(bbox, state.viewport);
   const canvas = els.pdfCanvas;
@@ -1672,7 +1674,7 @@ function sampleColorsForBbox(bbox) {
     }
   }
   if (!best || bestDist < 42 * 42) return fallback;
-  return { bg, fg: U.rgbToHex(best[0], best[1], best[2]) };
+  return { bg, fg: U.rgbToHex(best[0], best[1], best[2]), found: true };
 }
 
 function clearOverlay() {
@@ -3000,7 +3002,7 @@ function appendPageEditsToOverlay(targetOverlay, pageEdits, vp, scale, activeId 
 
     const span = document.createElement('span');
     span.className = 'edit-text';
-    span.textContent = e.wrap ? editDisplayText(e) : e.text || '';
+    fillStyledText(span, e, e.wrap ? editDisplayText(e) : e.text || '');
     span.style.display = 'block';
     span.style.whiteSpace = e.wrap ? 'pre-wrap' : 'pre';
     if (e.wrap) {
@@ -3437,7 +3439,31 @@ function bindEditPanel() {
 function applyFormat(mutator) {
   const e = state.active?.edit;
   if (!e) return;
+  syncRuns(e);
+  const KEYS = ['bold', 'italic', 'color'];
+  const before = { bold: !!e.bold, italic: !!e.italic, color: e.color };
+  const sel = inline.selectionOffsets?.();
+  const hasSel = !!sel && sel.end > sel.start && sel.end <= String(e.text || '').length;
+  const styled = hasSel && hasMixedRuns(e) ? charStyles(syncRuns(e)) : null;
   mutator(e);
+  let restyled = false;
+  for (const key of KEYS) {
+    const after = key === 'color' ? e.color : !!e[key];
+    if (after === before[key]) continue;
+    if (hasSel && !(sel.start === 0 && sel.end === String(e.text || '').length)) {
+      // Mise en forme de la sélection seulement : le reste du bloc garde ses styles.
+      const chars = styled || charStyles(syncRuns({ ...e, ...before, runs: undefined }));
+      const value = key === 'color' ? after : !(chars[sel.start] || before)[key];
+      const next = chars.map((st, i) => (i >= sel.start && i < sel.end ? { ...st, [key]: value } : st));
+      e[key] = before[key];
+      e.runs = runsFromChars(String(e.text || ''), next);
+      syncRuns(e);
+    } else if (Array.isArray(e.runs)) {
+      applyStyleToAllRuns(e, key, after);
+    }
+    restyled = true;
+  }
+  if (restyled) inline.rerenderText?.();
   inline.refresh();
   syncFormatbar();
   onInlineChange();
@@ -3634,6 +3660,50 @@ const refreshTextEcho = U.debounce(() => {
 
 let wrapMeasureEl = null;
 
+/**
+ * Remplit `container` avec le texte d'un bloc : texte simple si le bloc n'a
+ * qu'un style, sinon un <span> par segment (gras, italique, couleur d'origine).
+ * `display` peut contenir des traits d'union conditionnels (U+00AD) en plus
+ * du texte du bloc : ils prennent le style du caractère précédent.
+ */
+function fillStyledText(container, edit, display = String(edit?.text || '')) {
+  container.textContent = '';
+  if (!hasMixedRuns(edit)) {
+    container.textContent = display;
+    return;
+  }
+  const styles = charStyles(syncRuns(edit));
+  let raw = 0;
+  let cur = null;
+  let buf = '';
+  const flush = () => {
+    if (!buf) return;
+    const sp = document.createElement('span');
+    sp.className = 'run';
+    sp.style.fontWeight = cur.bold ? '700' : '400';
+    sp.style.fontStyle = cur.italic ? 'italic' : 'normal';
+    sp.style.color = cur.color || '#111827';
+    sp.textContent = buf;
+    container.appendChild(sp);
+    buf = '';
+  };
+  for (let i = 0; i < display.length; i++) {
+    const ch = display[i];
+    let st;
+    if (ch === SHY) st = cur || styles[0];
+    else {
+      st = styles[raw] || cur || styles[0];
+      raw++;
+    }
+    if (!cur || !(!!cur.bold === !!st.bold && !!cur.italic === !!st.italic && cur.color === st.color)) {
+      flush();
+      cur = st;
+    }
+    buf += ch;
+  }
+  flush();
+}
+
 /** Retrait de première ligne d'un bloc (pt), seulement pour un texte aligné à gauche ou justifié. */
 function editFirstIndent(edit) {
   const ind = Number(edit?.indent) || 0;
@@ -3735,17 +3805,42 @@ function computeEditWrappedLines(edit) {
     const ends = [];
     const range = document.createRange();
     let firstPara = true;
+    // Segments stylés de chaque paragraphe (le texte affiché est découpé sur `\n`).
+    const mixed = hasMixedRuns(edit);
+    const allStyles = mixed ? charStyles(syncRuns(edit)) : null;
+    let rawPos = 0;
+    const paraRuns = (para) => {
+      if (!mixed) return undefined;
+      const plain = stripShy(para);
+      const st = allStyles.slice(rawPos, rawPos + plain.length);
+      rawPos += plain.length + 1; // + le retour à la ligne
+      const runs = [];
+      for (let k = 0; k < plain.length; k++) {
+        const x = st[k] || st[st.length - 1] || allStyles[0];
+        const prev = runs[runs.length - 1];
+        if (prev && !!prev.bold === !!x.bold && !!prev.italic === !!x.italic && prev.color === x.color) prev.text += plain[k];
+        else runs.push({ text: plain[k], bold: !!x.bold, italic: !!x.italic, color: x.color });
+      }
+      return runs;
+    };
     for (const para of display.split('\n')) {
       wrapMeasureEl.style.textIndent = firstPara && indentPx ? `${indentPx}px` : '0px';
       firstPara = false;
       if (!para) {
+        if (mixed) rawPos += 1;
         out.push('');
         ends.push(true);
         continue;
       }
-      wrapMeasureEl.textContent = para;
-      const node = wrapMeasureEl.firstChild;
-      if (!node || node.nodeType !== Node.TEXT_NODE) {
+      // Texte stylé (mots gras plus larges, etc.) : chaque caractère est
+      // retrouvé dans son nœud texte pour mesurer sa position.
+      fillStyledText(wrapMeasureEl, { ...edit, text: stripShy(para), runs: paraRuns(para) }, para);
+      const map = [];
+      const walker = document.createTreeWalker(wrapMeasureEl, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        for (let k = 0; k < n.data.length; k++) map.push([n, k]);
+      }
+      if (map.length !== para.length) {
         out.push(stripShy(para));
         ends.push(true);
         continue;
@@ -3755,8 +3850,8 @@ function computeEditWrappedLines(edit) {
       const len = para.length;
       for (let i = 0; i < len; i++) {
         if (para[i] === ' ' || para[i] === SHY) continue;
-        range.setStart(node, i);
-        range.setEnd(node, i + 1);
+        range.setStart(map[i][0], map[i][1]);
+        range.setEnd(map[i][0], map[i][1] + 1);
         const rects = range.getClientRects();
         const r = rects[rects.length - 1];
         if (!r || (!r.width && !r.height)) continue;
@@ -3800,6 +3895,7 @@ function computeEditWrappedLines(edit) {
 }
 
 function onInlineChange() {
+  if (state.active?.edit) syncRuns(state.active.edit);
   if (state.active?.edit?.wrap) {
     computeEditWrappedLines(state.active.edit);
   }
@@ -3826,6 +3922,7 @@ function editSignature(e) {
     Number(e.hScale) || 100,
     !!e.wrap,
     e.wrappedLines || null,
+    e.runs || null,
     e.bbox ? [Math.round(e.bbox.x), Math.round(e.bbox.y), Math.round(e.bbox.w), Math.round(e.bbox.h)] : null,
   ]);
 }
@@ -3940,11 +4037,143 @@ function guessScanLineStyle(line) {
   };
 }
 
+/** Distance entre deux couleurs « #rrggbb » (0 à ~441). */
+function colorDistance(a, b) {
+  const x = U.hexToRgb01(a || '#000000');
+  const y = U.hexToRgb01(b || '#000000');
+  return Math.hypot((x.r - y.r) * 255, (x.g - y.g) * 255, (x.b - y.b) * 255);
+}
+
+/**
+ * Mots d'une ligne avec leur cadre sur la page : mots OCR quand ils
+ * correspondent au texte, sinon position estimée à partir de la largeur de
+ * chaque mot dans la police de la ligne.
+ */
+function lineWordTokens(line, offset = 0) {
+  const text = String(line.text || '');
+  const tokens = [];
+  const re = /\S+/g;
+  let m;
+  while ((m = re.exec(text))) tokens.push({ start: m.index, end: m.index + m[0].length, text: m[0] });
+  if (!tokens.length) return [];
+  // 1. Mots OCR retrouvés dans l'ordre dans le texte (texte non corrigé après coup).
+  const words = Array.isArray(line.words) ? line.words : null;
+  if (words && words.length) {
+    let cursor = 0;
+    const placed = [];
+    let ok = true;
+    for (const w of words) {
+      const wt = String(w.text || '').trim();
+      const at = wt ? text.indexOf(wt, cursor) : -1;
+      if (at < 0) {
+        ok = false;
+        break;
+      }
+      placed.push({ start: at, end: at + wt.length, bbox: w.bbox, bold: w.bold });
+      cursor = at + wt.length;
+    }
+    if (ok && placed.length) {
+      return placed.map((t) => ({ ...t, start: t.start + offset, end: t.end + offset }));
+    }
+  }
+  // 2. Position estimée.
+  const b = line.bbox;
+  let widths;
+  try {
+    measureCtx.font = `${line.italic ? 'italic ' : ''}${line.bold ? '700' : '400'} 20px ${U.cssFontFamily(line.font || 'Helvetica')}`;
+    widths = (str) => measureCtx.measureText(str).width;
+  } catch {
+    widths = (str) => str.length;
+  }
+  const full = Math.max(1, widths(text));
+  return tokens.map((t) => {
+    const x0 = b.x + (widths(text.slice(0, t.start)) / full) * b.w;
+    const x1 = b.x + (widths(text.slice(0, t.end)) / full) * b.w;
+    return {
+      start: t.start + offset,
+      end: t.end + offset,
+      bbox: { x: x0, y: b.y, w: Math.max(1, x1 - x0), h: b.h },
+      bold: undefined,
+    };
+  });
+}
+
+/**
+ * Style d'origine de chaque mot d'un bloc (gras, couleur) : le bloc garde ces
+ * styles à l'édition au lieu de tout passer dans le style du premier mot.
+ * `parts` : [{ line, offset }] (offset = position de la ligne dans edit.text).
+ */
+function applyOriginalStyles(edit, parts) {
+  if (!state.viewport) return edit;
+  const base = { bold: !!edit.bold, italic: !!edit.italic, color: edit.color || '#111827' };
+  const tokens = [];
+  for (const { line, offset } of parts) {
+    const toks = lineWordTokens(line, offset);
+    const lineBold = typeof line.bold === 'boolean' ? line.bold : base.bold;
+    for (const t of toks) {
+      const sampled = t.bbox ? sampleColorsForBbox(t.bbox) : null;
+      const fg = sampled?.found ? sampled.fg : base.color;
+      tokens.push({
+        start: t.start,
+        end: t.end,
+        bold: line.source === 'ocr' && typeof t.bold === 'boolean' ? t.bold : lineBold,
+        italic: !!line.italic,
+        color: fg,
+      });
+    }
+  }
+  if (tokens.length < 2) return edit;
+  // Couleurs : un mot fin ou une ponctuation paraît plus clair (anticrénelage) sans
+  // changer d'encre. Une couleur est « la même encre » si elle se trouve entre le
+  // fond et la couleur de référence (même teinte, contraste moindre).
+  const bgHex = edit.bg && edit.bg !== 'none' ? edit.bg : '#ffffff';
+  const sameInk = (c, ref) => {
+    const B = U.hexToRgb01(bgHex);
+    const C = U.hexToRgb01(c);
+    const R = U.hexToRgb01(ref);
+    const v = [(C.r - B.r) * 255, (C.g - B.g) * 255, (C.b - B.b) * 255];
+    const r = [(R.r - B.r) * 255, (R.g - B.g) * 255, (R.b - B.b) * 255];
+    const rr = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
+    if (rr < 1) return colorDistance(c, ref) < 40;
+    const t = (v[0] * r[0] + v[1] * r[1] + v[2] * r[2]) / rr;
+    const perp = Math.hypot(v[0] - t * r[0], v[1] - t * r[1], v[2] - t * r[2]);
+    return t > 0.2 && t < 1.6 && perp < 45;
+  };
+  const inkStrength = (c) => colorDistance(c, bgHex);
+  const groups = [{ color: base.color, members: [] }];
+  for (const t of tokens) {
+    let g = groups.find((x) => sameInk(t.color, x.color));
+    if (!g) {
+      g = { color: t.color, members: [] };
+      groups.push(g);
+    }
+    g.members.push(t);
+    // Représentant d'un groupe secondaire : sa nuance la plus marquée.
+    if (g !== groups[0] && inkStrength(t.color) > inkStrength(g.color)) g.color = t.color;
+  }
+  for (const g of groups) for (const t of g.members) t.color = g.color;
+  // Une ponctuation ou un mot d'un ou deux caractères isolé ne crée pas à lui seul une couleur.
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.end - t.start > 2 || t.color === base.color) continue;
+    const prev = tokens[i - 1]?.color;
+    const next = tokens[i + 1]?.color;
+    if (prev !== t.color && next !== t.color) t.color = prev || next || base.color;
+  }
+  const { runs, major } = runsFromTokens(edit.text, tokens, base);
+  edit.bold = major.bold;
+  edit.italic = major.italic;
+  edit.color = major.color;
+  edit.runs = runs;
+  syncRuns(edit);
+  return edit;
+}
+
 function makeEditFromLine(line, pageNo) {
   const { bg, fg } = sampleColorsForBbox(line.bbox);
   const scanStyle = line.hiddenLayer || line.source === 'ocr' ? guessScanLineStyle(line) : null;
   if (scanStyle) preloadScanFonts();
-  return {
+  const edit = {
     id: U.uid('edit'),
     page: pageNo,
     kind: 'edit',
@@ -3978,6 +4207,7 @@ function makeEditFromLine(line, pageNo) {
     fit: !!scanStyle,
     confidence: typeof line.confidence === 'number' ? line.confidence : undefined,
   };
+  return applyOriginalStyles(edit, [{ line: scanStyle && typeof line.bold !== 'boolean' ? { ...line, bold: scanStyle.bold } : line, offset: 0 }]);
 }
 
 function makeEditFromParagraph(unit, pageNo) {
@@ -4047,6 +4277,17 @@ function makeEditFromParagraph(unit, pageNo) {
     bg,
     confidence: typeof unit.confidence === 'number' ? unit.confidence : undefined,
   };
+  // Position de chaque ligne d'origine dans le texte du paragraphe (lignes jointes par un espace).
+  const parts = [];
+  let off = 0;
+  for (const l of unit.lines) {
+    const t = l.text.trim();
+    const at = unit.text.indexOf(t, off);
+    if (at < 0) break;
+    parts.push({ line: { ...l, text: t, bold: typeof l.bold === 'boolean' ? l.bold : bold }, offset: at });
+    off = at + t.length;
+  }
+  if (parts.length === unit.lines.length) applyOriginalStyles(edit, parts);
   computeEditWrappedLines(edit);
   return edit;
 }
@@ -5245,6 +5486,10 @@ async function runOcrOnPage(n, langs, onProgress) {
         font: 'Helvetica',
         fontSize: U.clamp(bbox.h * 1.2, 5, 72),
         ...(typeof seg.bold === 'boolean' ? { bold: seg.bold } : {}),
+        // Mots de la ligne (position, gras) : gardent le style de chaque mot à l'édition.
+        ...(Array.isArray(seg.words) && seg.words.length > 1
+          ? { words: seg.words.map((w) => ({ text: w.text, bbox: mapBox(w.bbox), ...(typeof w.bold === 'boolean' ? { bold: w.bold } : {}) })) }
+          : {}),
         baseline: bbox.y + bbox.h * 0.24,
         bbox,
         confidence: seg.confidence,
@@ -9335,6 +9580,8 @@ window.__pdfStudio = {
       fontSize: line.fontSize ?? 12,
       baseline: line.baseline ?? line.bbox.y + line.bbox.h * 0.24,
       bbox: line.bbox,
+      ...(typeof line.bold === 'boolean' ? { bold: line.bold } : {}),
+      ...(Array.isArray(line.words) ? { words: line.words } : {}),
       confidence: line.confidence ?? 0.92,
     }));
     pd.ocr = {

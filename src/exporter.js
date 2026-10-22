@@ -28,6 +28,7 @@ import { ArabicShaper } from 'arabic-persian-reshaper';
 import bidiFactory from 'bidi-js';
 import { assetUrl, clamp, hexToRgb01 } from './utils.js';
 import { removeTextInBBoxes } from './textRemoval.js';
+import { hasMixedRuns, styledLinesFor, runsPerHardLine } from './styleRuns.js';
 import { arrowGeometry } from './markup.js';
 import { catalogFont, catalogFile, localFontBytes } from './fonts.js';
 
@@ -539,9 +540,31 @@ export async function exportPdf({
         : prepareTextForPdf(raw).split('\n');
       let size = clamp(Number(e.size) || 12, 4, 300);
 
+      // Styles d'origine par mot (gras, italique, couleur) : chaque segment
+      // garde sa police et sa couleur. Texte de droite à gauche : style unique.
+      const mixed = hasMixedRuns(e) && !/[\u0590-\u08FF\uFB1D-\uFEFF]/.test(raw);
+      const styledLines = mixed ? (hasScreenLines ? styledLinesFor(e, e.wrappedLines) : runsPerHardLine(e)) : null;
+
       // Prépare chaque ligne en segments (arabe / latin / symboles).
       const prepared = [];
-      for (const line of preparedLines) {
+      if (styledLines) {
+        for (const segs of styledLines) {
+          const runs = [];
+          for (const seg of segs) {
+            for (const run of splitScriptRuns(prepareTextForPdf(seg.text))) {
+              const resolved = await resolveRunFont(run, e.font, seg.bold, seg.italic);
+              const text = resolved.unicode ? run.text : sanitizePdfText(run.text);
+              if (!text) continue;
+              if (resolved.unicode && resolved.file) {
+                for (const ch of missingInFont(run.text, resolved.file)) missingChars.add(ch);
+              }
+              runs.push({ text, font: resolved.font, rgb: hexToRgb01(seg.color || e.color || '#111827') });
+            }
+          }
+          prepared.push(runs);
+        }
+      }
+      for (const line of styledLines ? [] : preparedLines) {
         const runs = [];
         for (const run of splitScriptRuns(line)) {
           const resolved = await resolveRunFont(run, e.font, e.bold, e.italic);
@@ -620,7 +643,7 @@ export async function exportPdf({
         for (const r of lineRuns) {
           const parts = r.text.match(/ +|[^ ]+/g) || [];
           for (const p of parts) {
-            toks.push({ text: p, font: r.font, isSpace: p[0] === ' ' });
+            toks.push({ text: p, font: r.font, rgb: r.rgb, isSpace: p[0] === ' ' });
           }
         }
         while (toks.length && toks[0].isSpace) toks.shift();
@@ -660,7 +683,7 @@ export async function exportPdf({
                 y,
                 size,
                 font: tok.font,
-                color: rgb(color.r, color.g, color.b),
+                color: rgb((tok.rgb || color).r, (tok.rgb || color).g, (tok.rgb || color).b),
               });
               x += runW(tok, size) + extraPerSpace * tok.text.length;
             } else {
@@ -669,7 +692,7 @@ export async function exportPdf({
                 y,
                 size,
                 font: tok.font,
-                color: rgb(color.r, color.g, color.b),
+                color: rgb((tok.rgb || color).r, (tok.rgb || color).g, (tok.rgb || color).b),
               });
               x += runW(tok, size);
             }
@@ -698,7 +721,7 @@ export async function exportPdf({
               y,
               size,
               font: run.font,
-              color: rgb(color.r, color.g, color.b),
+              color: rgb((run.rgb || color).r, (run.rgb || color).g, (run.rgb || color).b),
             });
             x += runW(run, size);
           }
