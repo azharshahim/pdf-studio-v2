@@ -5523,3 +5523,53 @@ body.editing-wide .ep-hint {
 .btn.danger {
   color: var(--danger, #dc2626);
 }
+
+/* Bouton « version » et feuille associée */
+.version-chip {
+  margin-left: 8px;
+  align-self: center;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font: 600 11px var(--font);
+  cursor: pointer;
+}
+.version-chip:hover {
+  color: var(--text);
+  border-color: var(--line-2);
+}
+.ver-box {
+  display: grid;
+  gap: 14px;
+  padding: 4px 2px 12px;
+}
+.ver-num {
+  margin: 0;
+  font-size: 18px;
+}
+.ver-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 0;
+  font-size: 14px;
+}
+.ver-list dt {
+  color: var(--muted);
+}
+.ver-list dd {
+  margin: 0;
+}
+.ver-note {
+  margin: 0;
+  min-height: 1.2em;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Modifier : les cadres peuvent dépasser le bord de la page. */
+body:not(.reading) .overlay {
+  overflow: visible;
+}

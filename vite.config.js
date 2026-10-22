@@ -1,6 +1,17 @@
 import { defineConfig } from 'vite';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
+
+const pkg = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
+let commit = process.env.GITHUB_SHA ? process.env.GITHUB_SHA.slice(0, 7) : '';
+if (!commit) {
+  try {
+    commit = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  } catch {
+    commit = '';
+  }
+}
 
 /**
  * Génère dist/precache.json (liste de tous les fichiers produits) afin que le
@@ -35,6 +46,11 @@ function precacheManifest() {
 
 export default defineConfig({
   plugins: [precacheManifest()],
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    __APP_BUILD__: JSON.stringify(new Date().toISOString()),
+    __APP_COMMIT__: JSON.stringify(commit),
+  },
   // Chemins relatifs : indispensable pour GitHub Pages (sous /studio-pdf/).
   base: './',
   server: {

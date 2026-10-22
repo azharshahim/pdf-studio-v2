@@ -6702,7 +6702,45 @@ window.addEventListener('beforeinstallprompt', (event) => {
   });
 });
 
+function openVersionSheet() {
+  const v = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
+  const build = typeof __APP_BUILD__ !== 'undefined' ? new Date(__APP_BUILD__) : null;
+  const commit = typeof __APP_COMMIT__ !== 'undefined' ? __APP_COMMIT__ : '';
+  const when = build && !Number.isNaN(build.getTime()) ? build.toLocaleString(uiLocale(), { dateStyle: 'long', timeStyle: 'short' }) : '—';
+  const html = `<div class="ver-box">
+    <p class="ver-num">PDF Studio <strong>v${U.escapeHtml(v)}</strong></p>
+    <dl class="ver-list">
+      <dt>${t('ver.build')}</dt><dd>${U.escapeHtml(when)}</dd>
+      ${commit ? `<dt>${t('ver.commit')}</dt><dd><code>${U.escapeHtml(commit)}</code></dd>` : ''}
+    </dl>
+    <button class="btn primary" id="verUpdate" type="button">${t('ver.update')}</button>
+    <p class="ver-note" id="verNote"></p>
+  </div>`;
+  const body = openSheet({ title: t('ver.sheet'), html });
+  const btn = body?.querySelector('#verUpdate');
+  btn?.addEventListener('click', async () => {
+    const note = body.querySelector('#verNote');
+    btn.disabled = true;
+    note.textContent = t('ver.checking');
+    try {
+      const reg = await navigator.serviceWorker?.getRegistration();
+      await reg?.update();
+      // Recharge depuis le réseau : récupère la dernière version publiée.
+      note.textContent = t('ver.reloading');
+      setTimeout(() => location.reload(), 600);
+    } catch {
+      note.textContent = t('ver.fail');
+      btn.disabled = false;
+    }
+  });
+}
+
 function registerServiceWorker() {
+  const chip = document.getElementById('versionChip');
+  if (chip) {
+    chip.textContent = `v${typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev'}`;
+    chip.addEventListener('click', openVersionSheet);
+  }
   if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return;
   const swUrl = U.assetUrl('sw.js');
   navigator.serviceWorker
