@@ -28,6 +28,7 @@ import { ArabicShaper } from 'arabic-persian-reshaper';
 import bidiFactory from 'bidi-js';
 import { assetUrl, clamp, hexToRgb01 } from './utils.js';
 import { removeTextInBBoxes } from './textRemoval.js';
+import { arrowGeometry } from './markup.js';
 import { catalogFont, catalogFile, localFontBytes } from './fonts.js';
 
 const bidi = bidiFactory();
@@ -800,15 +801,10 @@ export async function drawObjects(pdfDoc, pages, objects) {
         borderOpacity: obj.opacity ?? 1,
       });
     } else if (obj.type === 'arrow') {
-      page.drawLine({
-        start: { x, y },
-        end: { x: x + w, y: y + h },
-        color,
-        thickness: Math.max(0.8, obj.width || 2),
-      });
-      const head = Math.max(4, Math.min(w, h) * 0.28);
-      page.drawLine({ start: { x: x + w - head, y: y + h }, end: { x: x + w, y: y + h }, color, thickness: Math.max(0.8, obj.width || 2) });
-      page.drawLine({ start: { x: x + w, y: y + h - head }, end: { x: x + w, y: y + h }, color, thickness: Math.max(0.8, obj.width || 2) });
+      const { p1, p2, wing1, wing2, thickness } = arrowGeometry(obj);
+      page.drawLine({ start: p1, end: p2, color, thickness, lineCap: 1 });
+      page.drawLine({ start: wing1, end: p2, color, thickness, lineCap: 1 });
+      page.drawLine({ start: wing2, end: p2, color, thickness, lineCap: 1 });
     } else if (obj.type === 'note') {
       page.drawEllipse({
         x: x + w / 2,

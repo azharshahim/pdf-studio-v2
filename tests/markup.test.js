@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { clampRect, inkPath, arrowSvg, STAMP_PRESETS, HIGHLIGHT_COLORS } from '../src/markup.js';
+import {
+  clampRect,
+  inkPath,
+  arrowSvg,
+  arrowEndpoints,
+  arrowBboxFromEndpoints,
+  arrowGeometry,
+  STAMP_PRESETS,
+  HIGHLIGHT_COLORS,
+} from '../src/markup.js';
 import { COMPRESS_LEVELS, WATERMARK_PRESETS } from '../src/tools.js';
 import { SIGNATURE_FONTS, signatureSheetHtml } from '../src/signature.js';
 import { detectFillAreas } from '../src/forms.js';
@@ -23,9 +32,30 @@ describe('annotations — helpers', () => {
     expect(STAMP_PRESETS).toHaveLength(9);
   });
 
-  it('produit une flèche SVG colorée', () => {
+  it('produit une flèche SVG colorée et orientée dans toutes les directions', () => {
     expect(arrowSvg('#ff0000')).toContain('#ff0000');
     expect(arrowSvg('#ff0000')).toContain('<svg');
+    // Vers le bas-gauche
+    const gDownLeft = arrowGeometry({ p1: { x: 200, y: 300 }, p2: { x: 80, y: 120 }, width: 2 });
+    expect(gDownLeft.p1).toEqual({ x: 200, y: 300 });
+    expect(gDownLeft.p2).toEqual({ x: 80, y: 120 });
+    // Les deux ailes partent de la pointe p2 vers l'arrière (x > 80 et y > 120)
+    expect(gDownLeft.wing1.x).toBeGreaterThan(80);
+    expect(gDownLeft.wing2.x).toBeGreaterThan(80);
+    expect(gDownLeft.wing1.y).toBeGreaterThan(120);
+    expect(gDownLeft.wing2.y).toBeGreaterThan(120);
+
+    // Horizontale pure droite → gauche : le cadre englobant garde une hauteur > 0
+    const p1 = { x: 250, y: 400 };
+    const p2 = { x: 100, y: 400 };
+    const bbox = arrowBboxFromEndpoints(p1, p2, 2);
+    expect(bbox.h).toBeGreaterThanOrEqual(16);
+    expect(bbox.x).toBeLessThan(100);
+    expect(bbox.x + bbox.w).toBeGreaterThan(250);
+
+    // Rétrocompatibilité : ancienne flèche enregistrée avec uniquement bbox
+    const legacy = arrowEndpoints({ type: 'arrow', bbox: { x: 40, y: 50, w: 60, h: 30 } });
+    expect(legacy).toEqual({ p1: { x: 40, y: 50 }, p2: { x: 100, y: 80 } });
   });
 
   it('expose 3 niveaux de compression et 4 filigranes', () => {

@@ -3918,6 +3918,36 @@ body.annotating .annobar {
   bottom: -30px;
 }
 
+.mk-arrow svg {
+  overflow: visible;
+  display: block;
+}
+
+.mk-handle.mk-arrow-end {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border: 2.5px solid var(--accent);
+  background: #ffffff;
+  cursor: crosshair;
+  z-index: 6;
+  pointer-events: auto;
+}
+
+.mk-handle.mk-arrow-end.end {
+  background: var(--accent);
+}
+
+.mk-handle.mk-arrow-end::after {
+  content: '';
+  position: absolute;
+  inset: -12px;
+}
+
 /* Signatures et tampons */
 .sig-tabs {
   display: flex;

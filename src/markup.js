@@ -145,7 +145,17 @@ export function createMarkup({
       el.classList.add(o.type === 'ellipse' ? 'mk-round' : 'mk-square');
       el.style.border = `${Math.max(1, (o.width || 2) * scale)}px solid ${o.color}`;
     } else if (o.type === 'arrow') {
-      el.innerHTML = arrowSvg(o.color);
+      const ends = arrowEndpoints(o);
+      const sPt = rectForFn({ x: ends.p1.x, y: ends.p1.y, w: 0, h: 0 });
+      const ePt = rectForFn({ x: ends.p2.x, y: ends.p2.y, w: 0, h: 0 });
+      el.innerHTML = arrowSvg(o.color, {
+        start: { x: sPt.left - r.left, y: sPt.top - r.top },
+        end: { x: ePt.left - r.left, y: ePt.top - r.top },
+        width: r.width,
+        height: r.height,
+        strokeWidth: Math.max(1.5, (o.width || 2) * scale),
+        scale,
+      });
     } else if (o.type === 'note') {
       el.classList.add('mk-note');
       el.style.background = o.color || '#fde047';
@@ -185,7 +195,7 @@ export function createMarkup({
     if (!interactive) return el;
     if (o.id === selectedId) {
       el.classList.add('selected');
-      el.appendChild(selectionHandles(o, scale));
+      el.appendChild(selectionHandles(o, scale, rectForFn, r));
       if (o.type !== 'note') {
         el.style.pointerEvents = 'auto';
         el.style.touchAction = 'none';
@@ -299,7 +309,14 @@ export function createMarkup({
     return pts.length < 2 ? 0 : Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
   };
   const rebase = (o) => {
-    gesture = { id: o.id, box: { ...o.bbox }, fontSize: o.fontSize, start: centroid(), dist: spread() };
+    gesture = {
+      id: o.id,
+      box: { ...o.bbox },
+      endpoints: o.type === 'arrow' ? arrowEndpoints(o) : null,
+      fontSize: o.fontSize,
+      start: centroid(),
+      dist: spread(),
+    };
   };
 
   function onGestureMove(e) {
@@ -311,7 +328,22 @@ export function createMarkup({
     const c = centroid();
     const dx = (c.x - gesture.start.x) / sc;
     const dy = -(c.y - gesture.start.y) / sc;
-    const { box } = gesture;
+    const { box, endpoints } = gesture;
+    if (o.type === 'arrow' && endpoints) {
+      if (touches.size >= 2 && gesture.dist > 0) {
+        const s = Math.min(8, Math.max(0.15, spread() / gesture.dist));
+        const cx = (endpoints.p1.x + endpoints.p2.x) / 2;
+        const cy = (endpoints.p1.y + endpoints.p2.y) / 2;
+        const p1 = { x: cx + (endpoints.p1.x - cx) * s + dx, y: cy + (endpoints.p1.y - cy) * s + dy };
+        const p2 = { x: cx + (endpoints.p2.x - cx) * s + dx, y: cy + (endpoints.p2.y - cy) * s + dy };
+        update(o.id, { p1, p2, bbox: arrowBboxFromEndpoints(p1, p2, o.width) });
+      } else {
+        const p1 = { x: endpoints.p1.x + dx, y: endpoints.p1.y + dy };
+        const p2 = { x: endpoints.p2.x + dx, y: endpoints.p2.y + dy };
+        update(o.id, { p1, p2, bbox: arrowBboxFromEndpoints(p1, p2, o.width) });
+      }
+      return;
+    }
     if (touches.size >= 2 && gesture.dist > 0) {
       const s = Math.min(8, Math.max(0.15, spread() / gesture.dist));
       const center = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
@@ -352,16 +384,52 @@ export function createMarkup({
     }
   }
 
-  /** Poignées de déplacement / redimensionnement / rotation. */
-  function selectionHandles(o, scale) {
+  /** Poignées de déplacement / redimensionnement / rotation (et extrémités de flèche). */
+  function selectionHandles(o, scale, rectForFn = rectFor, boxRect = null) {
+    const frag = document.createDocumentFragment();
     handleEl = document.createElement('div');
     handleEl.className = 'mk-handles';
-    handleEl.innerHTML = `
-      <button class="mk-handle move" data-mk-handle="move" type="button" aria-label="Déplacer">✥</button>
-      <button class="mk-handle resize" data-mk-handle="resize" type="button" aria-label="Redimensionner">⤡</button>
-      <button class="mk-handle rotate" data-mk-handle="rotate" type="button" aria-label="Pivoter">⟳</button>
-      <button class="mk-handle del" data-mk-handle="delete" type="button" aria-label="Supprimer">✕</button>`;
-    handleEl.addEventListener('pointerdown', (ev) => {
+    if (o.type === 'arrow') {
+      handleEl.innerHTML = `
+        <button class="mk-handle move" data-mk-handle="move" type="button" aria-label="Déplacer">✥</button>
+        <button class="mk-handle del" data-mk-handle="delete" type="button" aria-label="Supprimer">✕</button>`;
+    } else {
+      handleEl.innerHTML = `
+        <button class="mk-handle move" data-mk-handle="move" type="button" aria-label="Déplacer">✥</button>
+        <button class="mk-handle resize" data-mk-handle="resize" type="button" aria-label="Redimensionner">⤡</button>
+        <button class="mk-handle rotate" data-mk-handle="rotate" type="button" aria-label="Pivoter">⟳</button>
+        <button class="mk-handle del" data-mk-handle="delete" type="button" aria-label="Supprimer">✕</button>`;
+    }
+    frag.appendChild(handleEl);
+
+    let startBtn = null;
+    let endBtn = null;
+    if (o.type === 'arrow') {
+      const r = boxRect || rectForFn(o.bbox);
+      const ends = arrowEndpoints(o);
+      const sPt = rectForFn({ x: ends.p1.x, y: ends.p1.y, w: 0, h: 0 });
+      const ePt = rectForFn({ x: ends.p2.x, y: ends.p2.y, w: 0, h: 0 });
+      startBtn = document.createElement('button');
+      startBtn.type = 'button';
+      startBtn.className = 'mk-handle mk-arrow-end start';
+      startBtn.dataset.mkHandle = 'arrow-start';
+      startBtn.setAttribute('aria-label', 'Déplacer le point de départ');
+      startBtn.style.left = `${sPt.left - r.left}px`;
+      startBtn.style.top = `${sPt.top - r.top}px`;
+
+      endBtn = document.createElement('button');
+      endBtn.type = 'button';
+      endBtn.className = 'mk-handle mk-arrow-end end';
+      endBtn.dataset.mkHandle = 'arrow-end';
+      endBtn.setAttribute('aria-label', 'Déplacer la pointe de la flèche');
+      endBtn.style.left = `${ePt.left - r.left}px`;
+      endBtn.style.top = `${ePt.top - r.top}px`;
+
+      frag.appendChild(startBtn);
+      frag.appendChild(endBtn);
+    }
+
+    const bindHandleDown = (ev) => {
       const kind = ev.target.closest('[data-mk-handle]')?.dataset.mkHandle;
       if (!kind) return;
       ev.preventDefault();
@@ -374,10 +442,28 @@ export function createMarkup({
       const start = { x: ev.clientX, y: ev.clientY };
       const box = { ...o.bbox };
       const startRotation = o.rotation || 0;
+      const initEnds = o.type === 'arrow' ? arrowEndpoints(o) : null;
+      const hadExplicitEnds = !!(o.p1 && o.p2);
       const move = (e) => {
         const scaleNow = getScale() || 1;
         const dx = (e.clientX - start.x) / scaleNow;
         const dy = -(e.clientY - start.y) / scaleNow;
+        if (o.type === 'arrow' && initEnds) {
+          if (kind === 'move') {
+            const p1 = { x: initEnds.p1.x + dx, y: initEnds.p1.y + dy };
+            const p2 = { x: initEnds.p2.x + dx, y: initEnds.p2.y + dy };
+            update(o.id, { p1, p2, bbox: arrowBboxFromEndpoints(p1, p2, o.width) });
+          } else if (kind === 'arrow-start') {
+            const p1 = { x: initEnds.p1.x + dx, y: initEnds.p1.y + dy };
+            const p2 = { ...initEnds.p2 };
+            update(o.id, { p1, p2, bbox: arrowBboxFromEndpoints(p1, p2, o.width) });
+          } else if (kind === 'arrow-end') {
+            const p1 = { ...initEnds.p1 };
+            const p2 = { x: initEnds.p2.x + dx, y: initEnds.p2.y + dy };
+            update(o.id, { p1, p2, bbox: arrowBboxFromEndpoints(p1, p2, o.width) });
+          }
+          return;
+        }
         if (kind === 'move') {
           update(o.id, { bbox: { ...box, x: box.x + dx, y: box.y + dy } });
         } else if (kind === 'resize') {
@@ -392,14 +478,24 @@ export function createMarkup({
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
         window.removeEventListener('pointercancel', up);
-        // Geste interrompu (défilement, geste système) : retour à l'état initial.
-        if (e?.type === 'pointercancel') update(o.id, { bbox: box, rotation: startRotation });
+        if (e?.type === 'pointercancel') {
+          if (o.type === 'arrow' && initEnds) {
+            if (hadExplicitEnds) update(o.id, { p1: initEnds.p1, p2: initEnds.p2, bbox: box });
+            else update(o.id, { bbox: box });
+          } else {
+            update(o.id, { bbox: box, rotation: startRotation });
+          }
+        }
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
       window.addEventListener('pointercancel', up);
-    });
-    return handleEl;
+    };
+
+    handleEl.addEventListener('pointerdown', bindHandleDown);
+    startBtn?.addEventListener('pointerdown', bindHandleDown);
+    endBtn?.addEventListener('pointerdown', bindHandleDown);
+    return frag;
   }
 
   /* ───────────────────── Conversions de coordonnées ───────────────────── */
@@ -429,7 +525,7 @@ export function createMarkup({
 
   /* ─────────────────────────── Outils ─────────────────────────── */
 
-  const RECT_TOOLS = new Set(['highlight', 'underline', 'strike', 'rect', 'ellipse', 'arrow']);
+  const RECT_TOOLS = new Set(['highlight', 'underline', 'strike', 'rect', 'ellipse']);
 
   function setTool(tool) {
     state.tool = tool;
@@ -544,13 +640,68 @@ export function createMarkup({
       return;
     }
 
+    if (tool === 'arrow') {
+      let end = { ...start };
+      draftEl = document.createElement('div');
+      draftEl.className = 'mk mk-draft mk-arrow-draft';
+      draftEl.style.cssText = 'left:0;top:0;width:100%;height:100%;pointer-events:none;border:none;background:transparent;';
+      overlay.appendChild(draftEl);
+      const pid = ev.pointerId;
+      const paintDraft = () => {
+        if (!draftEl) return;
+        const sc = getScale() || 1;
+        const ow = overlay.clientWidth || parseFloat(overlay.parentElement?.style.width) || 1;
+        const oh = overlay.clientHeight || parseFloat(overlay.parentElement?.style.height) || 1;
+        draftEl.innerHTML = arrowSvg(state.color, {
+          start,
+          end,
+          width: ow,
+          height: oh,
+          strokeWidth: Math.max(1.5, (state.inkWidth || 2.5) * sc),
+          scale: sc,
+        });
+      };
+      paintDraft();
+      const move = (e) => {
+        if (e.pointerId !== pid) return;
+        end = localPoint(e);
+        paintDraft();
+      };
+      const up = (e) => {
+        if (e && e.pointerId !== undefined && e.pointerId !== pid) return;
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+        draftEl?.remove();
+        draftEl = null;
+        if (e?.type === 'pointercancel') return;
+        const dist = Math.hypot(end.x - start.x, end.y - start.y);
+        const sCss = dist < 8 ? { x: start.x - 30, y: start.y } : start;
+        const eCss = dist < 8 ? { x: start.x + 30, y: start.y } : end;
+        const p1 = toPdf(sCss.x, sCss.y);
+        const p2 = toPdf(eCss.x, eCss.y);
+        add({
+          type: 'arrow',
+          p1,
+          p2,
+          bbox: arrowBboxFromEndpoints(p1, p2, state.inkWidth),
+          color: state.color,
+          width: state.inkWidth,
+        });
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+      return;
+    }
+
     if (RECT_TOOLS.has(tool)) {
       const rect = { left: start.x, top: start.y, width: 0, height: 0 };
       draftEl = document.createElement('div');
       draftEl.className = 'mk mk-draft';
       draftEl.style.background = tool === 'highlight' ? state.color : 'transparent';
       draftEl.style.border =
-        tool === 'rect' || tool === 'ellipse' || tool === 'arrow' ? `2px dashed ${state.color}` : 'none';
+        tool === 'rect' || tool === 'ellipse' ? `2px dashed ${state.color}` : 'none';
       if (tool === 'underline') draftEl.style.borderBottom = `3px solid ${state.color}`;
       overlay.appendChild(draftEl);
       const pid = ev.pointerId;
@@ -656,8 +807,96 @@ export function inkPath(obj, rectFor) {
     .join(' ');
 }
 
-export function arrowSvg(color) {
-  return `<svg viewBox="0 0 100 100" preserveAspectRatio="none" width="100%" height="100%" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round"><path d="M2 98 98 2"/><path d="M70 2h28v28"/></svg>`;
+/**
+ * Extrémités en points PDF d'une flèche. Compatible avec les flèches existantes
+ * qui ne stockaient que `bbox` (du coin bas-gauche vers le coin haut-droit).
+ */
+export function arrowEndpoints(obj) {
+  if (
+    obj?.p1 &&
+    obj?.p2 &&
+    Number.isFinite(obj.p1.x) &&
+    Number.isFinite(obj.p1.y) &&
+    Number.isFinite(obj.p2.x) &&
+    Number.isFinite(obj.p2.y)
+  ) {
+    return {
+      p1: { x: obj.p1.x, y: obj.p1.y },
+      p2: { x: obj.p2.x, y: obj.p2.y },
+    };
+  }
+  const b = obj?.bbox || { x: 0, y: 0, w: 40, h: 20 };
+  return {
+    p1: { x: b.x, y: b.y },
+    p2: { x: b.x + b.w, y: b.y + b.h },
+  };
+}
+
+/** Cadre englobant PDF d'une flèche (marge suffisante pour la pointe, même horizontale ou verticale). */
+export function arrowBboxFromEndpoints(p1, p2, width = 2) {
+  const pad = Math.max(8, (Number(width) || 2) * 4);
+  const minX = Math.min(p1.x, p2.x) - pad;
+  const maxX = Math.max(p1.x, p2.x) + pad;
+  const minY = Math.min(p1.y, p2.y) - pad;
+  const maxY = Math.max(p1.y, p2.y) + pad;
+  return {
+    x: minX,
+    y: minY,
+    w: Math.max(4, maxX - minX),
+    h: Math.max(4, maxY - minY),
+  };
+}
+
+/** Géométrie complète d'une flèche en points PDF (tige + deux ailes de la pointe à 30°). */
+export function arrowGeometry(obj) {
+  const { p1, p2 } = arrowEndpoints(obj);
+  const thickness = Math.max(0.8, Number(obj?.width) || 2);
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  const len = Math.hypot(dx, dy);
+  const ux = len > 1e-4 ? dx / len : 1;
+  const uy = len > 1e-4 ? dy / len : 0;
+  const headLen = Math.min(Math.max(8, thickness * 4.2), Math.max(4, len > 1e-4 ? len * 0.48 : 8));
+  const cosA = Math.cos(Math.PI / 6);
+  const sinA = Math.sin(Math.PI / 6);
+  const wing1 = {
+    x: p2.x - headLen * (ux * cosA - uy * sinA),
+    y: p2.y - headLen * (uy * cosA + ux * sinA),
+  };
+  const wing2 = {
+    x: p2.x - headLen * (ux * cosA + uy * sinA),
+    y: p2.y - headLen * (uy * cosA - ux * sinA),
+  };
+  return { p1, p2, wing1, wing2, thickness, headLen };
+}
+
+export function arrowSvg(
+  color,
+  {
+    start = { x: 2, y: 98 },
+    end = { x: 98, y: 2 },
+    width = 100,
+    height = 100,
+    strokeWidth = 2.5,
+    scale = 1,
+  } = {}
+) {
+  const w = Math.max(1, width);
+  const h = Math.max(1, height);
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const len = Math.hypot(dx, dy);
+  const ux = len > 1e-4 ? dx / len : 1;
+  const uy = len > 1e-4 ? dy / len : 0;
+  const headLen = Math.min(Math.max(8 * scale, strokeWidth * 4.2), Math.max(4, len > 1e-4 ? len * 0.48 : 8));
+  const cosA = Math.cos(Math.PI / 6);
+  const sinA = Math.sin(Math.PI / 6);
+  const wx1 = end.x - headLen * (ux * cosA - uy * sinA);
+  const wy1 = end.y - headLen * (uy * cosA + ux * sinA);
+  const wx2 = end.x - headLen * (ux * cosA + uy * sinA);
+  const wy2 = end.y - headLen * (uy * cosA - ux * sinA);
+  const f = (n) => Number(n).toFixed(1);
+  return `<svg viewBox="0 0 ${f(w)} ${f(h)}" width="100%" height="100%" overflow="visible" fill="none" stroke="${color}" stroke-width="${f(strokeWidth)}" stroke-linecap="round" stroke-linejoin="round"><path d="M${f(start.x)} ${f(start.y)} L${f(end.x)} ${f(end.y)}"/><path d="M${f(wx1)} ${f(wy1)} L${f(end.x)} ${f(end.y)} L${f(wx2)} ${f(wy2)}"/></svg>`;
 }
 
 /** Tampons prédéfinis (texte + couleur). */
