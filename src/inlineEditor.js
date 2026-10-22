@@ -323,6 +323,14 @@ export function createInlineEditor({
     shell.style.fontFamily = cssFontFamilyFor(edit.font);
     shell.style.fontSize = `${sizePx}px`;
     shell.style.lineHeight = String(edit.lineHeight || 1.16);
+    shell.style.letterSpacing = edit.charSpacing ? `${Number(edit.charSpacing) * scale}px` : '';
+    shell.style.fontStretch = '';
+    if (textEl) {
+      const hz = Number(edit.hScale) || 100;
+      textEl.style.transform = hz !== 100 ? `scaleX(${hz / 100})` : '';
+      textEl.style.transformOrigin = 'left center';
+      textEl.style.width = hz !== 100 ? `${100 / (hz / 100)}%` : '';
+    }
     shell.style.fontWeight = edit.bold ? '700' : '400';
     shell.style.fontStyle = edit.italic ? 'italic' : 'normal';
     shell.style.textDecoration = edit.underline ? 'underline' : 'none';

@@ -427,6 +427,49 @@
             </section>
           </div>
         </aside>
+
+        <!-- Panneau « Modifier » (grand écran, façon Acrobat) : remplace le panneau de droite en mode modification -->
+        <aside class="editpanel" id="editPanel" aria-label="Modifier">
+          <header class="ep-head">
+            <h2 data-i18n="ep.title">Modifier</h2>
+            <button class="icon-btn tiny" type="button" id="epClose" data-i18n-title="ep.close" aria-label="Fermer" data-icon="x"></button>
+          </header>
+          <div class="ep-body">
+            <p class="ep-hint" id="epHint" data-i18n="ep.hint">Cliquez sur un bloc de texte (cadre en pointillés) pour le modifier.</p>
+            <h3 class="ep-sec" data-i18n="ep.format">Mettre le texte en forme</h3>
+            <fieldset class="ep-fields" id="epFields" disabled>
+              <button class="ep-font" type="button" id="epFont" data-i18n-title="editor.font"><span id="epFontName">Helvetica</span><span data-icon="chevronDown"></span></button>
+              <div class="ep-row">
+                <label class="ep-num" data-i18n-title="editor.size"><input type="number" id="epSize" min="4" max="200" step="0.5" value="12" aria-label="Taille" /></label>
+                <label class="ep-color" data-i18n-title="editor.color"><input type="color" id="epColor" value="#111827" aria-label="Couleur" /></label>
+                <div class="ep-seg" role="group" aria-label="Alignement">
+                  <button type="button" class="ep-btn" data-ep-align="left" data-i18n-title="editor.alignLeft"><svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true"><path d="M3 4h12M3 8h8M3 12h12M3 16h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+                  <button type="button" class="ep-btn" data-ep-align="center" data-i18n-title="editor.alignCenter"><svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true"><path d="M3 4h12M5 8h8M3 12h12M6 16h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+                  <button type="button" class="ep-btn" data-ep-align="right" data-i18n-title="editor.alignRight"><svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true"><path d="M3 4h12M7 8h8M3 12h12M9 16h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+                </div>
+              </div>
+              <div class="ep-row ep-styles">
+                <button type="button" class="ep-btn" data-ep-fmt="bold" data-i18n-title="editor.bold"><b>B</b></button>
+                <button type="button" class="ep-btn" data-ep-fmt="italic" data-i18n-title="editor.italic"><i style="font-family:Georgia,serif">I</i></button>
+                <button type="button" class="ep-btn" data-ep-fmt="underline" data-i18n-title="editor.underline"><u>U</u></button>
+              </div>
+              <div class="ep-grid">
+                <label class="ep-field"><span class="ep-ico" aria-hidden="true">↕</span><span class="ep-lbl" data-i18n="editor.lineHeight">Interligne</span><input type="number" id="epLineHeight" min="0.8" max="2.6" step="0.05" value="1.16" /></label>
+                <label class="ep-field"><span class="ep-ico" aria-hidden="true">VA</span><span class="ep-lbl" data-i18n="ep.charSpacing">Espacement</span><input type="number" id="epCharSpacing" min="-5" max="50" step="0.05" value="0" /></label>
+                <label class="ep-field"><span class="ep-ico" aria-hidden="true">↔</span><span class="ep-lbl" data-i18n="ep.hScale">Échelle horiz. %</span><input type="number" id="epHScale" min="20" max="400" step="1" value="100" /></label>
+              </div>
+              <h3 class="ep-sec" data-i18n="ep.block">Bloc</h3>
+              <div class="ep-row">
+                <button type="button" class="btn soft small" id="epDuplicate"><span data-icon="copy"></span><span data-i18n="editor.duplicate">Dupliquer le bloc</span></button>
+                <button type="button" class="btn soft small danger" id="epDelete"><span data-icon="trash"></span><span data-i18n="ep.delete">Supprimer</span></button>
+              </div>
+            </fieldset>
+            <h3 class="ep-sec" data-i18n="ep.add">Ajouter un contenu</h3>
+            <div class="ep-row">
+              <button type="button" class="btn soft small" id="epAddText"><span data-icon="text"></span><span data-i18n="ep.text">Texte</span></button>
+            </div>
+          </div>
+        </aside>
       </div>
       </div><!-- /doc-view -->
 

@@ -36,4 +36,16 @@ test('grand écran : la mise en page reste figée quand on modifie une ligne', a
   expect(await rect()).toEqual(before);
   await expect(page.locator('.topbar')).toBeVisible();
   await expect(page.locator('.thumbrail')).toBeVisible();
+
+  // Panneau « Modifier » façon Acrobat : à droite, lié au bloc actif.
+  await expect(page.locator('#editPanel')).toBeVisible();
+  await expect(page.locator('#epFields')).toBeEnabled();
+  await page.locator('#epSize').fill('14');
+  await expect.poll(() => page.evaluate(() => window.__pdfStudio.state.active?.edit?.size)).toBe(14);
+  const wasBold = await page.evaluate(() => !!window.__pdfStudio.state.active?.edit?.bold);
+  await page.locator('#editPanel [data-ep-fmt=bold]').click();
+  await expect.poll(() => page.evaluate(() => !!window.__pdfStudio.state.active?.edit?.bold)).toBe(!wasBold);
+  await page.locator('#epCharSpacing').fill('0.5');
+  await expect.poll(() => page.evaluate(() => window.__pdfStudio.state.active?.edit?.charSpacing)).toBe(0.5);
+  expect(await rect()).toEqual(before);
 });

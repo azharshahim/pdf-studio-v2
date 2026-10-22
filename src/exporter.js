@@ -20,6 +20,8 @@ import {
   pushGraphicsState,
   popGraphicsState,
   concatTransformationMatrix,
+  setCharacterSpacing,
+  setCharacterSqueeze,
 } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import { ArabicShaper } from 'arabic-persian-reshaper';
@@ -494,7 +496,13 @@ export async function exportPdf({
         prepared.push(runs);
       }
 
-      const widthOf = (runs, s) => runs.reduce((acc, r) => acc + r.font.widthOfTextAtSize(r.text, s), 0);
+      // Espacement des caractères (pt, opérateur Tc) et échelle horizontale (%, Tz).
+      const tc = clamp(Number(e.charSpacing) || 0, -5, 50);
+      const hz = clamp(Number(e.hScale) || 100, 20, 400) / 100;
+      const runW = (r, s) => (r.font.widthOfTextAtSize(r.text, s) + tc * [...r.text].length) * hz;
+      const widthOf = (runs, s) => runs.reduce((acc, r) => acc + runW(r, s), 0);
+      const spaced = tc !== 0 || hz !== 1;
+      if (spaced) page.pushOperators(pushGraphicsState(), setCharacterSpacing(tc), setCharacterSqueeze(hz * 100));
       if (e.fit !== false && e.bbox.w > 2) {
         let factor = 1;
         for (const runs of prepared) {
@@ -509,14 +517,14 @@ export async function exportPdf({
       const align = e.align === 'center' || e.align === 'right' ? e.align : 'left';
       let y = e.baseline ?? e.bbox.y + e.bbox.h * 0.24;
       for (const runs of prepared) {
-        const total = runs.reduce((acc, r) => acc + r.font.widthOfTextAtSize(r.text, size), 0);
+        const total = widthOf(runs, size);
         let x = e.bbox.x + 0.5;
         if (align === 'center') x = e.bbox.x + (e.bbox.w - total) / 2;
         else if (align === 'right') x = e.bbox.x + e.bbox.w - total;
         const startX = x;
         for (const run of runs) {
           if (!run.text.trim()) {
-            x += run.font.widthOfTextAtSize(run.text, size);
+            x += runW(run, size);
             continue;
           }
           page.drawText(run.text, {
@@ -526,7 +534,7 @@ export async function exportPdf({
             font: run.font,
             color: rgb(color.r, color.g, color.b),
           });
-          x += run.font.widthOfTextAtSize(run.text, size);
+          x += runW(run, size);
         }
         if (e.underline && total > 0.2) {
           page.drawLine({
@@ -538,6 +546,7 @@ export async function exportPdf({
         }
         y -= lineHeight;
       }
+      if (spaced) page.pushOperators(popGraphicsState());
     }
   }
 

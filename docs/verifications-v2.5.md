@@ -291,3 +291,8 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - Séparation des fragments plus fine (écart > 0,85 × hauteur), comme les boîtes pointillées d'Acrobat.
 - Graisse par mot comparée aux autres mots de la même ligne (« N° SS » gras, numéro normal).
 - Vérifié sur le bulletin fourni : vitest 145, Playwright chromium + samsung 126 OK.
+
+### v2.12 — mode Modifier façon Acrobat (PC)
+- Panneau « Modifier » à droite (≥ 901 px) : police, taille, couleur, alignement, G/I/S, interligne, espacement des caractères (Tc), échelle horizontale (Tz), dupliquer/supprimer, ajouter du texte.
+- Cadres pointillés permanents autour des blocs, tracés à l'extérieur du texte.
+- Tests : vitest 149, Playwright chromium 63, bureau (1280×800) OK.

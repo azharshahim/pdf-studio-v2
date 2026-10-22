@@ -72,6 +72,19 @@ describe.skipIf(!hasPoppler)('fidélité de l’export (rendu Poppler)', () => {
     expect(darkIn(img, 36, 34, 100, 26)).toBeGreaterThan(60);
   });
 
+  it('espacement des caractères et échelle horizontale élargissent le texte', async () => {
+    const width = async (over) => {
+      const { bytes } = await exportPdf({ sourceBytes: await blank(), edits: [baseEdit({ text: 'IIIIII', bg: 'none', ...over })], ocrPages: [] });
+      const img = render(bytes);
+      let right = 0;
+      for (let x = 0; x < img.w; x++) if (darkIn(img, x, 34, 1, 26) > 0) right = x;
+      return right;
+    };
+    const plain = await width({});
+    expect(await width({ charSpacing: 3 })).toBeGreaterThan(plain + 10);
+    expect(await width({ hScale: 200 })).toBeGreaterThan(plain + 10);
+  });
+
   it('un scan à couche cachée est masqué avant le nouveau texte', async () => {
     const doc = await PDFDocument.create();
     const page = doc.addPage([300, 200]);

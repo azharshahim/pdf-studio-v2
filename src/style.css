@@ -5345,3 +5345,181 @@ body:not([data-route='doc']) .doctabs {
 /* Surlignage : translucide, le texte reste lisible dessous */
 .mk-highlight{opacity:.4;mix-blend-mode:multiply}
 .mk-draft{mix-blend-mode:multiply}
+
+/* ───────── Mode Modifier façon Acrobat ───────── */
+/* Cadres pointillés permanents autour de chaque bloc de texte modifiable. */
+/* Le cadre est tracé un peu à l'extérieur du texte pour ne jamais rayer les lettres. */
+body:not(.reading):not(.annotating) .line-block,
+body:not(.reading):not(.annotating) .line-block.ocr {
+  border-color: transparent;
+  outline: 1px dotted color-mix(in srgb, var(--text, #111) 38%, transparent);
+  outline-offset: 2px;
+  border-radius: 1px;
+}
+body:not(.reading):not(.annotating) .line-block:hover {
+  outline: 1px solid color-mix(in srgb, var(--accent) 80%, transparent);
+  border-color: transparent;
+}
+
+.editpanel {
+  display: none;
+}
+@media (min-width: 901px) {
+  body:not(.reading):not(.no-doc):not(.annotating) .inspector {
+    display: none;
+  }
+  body:not(.reading):not(.no-doc):not(.annotating) .editpanel {
+    display: flex;
+  }
+  /* Le panneau remplace la barre de mise en forme flottante. */
+  body.editing-wide .formatbar {
+    display: none !important;
+  }
+}
+.editpanel {
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+}
+.ep-head {
+  flex: 0 0 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px 0 20px;
+  border-bottom: 1px solid var(--line);
+}
+.ep-head h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+.ep-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 20px 24px;
+}
+.ep-hint {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+body.editing-wide .ep-hint {
+  display: none;
+}
+.ep-sec {
+  margin: 20px 0 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+.ep-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.ep-fields:disabled {
+  opacity: 0.45;
+}
+.ep-font {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 2px;
+  border: 0;
+  border-bottom: 1px solid var(--line-2, var(--line));
+  background: none;
+  color: var(--text);
+  font: 500 14px/1.3 var(--font);
+  cursor: pointer;
+  text-align: left;
+}
+.ep-font span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ep-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.ep-num input,
+.ep-field input {
+  width: 64px;
+  padding: 6px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--line-2, var(--line));
+  background: none;
+  color: var(--text);
+  font: 500 14px var(--font);
+}
+.ep-color input {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+.ep-seg {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+.ep-btn {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font-size: 18px;
+  cursor: pointer;
+}
+.ep-btn:hover {
+  background: var(--panel-2);
+}
+.ep-btn.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+.ep-styles {
+  gap: 6px;
+}
+.ep-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+.ep-field {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.ep-ico {
+  font: 700 12px var(--font);
+  color: var(--text);
+  text-align: center;
+}
+.btn.danger {
+  color: var(--danger, #dc2626);
+}

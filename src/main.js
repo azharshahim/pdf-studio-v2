@@ -1386,7 +1386,9 @@ function renderOverlay() {
       try {
         measureCtx.font = `${e.italic ? 'italic ' : ''}${e.bold ? '700' : '400'} ${basePx}px ${fontFamily}`;
         let maxW = 0;
-        for (const ln of lines) maxW = Math.max(maxW, measureCtx.measureText(ln || ' ').width);
+        const hz = (Number(e.hScale) || 100) / 100;
+        const cs = (Number(e.charSpacing) || 0) * scale;
+        for (const ln of lines) maxW = Math.max(maxW, (measureCtx.measureText(ln || ' ').width + cs * [...ln].length) * hz);
         const allowed = (e.bbox.w + 1) * scale;
         if (maxW > allowed && maxW > 0) fontSizePx = Math.max(1, basePx * (allowed / maxW));
       } catch {
@@ -1410,6 +1412,11 @@ function renderOverlay() {
       span.style.width = '100%';
     }
     span.style.color = e.color || '#111827';
+    if (e.charSpacing) span.style.letterSpacing = `${Number(e.charSpacing) * scale * (fontSizePx / basePx)}px`;
+    if (e.hScale && Number(e.hScale) !== 100) {
+      span.style.transform = `scaleX(${Number(e.hScale) / 100})`;
+      span.style.transformOrigin = 'left top';
+    }
     // compense la réduction de taille pour garder la ligne de base
     if (fontSizePx < basePx) span.style.paddingTop = `${0.88 * (basePx - fontSizePx)}px`;
     d.appendChild(span);
@@ -1607,6 +1614,90 @@ function syncFormatbar() {
   document.querySelectorAll('[data-align]').forEach((btn) => {
     btn.classList.toggle('active', (e.align || 'left') === btn.dataset.align);
   });
+  syncEditPanel();
+}
+
+/* ───────── Panneau « Modifier » (grand écran, façon Acrobat) ───────── */
+
+const fmtNum = (v, d) => String(Math.round(Number(v) * 10 ** d) / 10 ** d);
+
+function syncEditPanel() {
+  const panel = document.getElementById('editPanel');
+  if (!panel) return;
+  const e = state.active?.edit;
+  const fields = document.getElementById('epFields');
+  if (fields) fields.disabled = !e;
+  if (!e) return;
+  const set = (id, v) => {
+    const el = document.getElementById(id);
+    if (el && document.activeElement !== el) el.value = v;
+  };
+  const fontName = document.getElementById('epFontName');
+  if (fontName) fontName.textContent = e.font || 'Helvetica';
+  set('epSize', fmtNum(Number(e.size) || 12, 1));
+  set('epColor', normalizeHexColor(e.color));
+  set('epLineHeight', fmtNum(Number(e.lineHeight) || 1.16, 2));
+  set('epCharSpacing', fmtNum(Number(e.charSpacing) || 0, 2));
+  set('epHScale', fmtNum(Number(e.hScale) || 100, 0));
+  panel.querySelectorAll('[data-ep-fmt]').forEach((b) => b.classList.toggle('active', !!e[b.dataset.epFmt]));
+  panel.querySelectorAll('[data-ep-align]').forEach((b) => b.classList.toggle('active', (e.align || 'left') === b.dataset.epAlign));
+}
+
+function bindEditPanel() {
+  const panel = document.getElementById('editPanel');
+  if (!panel) return;
+  // Les boutons ne prennent pas le focus : le curseur reste dans le bloc édité.
+  panel.addEventListener('pointerdown', (ev) => {
+    if (ev.target.closest('button')) ev.preventDefault();
+  });
+  panel.querySelectorAll('[data-ep-fmt]').forEach((btn) =>
+    btn.addEventListener('click', () => applyFormat((e) => {
+      e[btn.dataset.epFmt] = !e[btn.dataset.epFmt];
+    }))
+  );
+  panel.querySelectorAll('[data-ep-align]').forEach((btn) =>
+    btn.addEventListener('click', () => applyFormat((e) => {
+      e.align = btn.dataset.epAlign;
+    }))
+  );
+  const num = (id, key, min, max, def) => {
+    const el = document.getElementById(id);
+    el?.addEventListener('input', () => {
+      const v = parseFloat(String(el.value).replace(',', '.'));
+      if (!Number.isFinite(v)) return;
+      applyFormat((e) => {
+        e[key] = U.clamp(v, min, max);
+        if (key === 'size') e.fit = false; // taille choisie à la main : respectée telle quelle
+      });
+    });
+    el?.addEventListener('change', () => {
+      if (!Number.isFinite(parseFloat(el.value))) el.value = def;
+      syncEditPanel();
+    });
+  };
+  num('epSize', 'size', 4, 200, 12);
+  num('epLineHeight', 'lineHeight', 0.8, 2.6, 1.16);
+  num('epCharSpacing', 'charSpacing', -5, 50, 0);
+  num('epHScale', 'hScale', 20, 400, 100);
+  document.getElementById('epColor')?.addEventListener('input', (ev) => {
+    const color = normalizeHexColor(ev.target.value);
+    applyFormat((e) => {
+      e.color = color;
+    });
+  });
+  document.getElementById('epFont')?.addEventListener('click', () => {
+    if (!state.active?.edit || !els.fmtFont) return;
+    els.fmtFont.value = state.active.edit.font || 'Helvetica';
+    openFontPicker();
+  });
+  document.getElementById('epDuplicate')?.addEventListener('click', () => duplicateActiveEdit());
+  document.getElementById('epDelete')?.addEventListener('click', () => deleteActiveEdit());
+  document.getElementById('epAddText')?.addEventListener('click', () => startAddText());
+  document.getElementById('epClose')?.addEventListener('click', () => {
+    closeActive();
+    setReadMode(true);
+  });
+  syncEditPanel();
 }
 
 function applyFormat(mutator) {
@@ -1784,6 +1875,7 @@ function hideEditingUi() {
   document.body.classList.remove('editing', 'editing-wide');
   if (els.editbar) els.editbar.hidden = true;
   hideFormatbar();
+  queueMicrotask(syncEditPanel);
 }
 
 function updateEditbarCount() {
@@ -1826,6 +1918,8 @@ function editSignature(e) {
     e.color,
     e.bg,
     e.fit,
+    Number(e.charSpacing) || 0,
+    Number(e.hScale) || 100,
   ]);
 }
 
@@ -6290,13 +6384,14 @@ function bindEvents() {
   });
 
   bindFormatbar();
+  bindEditPanel();
 
   // Toucher en dehors du texte valide la modification.
   document.addEventListener(
     'pointerdown',
     (e) => {
       if (!state.active) return;
-      if (e.target.closest('.inline-shell, #formatbar, #editbar, #docDock, dialog, .popover, .font-picker, .sheet')) return;
+      if (e.target.closest('.inline-shell, #formatbar, #editPanel, #editbar, #docDock, dialog, .popover, .font-picker, .sheet')) return;
       closeActive();
     },
     true
