@@ -11,7 +11,7 @@ import path from 'node:path';
  * que l'élément est bien présent dans le fichier (et pas seulement à l'écran).
  */
 
-const CAPTURES = path.join(process.cwd(), 'docs', 'captures', 'v2.5');
+const CAPTURES = path.join(process.cwd(), 'test-results', 'captures', 'v2.5');
 
 async function gotoApp(page) {
   await page.addInitScript(() => {
