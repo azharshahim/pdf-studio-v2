@@ -1563,6 +1563,9 @@ function dockAction(id) {
     case 'sign':
       openSignTool();
       break;
+    case 'certsign':
+      openCertSignSheet();
+      break;
     case 'stamp':
       openStampTool();
       break;
@@ -6694,6 +6697,240 @@ function openSignTool() {
       deleteSignature(el.dataset.sigDel);
       openSignTool();
     });
+  });
+  body.querySelector('#sigOpenCert')?.addEventListener('click', () => {
+    openCertSignSheet();
+  });
+}
+
+/**
+ * Construit les octets finaux du PDF incluant toutes les modifications de la
+ * session (formulaires, textes/paragraphes modifiés, OCR, annotations/flèches,
+ * nettoyage de scan), afin que la signature PAdES soit appliquée en toute
+ * dernière étape juste avant l'enregistrement final.
+ */
+async function buildFinalExportBytesForSigning() {
+  closeActive();
+  for (const e of state.edits) {
+    if (e.wrap && !Array.isArray(e.wrappedLines)) {
+      computeEditWrappedLines(e);
+    }
+  }
+  const { exportPdf } = await import('./exporter.js');
+  const cleanedPages = hasCleanedPages() ? state.cleanedPages : null;
+  const ocrPages = await collectOcrPagesForExport({ includeOcr: true, cleanedPages });
+  const result = await exportPdf({
+    sourceBytes: await bytesWithForm(),
+    edits: state.edits,
+    ocrPages,
+    redactMode: 'stream',
+    renderPage: null,
+    objects: markup.objects,
+    cleanedPages,
+  });
+  return result.bytes;
+}
+
+/**
+ * Feuille « Signer avec un certificat » (.p12 / .pfx) dans « Remplir et signer ».
+ * Tout se passe en mémoire locale : ni le certificat ni le mot de passe ne sont
+ * jamais envoyés sur le réseau ni enregistrés (ni dans localStorage, ni dans IndexedDB).
+ */
+function openCertSignSheet() {
+  routeTo('doc');
+  if (!state.engine) return;
+
+  let p12Bytes = null;
+  const wipeSecrets = (root) => {
+    if (p12Bytes) {
+      try {
+        p12Bytes.fill(0);
+      } catch {
+        /* ignore */
+      }
+      p12Bytes = null;
+    }
+    const pwd = root?.querySelector?.('#certPassword');
+    if (pwd) pwd.value = '';
+    const fileIn = root?.querySelector?.('#certFileInput');
+    if (fileIn) fileIn.value = '';
+  };
+
+  const html = `
+    <div class="cert-sheet" id="certSheet">
+      <p class="muted small">${U.escapeHtml(t('cert.desc'))}</p>
+      <div class="cert-warn-banner" id="certInvalidateWarn" role="note">
+        ${icon('alert', 18)}
+        <span>${U.escapeHtml(t('cert.invalidateWarn'))}</span>
+      </div>
+      <div class="cert-local-note">
+        ${icon('lock', 16)}
+        <span>${U.escapeHtml(t('cert.localOnly'))}</span>
+      </div>
+
+      <div class="cert-field">
+        <div class="cert-file-row">
+          <button class="btn soft small" id="certPickBtn" type="button">${icon('shield', 15)}<span>${U.escapeHtml(t('cert.pickFile'))}</span></button>
+          <span class="cert-file-name" id="certFileName"></span>
+        </div>
+        <input type="file" id="certFileInput" accept=".p12,.pfx,application/x-pkcs12" hidden />
+      </div>
+
+      <div class="cert-field">
+        <label for="certPassword">${U.escapeHtml(t('cert.password'))}</label>
+        <input type="password" id="certPassword" autocomplete="off" data-lpignore="true" placeholder="${U.escapeHtml(t('cert.passwordPlaceholder'))}" />
+      </div>
+
+      <div class="cert-summary" id="certSummary" hidden></div>
+      <div class="cert-error" id="certError" role="alert" hidden></div>
+
+      <div class="cert-field">
+        <label for="certReason">${U.escapeHtml(t('cert.reason'))}</label>
+        <input type="text" id="certReason" autocomplete="off" placeholder="${U.escapeHtml(t('cert.reasonPlaceholder'))}" />
+      </div>
+
+      <div class="cert-field">
+        <label for="certLocation">${U.escapeHtml(t('cert.location'))}</label>
+        <input type="text" id="certLocation" autocomplete="off" placeholder="${U.escapeHtml(t('cert.locationPlaceholder'))}" />
+      </div>
+
+      <label class="check compact">
+        <input type="checkbox" id="certVisibleStamp" checked />
+        <span>${U.escapeHtml(t('cert.visibleStamp'))}</span>
+      </label>
+
+      <button class="btn primary wide" id="certSubmitBtn" type="button">
+        ${icon('shield', 16)}
+        <span>${U.escapeHtml(t('cert.signAndSave'))}</span>
+      </button>
+    </div>
+  `;
+
+  let bodyRef = null;
+  const body = openSheet({
+    title: t('cert.title'),
+    html,
+    size: 'tall',
+    onClose: () => wipeSecrets(bodyRef),
+  });
+  bodyRef = body;
+  if (!body) return;
+
+  const fileInput = body.querySelector('#certFileInput');
+  const pickBtn = body.querySelector('#certPickBtn');
+  const fileNameEl = body.querySelector('#certFileName');
+  const pwdInput = body.querySelector('#certPassword');
+  const summaryEl = body.querySelector('#certSummary');
+  const errorEl = body.querySelector('#certError');
+  const reasonInput = body.querySelector('#certReason');
+  const locationInput = body.querySelector('#certLocation');
+  const visibleInput = body.querySelector('#certVisibleStamp');
+  const submitBtn = body.querySelector('#certSubmitBtn');
+
+  const showError = (msg) => {
+    if (!errorEl) return;
+    if (!msg) {
+      errorEl.hidden = true;
+      errorEl.textContent = '';
+    } else {
+      errorEl.textContent = msg;
+      errorEl.hidden = false;
+    }
+  };
+
+  const inspectCurrentP12 = async () => {
+    showError('');
+    if (!p12Bytes) {
+      if (summaryEl) summaryEl.hidden = true;
+      return;
+    }
+    try {
+      const { parsePkcs12 } = await import('./pades.js');
+      const parsed = parsePkcs12(p12Bytes, pwdInput?.value || '');
+      const s = parsed.summary;
+      const until = s.notAfter
+        ? new Date(s.notAfter).toLocaleDateString(uiLocale(), {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+          })
+        : '—';
+      if (summaryEl) {
+        summaryEl.innerHTML =
+          `<div><strong>${U.escapeHtml(t('cert.subject'))} :</strong> ${U.escapeHtml(s.subjectName)}</div>` +
+          `<div><strong>${U.escapeHtml(t('cert.issuer'))} :</strong> ${U.escapeHtml(s.issuerName)}</div>` +
+          `<div><strong>${U.escapeHtml(t('cert.validUntil'))} :</strong> ${U.escapeHtml(until)}${
+            s.isExpired ? ` <span class="badge warn">${U.escapeHtml(t('cert.expired'))}</span>` : ''
+          }</div>`;
+        summaryEl.hidden = false;
+      }
+    } catch (err) {
+      if (summaryEl) summaryEl.hidden = true;
+      if (pwdInput?.value) showError(err.message);
+    }
+  };
+
+  pickBtn?.addEventListener('click', () => fileInput?.click());
+
+  fileInput?.addEventListener('change', async () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    if (p12Bytes) p12Bytes.fill(0);
+    p12Bytes = new Uint8Array(await file.arrayBuffer());
+    if (fileNameEl) fileNameEl.textContent = file.name;
+    await inspectCurrentP12();
+  });
+
+  pwdInput?.addEventListener('input', () => {
+    inspectCurrentP12();
+  });
+
+  submitBtn?.addEventListener('click', async () => {
+    showError('');
+    if (!p12Bytes) {
+      showError(t('cert.needFile'));
+      return;
+    }
+    const password = pwdInput?.value || '';
+    const reason = reasonInput?.value?.trim() || '';
+    const location = locationInput?.value?.trim() || '';
+    const visibleStamp = !!visibleInput?.checked;
+    const pageNumber = (state.pageIndex || 0) + 1;
+
+    submitBtn.disabled = true;
+    pushLoading(t('cert.signing'));
+    try {
+      const { signPdfBytes } = await import('./pades.js');
+      // 1. Applique d'abord toutes les modifications du document (texte, formulaires, flèches, OCR, nettoyage)
+      const finalModifiedBytes = await buildFinalExportBytesForSigning();
+      // 2. Signe cryptographiquement les octets finaux en toute dernière étape avant l'enregistrement
+      const signed = await signPdfBytes(finalModifiedBytes, {
+        p12Bytes,
+        password,
+        reason,
+        location,
+        pageNumber,
+        visibleStamp,
+        subFilter: 'ETSI.CAdES.detached',
+      });
+
+      const base = String(state.fileName || 'document')
+        .replace(/\.pdf$/i, '')
+        .replace(/-signe$/i, '');
+      const outName = `${base}-signe.pdf`;
+      const blob = new Blob([signed.bytes], { type: 'application/pdf' });
+      lastSaved = { blob, name: outName };
+
+      wipeSecrets(body);
+      closeSheet();
+      saveBytes(signed.bytes, outName, 'application/pdf');
+      toast(t('cert.success'), 'success', { duration: 6500 });
+    } catch (err) {
+      showError(err?.message || t('save.error'));
+    } finally {
+      popLoading();
+      submitBtn.disabled = false;
+    }
   });
 }
 

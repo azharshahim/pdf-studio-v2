@@ -280,5 +280,8 @@ export function signatureSheetHtml() {
       <button class="btn soft wide" id="sigPickImage" type="button">${icon('image', 16)}<span>${t('sign.choose')}</span></button>
       <input type="file" id="sigFile" accept="image/*" hidden />
     </div>
+    <div class="sig-cert-cta">
+      <button class="btn soft wide" id="sigOpenCert" type="button">${icon('shield', 16)}<span>${t('cert.openFromSign')}</span></button>
+    </div>
   `;
 }
