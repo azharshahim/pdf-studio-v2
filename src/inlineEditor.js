@@ -79,6 +79,7 @@ export function createInlineEditor({
   let isNew = false;
   let handleEls = [];
   let dragState = null;
+  let lastDragEndAt = 0;
   let composing = false;
   let refreshQueued = false;
   let lastCaret = null;
@@ -766,6 +767,7 @@ export function createInlineEditor({
     if (!dragState) return;
     if (ev?.pointerId != null && ev.pointerId !== dragState.pointerId) return;
     dragState = null;
+    lastDragEndAt = Date.now();
     shell?.classList.remove('dragging');
     if (edit) onChange?.(edit);
   }
@@ -780,6 +782,7 @@ export function createInlineEditor({
     sync,
     refresh,
     isOpen,
+    isDragging: () => !!dragState || Date.now() - lastDragEndAt < 180,
     caretOffset,
     get edit() {
       return edit;

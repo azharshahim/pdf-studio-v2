@@ -500,6 +500,137 @@ function redoClean() {
  * et zoom PC à la molette (Ctrl + molette).
  */
 let programmaticScrollUntil = 0;
+let pinchActive = false;
+let lastPinchEndAt = 0;
+
+function isPinchBusy() {
+  return (
+    pinchActive ||
+    Date.now() - lastPinchEndAt < 220 ||
+    !!els.stage?.classList.contains('pinching') ||
+    !!els.pagesWrap?.classList.contains('pinching')
+  );
+}
+
+const pageFlipState = {
+  count: 0,
+  canFlip: () => false,
+};
+
+/**
+ * Changement de page au bout du défilement dans les modes page par page
+ * (Modifier, Annoter, Remplir et signer) : continuer à défiler en bas de page
+ * passe à la suivante, et inversement en haut de page.
+ * Inactif en mode Lecture (le défilement continu le remplace) et pendant tout
+ * glisser de bloc, poignée, signature, flèche ou zoom à deux doigts.
+ */
+function bindPageFlip() {
+  const sc = els.canvasScroll;
+  if (!sc) return;
+  let acc = 0;
+  let lastT = 0;
+  let cooldown = 0;
+  const isGestureBusy = () =>
+    isPinchBusy() || !!inline.isDragging?.() || !!markup.isDragging?.();
+  const canFlip = () =>
+    !!state.engine &&
+    document.body.dataset.route === 'doc' &&
+    !isContinuousRead() &&
+    (!isReading() ||
+      document.body.classList.contains('annotating') ||
+      document.body.classList.contains('fillsign')) &&
+    !isGestureBusy() &&
+    !isSheetOpen() &&
+    !document.querySelector('dialog[open]') &&
+    Date.now() > cooldown;
+  pageFlipState.canFlip = canFlip;
+  const atBottom = () => sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2;
+  const atTop = () => sc.scrollTop <= 1;
+  const flip = async (dir) => {
+    cooldown = Date.now() + 700;
+    acc = 0;
+    if (dir > 0 && state.pageIndex + 1 < state.numPages) {
+      pageFlipState.count += 1;
+      await goToPage(state.pageIndex + 2);
+    } else if (dir < 0 && state.pageIndex > 0) {
+      pageFlipState.count += 1;
+      await goToPage(state.pageIndex, { keepScroll: true });
+      sc.scrollTop = sc.scrollHeight;
+    }
+  };
+  sc.addEventListener(
+    'wheel',
+    (e) => {
+      if (e.ctrlKey || e.metaKey || !canFlip()) {
+        acc = 0;
+        return;
+      }
+      const down = e.deltaY > 0;
+      if ((down && atBottom()) || (!down && e.deltaY < 0 && atTop())) {
+        const now = Date.now();
+        if (now - lastT > 300) acc = 0;
+        lastT = now;
+        acc += e.deltaY;
+        if (Math.abs(acc) > 180) flip(acc > 0 ? 1 : -1);
+      } else {
+        acc = 0;
+      }
+    },
+    { passive: true }
+  );
+  let touch = null;
+  sc.addEventListener(
+    'touchstart',
+    (e) => {
+      if (e.touches.length !== 1 || !canFlip()) {
+        touch = null;
+        return;
+      }
+      const tgt = e.target instanceof Element ? e.target : null;
+      if (
+        tgt?.closest('.inline-shell, .inline-corner, .inline-edge, .mk, [data-mk-handle]') ||
+        (markup.tool && tgt?.closest('#stage, #overlay'))
+      ) {
+        touch = null;
+        return;
+      }
+      touch = { y: e.touches[0].clientY, bottom: atBottom(), top: atTop(), at: Date.now() };
+    },
+    { passive: true }
+  );
+  sc.addEventListener(
+    'touchmove',
+    (e) => {
+      if (!touch) return;
+      if (e.touches.length !== 1 || isGestureBusy()) {
+        touch = null;
+      }
+    },
+    { passive: true }
+  );
+  sc.addEventListener(
+    'touchcancel',
+    () => {
+      touch = null;
+    },
+    { passive: true }
+  );
+  sc.addEventListener(
+    'touchend',
+    (e) => {
+      if (!touch || !canFlip()) {
+        touch = null;
+        return;
+      }
+      const dy = (e.changedTouches[0]?.clientY ?? touch.y) - touch.y;
+      const t0 = touch;
+      touch = null;
+      if (dy < -90 && t0.bottom && atBottom()) flip(1);
+      else if (dy > 90 && t0.top && atTop()) flip(-1);
+    },
+    { passive: true }
+  );
+}
 
 function bindContinuousScrollAndWheel() {
   const sc = els.canvasScroll;
@@ -8408,6 +8539,7 @@ function bindEvents() {
   // Navigation
   els.btnPrev.addEventListener('click', () => goToPage(state.pageIndex));
   els.btnNext.addEventListener('click', () => goToPage(state.pageIndex + 2));
+  bindPageFlip();
   bindContinuousScrollAndWheel();
   els.pageInput.addEventListener('change', () => goToPage(parseInt(els.pageInput.value, 10) || 1));
   els.pageInput.addEventListener('keydown', (e) => {
@@ -8658,6 +8790,7 @@ function bindPinchZoom() {
     (e) => {
       if (e.touches.length !== 2 || !state.engine) return;
       pinching = true;
+      pinchActive = true;
       factor = 1;
       startDistance = distance(e.touches) || 1;
       startZoom = state.zoom ?? state.scale;
@@ -8680,6 +8813,8 @@ function bindPinchZoom() {
   const end = () => {
     if (!pinching) return;
     pinching = false;
+    pinchActive = false;
+    lastPinchEndAt = Date.now();
     for (const node of [els.stage, els.pagesWrap]) {
       if (!node) continue;
       node.classList.remove('pinching');
@@ -8984,6 +9119,7 @@ window.__pdfStudio = {
   state,
   markup,
   continuousState,
+  pageFlipState,
   isContinuousRead,
   setEditGranularity,
   currentEditGranularity,

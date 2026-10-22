@@ -294,6 +294,9 @@ export function createMarkup({
   const touches = new Map();
   let gesture = null;
   let gestureBound = false;
+  let handleDragActive = false;
+  let drawingActive = false;
+  let lastDragEndAt = 0;
 
   const centroid = () => {
     let x = 0;
@@ -363,6 +366,7 @@ export function createMarkup({
       window.removeEventListener('pointercancel', onGestureEnd);
       gestureBound = false;
       gesture = null;
+      lastDragEndAt = Date.now();
       return;
     }
     const o = gesture && state.objects.find((x) => x.id === gesture.id);
@@ -439,6 +443,7 @@ export function createMarkup({
         selectedId = null;
         return;
       }
+      handleDragActive = true;
       const start = { x: ev.clientX, y: ev.clientY };
       const box = { ...o.bbox };
       const startRotation = o.rotation || 0;
@@ -478,6 +483,8 @@ export function createMarkup({
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
         window.removeEventListener('pointercancel', up);
+        handleDragActive = false;
+        lastDragEndAt = Date.now();
         if (e?.type === 'pointercancel') {
           if (o.type === 'arrow' && initEnds) {
             if (hadExplicitEnds) update(o.id, { p1: initEnds.p1, p2: initEnds.p2, bbox: box });
@@ -613,6 +620,7 @@ export function createMarkup({
     }
 
     if (tool === 'ink') {
+      drawingActive = true;
       const points = [start];
       const obj = { type: 'ink', points: [], color: state.inkColor, width: state.inkWidth };
       const pid = ev.pointerId;
@@ -627,6 +635,8 @@ export function createMarkup({
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
         window.removeEventListener('pointercancel', up);
+        drawingActive = false;
+        lastDragEndAt = Date.now();
         draftEl?.remove();
         draftEl = null;
         if (e?.type === 'pointercancel') return;
@@ -641,6 +651,7 @@ export function createMarkup({
     }
 
     if (tool === 'arrow') {
+      drawingActive = true;
       let end = { ...start };
       draftEl = document.createElement('div');
       draftEl.className = 'mk mk-draft mk-arrow-draft';
@@ -672,6 +683,8 @@ export function createMarkup({
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
         window.removeEventListener('pointercancel', up);
+        drawingActive = false;
+        lastDragEndAt = Date.now();
         draftEl?.remove();
         draftEl = null;
         if (e?.type === 'pointercancel') return;
@@ -696,6 +709,7 @@ export function createMarkup({
     }
 
     if (RECT_TOOLS.has(tool)) {
+      drawingActive = true;
       const rect = { left: start.x, top: start.y, width: 0, height: 0 };
       draftEl = document.createElement('div');
       draftEl.className = 'mk mk-draft';
@@ -724,6 +738,8 @@ export function createMarkup({
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
         window.removeEventListener('pointercancel', up);
+        drawingActive = false;
+        lastDragEndAt = Date.now();
         draftEl?.remove();
         draftEl = null;
         if (e?.type === 'pointercancel') return;
@@ -785,6 +801,13 @@ export function createMarkup({
     get tool() {
       return state.tool;
     },
+    isDragging: () =>
+      touches.size > 0 ||
+      !!gesture ||
+      handleDragActive ||
+      drawingActive ||
+      !!draftEl ||
+      Date.now() - lastDragEndAt < 180,
     toPdfRect,
     toPdf,
     attachViewport(vp) {
