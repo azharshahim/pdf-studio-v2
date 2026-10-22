@@ -133,6 +133,8 @@ const els = {
   btnInspectorToggle: $('btnInspectorToggle'),
   langSelect: $('langSelect'),
   canvasScroll: $('canvasScroll'),
+  pagesWrap: $('pagesWrap'),
+  readStack: $('readStack'),
   btnTheme: $('btnTheme'),
   stage: $('stage'),
   pdfCanvas: $('pdfCanvas'),
@@ -313,6 +315,7 @@ const markup = createMarkup({
     scheduleAutosave();
   },
   onPickNote: (obj) => editNote(obj),
+  onStaticRender: () => refreshContinuousOverlays(),
 });
 
 /** Historique dédié aux annotations et aux pages nettoyées ; l'ordre réel est dans actionLog. */
@@ -490,64 +493,46 @@ function redoClean() {
 }
 
 /**
- * Défilement continu en lecture : au bout de la page, continuer à défiler
- * (molette ou glissement du doigt) passe à la page suivante, et inversement
- * en haut de page, comme dans un lecteur à défilement continu.
+ * Défilement continu en lecture : suivi de la page visible au fil du scroll
+ * et zoom PC à la molette (Ctrl + molette).
  */
-function bindPageFlip() {
+let programmaticScrollUntil = 0;
+
+function bindContinuousScrollAndWheel() {
   const sc = els.canvasScroll;
   if (!sc) return;
-  let acc = 0;
-  let lastT = 0;
-  let cooldown = 0;
-  const canFlip = () =>
-    state.engine && isReading() && !state.active && !document.body.classList.contains('annotating') && Date.now() > cooldown;
-  const atBottom = () => sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2;
-  const atTop = () => sc.scrollTop <= 1;
-  const flip = async (dir) => {
-    cooldown = Date.now() + 700;
-    acc = 0;
-    if (dir > 0 && state.pageIndex + 1 < state.numPages) {
-      await goToPage(state.pageIndex + 2);
-    } else if (dir < 0 && state.pageIndex > 0) {
-      await goToPage(state.pageIndex, { keepScroll: true });
-      sc.scrollTop = sc.scrollHeight;
-    }
-  };
+  let scrollRaf = 0;
+  sc.addEventListener(
+    'scroll',
+    () => {
+      if (!isContinuousRead() || Date.now() < programmaticScrollUntil) return;
+      if (scrollRaf) return;
+      scrollRaf = requestAnimationFrame(() => {
+        scrollRaf = 0;
+        syncVisibleReadPageFromScroll();
+      });
+    },
+    { passive: true }
+  );
+
+  let wheelRaf = 0;
+  let pendingFactor = 1;
   sc.addEventListener(
     'wheel',
     (e) => {
-      if (e.ctrlKey || !canFlip()) return;
-      const down = e.deltaY > 0;
-      if ((down && atBottom()) || (!down && e.deltaY < 0 && atTop())) {
-        const now = Date.now();
-        if (now - lastT > 300) acc = 0;
-        lastT = now;
-        acc += e.deltaY;
-        if (Math.abs(acc) > 180) flip(acc > 0 ? 1 : -1);
-      } else acc = 0;
+      if (!(e.ctrlKey || e.metaKey) || !state.engine) return;
+      e.preventDefault();
+      pendingFactor *= e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      if (wheelRaf) return;
+      wheelRaf = requestAnimationFrame(() => {
+        wheelRaf = 0;
+        const factor = pendingFactor;
+        pendingFactor = 1;
+        state.zoom = U.clamp((state.zoom ?? state.scale) * factor, 0.2, 6);
+        renderCurrent();
+      });
     },
-    { passive: true }
-  );
-  let touch = null;
-  sc.addEventListener(
-    'touchstart',
-    (e) => {
-      touch = e.touches.length === 1 ? { y: e.touches[0].clientY, bottom: atBottom(), top: atTop(), at: Date.now() } : null;
-    },
-    { passive: true }
-  );
-  sc.addEventListener(
-    'touchend',
-    (e) => {
-      if (!touch || !canFlip()) return;
-      const dy = (e.changedTouches[0]?.clientY ?? touch.y) - touch.y;
-      const t = touch;
-      touch = null;
-      if (dy < -90 && t.bottom && atBottom()) flip(1);
-      else if (dy > 90 && t.top && atTop()) flip(-1);
-    },
-    { passive: true }
+    { passive: false }
   );
 }
 
@@ -643,6 +628,450 @@ function editLinesForPage(n) {
 let resizeTimer = null;
 let thumbObserver = null;
 const measureCtx = document.createElement('canvas').getContext('2d');
+
+/** Lecture seule pure : pages empilées verticalement avec rendu progressif. */
+function isContinuousRead() {
+  return (
+    !!state.engine &&
+    isReading() &&
+    !document.body.classList.contains('annotating') &&
+    !document.body.classList.contains('fillsign')
+  );
+}
+
+const continuousState = {
+  active: false,
+  docToken: 0,
+  numPages: 0,
+  scale: 0,
+  defaultBase: null,
+  baseSizes: new Map(),
+  viewports: new Map(),
+  renderTasks: new Map(),
+  inFlight: new Map(),
+  rendered: new Set(),
+  visible: new Set(),
+  observer: null,
+};
+
+function cleanSigForPage(pageNo) {
+  const info = state.cleanedPages?.[pageNo];
+  if (!info?.dataUrl || info.preset === 'original') return 'orig';
+  return `${info.preset}:${info.intensity}:${info.qualityTier || ''}:${info.dataUrl.length}`;
+}
+
+function getReadSlotParts(pageNo) {
+  if (pageNo === 1) {
+    return { slot: els.stage, canvas: els.pdfCanvas, overlay: els.overlay };
+  }
+  const slot = els.readStack?.querySelector(`[data-read-page="${pageNo}"]`);
+  if (!slot) return { slot: null, canvas: null, overlay: null };
+  return {
+    slot,
+    canvas: slot.querySelector('canvas'),
+    overlay: slot.querySelector('.overlay'),
+  };
+}
+
+function slotTopInScroller(slot) {
+  const sc = els.canvasScroll;
+  if (!sc || !slot) return 0;
+  const sr = sc.getBoundingClientRect();
+  const r = slot.getBoundingClientRect();
+  return sc.scrollTop + (r.top - sr.top);
+}
+
+function releaseReadPage(pageNo) {
+  const task = continuousState.renderTasks.get(pageNo);
+  if (task) {
+    try {
+      task.cancel();
+    } catch {
+      /* ignore */
+    }
+    continuousState.renderTasks.delete(pageNo);
+  }
+  continuousState.inFlight.delete(pageNo);
+  const { slot, canvas, overlay } = getReadSlotParts(pageNo);
+  if (canvas) {
+    canvas.width = 1;
+    canvas.height = 1;
+  }
+  if (overlay) overlay.innerHTML = '';
+  if (slot) {
+    slot.dataset.renderedScale = '';
+    slot.dataset.cleanSig = '';
+  }
+  continuousState.rendered.delete(pageNo);
+}
+
+/** Libère la mémoire des pages éloignées de la zone visible (PDF de 100+ pages). */
+function pruneFarReadPages() {
+  if (!continuousState.active) return;
+  const current = state.pageIndex + 1;
+  let minVis = current;
+  let maxVis = current;
+  if (continuousState.visible.size) {
+    minVis = Math.min(...continuousState.visible);
+    maxVis = Math.max(...continuousState.visible);
+  }
+  for (const p of [...continuousState.rendered]) {
+    if (continuousState.visible.has(p)) continue;
+    if (p >= minVis - 1 && p <= maxVis + 1) continue;
+    if (Math.abs(p - current) <= 1) continue;
+    releaseReadPage(p);
+  }
+}
+
+function teardownContinuousRead({ resetCache = false } = {}) {
+  if (continuousState.observer) {
+    continuousState.observer.disconnect();
+    continuousState.observer = null;
+  }
+  for (const task of continuousState.renderTasks.values()) {
+    try {
+      task.cancel();
+    } catch {
+      /* ignore */
+    }
+  }
+  continuousState.renderTasks.clear();
+  continuousState.inFlight.clear();
+  if (els.readStack) {
+    els.readStack.querySelectorAll('canvas').forEach((c) => {
+      c.width = 1;
+      c.height = 1;
+    });
+    els.readStack.innerHTML = '';
+    els.readStack.hidden = true;
+  }
+  if (els.overlay) delete els.overlay.dataset.staticMode;
+  if (els.stage) {
+    delete els.stage.dataset.readPage;
+    delete els.stage.dataset.renderedScale;
+    delete els.stage.dataset.cleanSig;
+  }
+  const activeVp = continuousState.viewports.get(state.pageIndex + 1);
+  if (activeVp) {
+    state.viewport = activeVp;
+    markup.attachViewport(activeVp);
+  }
+  continuousState.active = false;
+  continuousState.rendered.clear();
+  continuousState.visible.clear();
+  if (resetCache) {
+    continuousState.docToken = 0;
+    continuousState.numPages = 0;
+    continuousState.scale = 0;
+    continuousState.defaultBase = null;
+    continuousState.baseSizes.clear();
+    continuousState.viewports.clear();
+  }
+}
+
+function syncVisibleReadPageFromScroll() {
+  if (!isContinuousRead() || !continuousState.active || !els.canvasScroll) return;
+  const sc = els.canvasScroll;
+  const sr = sc.getBoundingClientRect();
+  if (!sr.height) return;
+  const probeY = sr.top + sr.height * 0.36;
+  let bestPage = state.pageIndex + 1;
+  let bestScore = -Infinity;
+  const checkSlot = (slot, pageNo) => {
+    if (!slot || slot.hidden) return;
+    const r = slot.getBoundingClientRect();
+    const overlap = Math.max(0, Math.min(r.bottom, sr.bottom) - Math.max(r.top, sr.top));
+    const containsProbe = probeY >= r.top && probeY <= r.bottom ? sr.height : 0;
+    const distPenalty = Math.abs((r.top + r.bottom) / 2 - probeY) * 0.05;
+    const score = overlap + containsProbe - distPenalty;
+    if (score > bestScore) {
+      bestScore = score;
+      bestPage = pageNo;
+    }
+  };
+  checkSlot(els.stage, 1);
+  if (els.readStack && !els.readStack.hidden) {
+    els.readStack.querySelectorAll('[data-read-page]').forEach((slot) => {
+      checkSlot(slot, Number(slot.dataset.readPage));
+    });
+  }
+  if (bestPage >= 1 && bestPage <= state.numPages && bestPage - 1 !== state.pageIndex) {
+    state.pageIndex = bestPage - 1;
+    const vp = continuousState.viewports.get(bestPage);
+    if (vp) state.viewport = vp;
+    updatePageNav();
+    updateThumbActive();
+    updatePanelsForPage();
+    const activeThumb = els.thumbs?.querySelector('.thumb.active');
+    activeThumb?.scrollIntoView({ block: 'nearest' });
+    pruneFarReadPages();
+  }
+}
+
+async function renderReadPage(pageNo, token = state.renderToken, { force = false } = {}) {
+  if (!isContinuousRead() || token !== state.renderToken) return;
+  if (pageNo < 1 || pageNo > state.numPages) return;
+  const { slot, canvas, overlay } = getReadSlotParts(pageNo);
+  if (!slot || !canvas || !overlay) return;
+  const scale = continuousState.scale || state.scale || 1;
+  const scaleKey = String(scale);
+  const cleanKey = cleanSigForPage(pageNo);
+  if (
+    !force &&
+    continuousState.rendered.has(pageNo) &&
+    slot.dataset.renderedScale === scaleKey &&
+    slot.dataset.cleanSig === cleanKey
+  ) {
+    return;
+  }
+  const existing = continuousState.inFlight.get(pageNo);
+  if (existing && !force && existing.scaleKey === scaleKey && existing.token === token) {
+    return existing.promise;
+  }
+
+  const job = (async () => {
+    const page = await state.engine.getPage(pageNo);
+    if (token !== state.renderToken || !isContinuousRead()) return;
+    const base = page.getViewport({ scale: 1 });
+    continuousState.baseSizes.set(pageNo, { width: base.width, height: base.height });
+    const vp = page.getViewport({ scale });
+    continuousState.viewports.set(pageNo, vp);
+    if (pageNo === state.pageIndex + 1) state.viewport = vp;
+
+    slot.style.width = `${vp.width}px`;
+    slot.style.height = `${vp.height}px`;
+
+    let dpr = Math.min(2, window.devicePixelRatio || 1);
+    const maxPx = 8000;
+    if (vp.width * dpr > maxPx || vp.height * dpr > maxPx) {
+      dpr = Math.max(0.5, Math.min(maxPx / vp.width, maxPx / vp.height));
+    }
+
+    const prevTask = continuousState.renderTasks.get(pageNo);
+    if (prevTask) {
+      try {
+        prevTask.cancel();
+      } catch {
+        /* ignore */
+      }
+      continuousState.renderTasks.delete(pageNo);
+    }
+
+    canvas.style.width = `${vp.width}px`;
+    canvas.style.height = `${vp.height}px`;
+    canvas.width = Math.max(1, Math.floor(vp.width * dpr));
+    canvas.height = Math.max(1, Math.floor(vp.height * dpr));
+    const ctx = canvas.getContext('2d');
+
+    const cleanInfo = state.cleanedPages?.[pageNo];
+    if (cleanInfo?.dataUrl && cleanInfo.preset !== 'original') {
+      try {
+        const img = await loadCleanedImage(cleanInfo.dataUrl);
+        if (token !== state.renderToken || !isContinuousRead()) return;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (img) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      } catch (err) {
+        console.warn('clean render', err);
+      }
+    } else {
+      try {
+        const task = page.render({
+          canvasContext: ctx,
+          viewport: vp,
+          transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
+          background: '#ffffff',
+        });
+        continuousState.renderTasks.set(pageNo, task);
+        await task.promise;
+      } catch (err) {
+        if (err?.name !== 'RenderingCancelledException' && err?.name !== 'AbortException') {
+          console.warn('render', err);
+        }
+        return;
+      } finally {
+        continuousState.renderTasks.delete(pageNo);
+      }
+    }
+    if (token !== state.renderToken || !isContinuousRead()) return;
+
+    await ensureLines(pageNo);
+    if (token !== state.renderToken || !isContinuousRead()) return;
+
+    renderReadPageOverlay(pageNo, overlay, vp, scale);
+    slot.dataset.renderedScale = scaleKey;
+    slot.dataset.cleanSig = cleanKey;
+    continuousState.rendered.add(pageNo);
+  })();
+
+  continuousState.inFlight.set(pageNo, { token, scaleKey, promise: job });
+  try {
+    await job;
+  } finally {
+    if (continuousState.inFlight.get(pageNo)?.promise === job) {
+      continuousState.inFlight.delete(pageNo);
+    }
+  }
+}
+
+function refreshContinuousOverlays() {
+  if (!isContinuousRead() || !continuousState.active) return;
+  for (const pageNo of continuousState.rendered) {
+    const { overlay } = getReadSlotParts(pageNo);
+    const vp = continuousState.viewports.get(pageNo);
+    if (overlay && vp) renderReadPageOverlay(pageNo, overlay, vp, continuousState.scale || state.scale || 1);
+  }
+}
+
+async function renderContinuous(token) {
+  const anchorPage = U.clamp(state.pageIndex + 1, 1, state.numPages);
+  const page = await state.engine.getPage(anchorPage);
+  if (token !== state.renderToken || !isContinuousRead()) return;
+
+  positionDock();
+  const base = page.getViewport({ scale: 1 });
+  continuousState.baseSizes.set(anchorPage, { width: base.width, height: base.height });
+  if (!continuousState.defaultBase) {
+    continuousState.defaultBase = { width: base.width, height: base.height };
+  }
+
+  const narrow = window.matchMedia('(max-width: 900px)').matches;
+  const gutter = narrow ? 16 : 56;
+  const availW = Math.max(280, els.canvasScroll.clientWidth - gutter);
+  const availH = Math.max(240, els.canvasScroll.clientHeight - gutter);
+  const readBoost = 1.25;
+  let scale =
+    state.zoom == null
+      ? narrow
+        ? Math.min(availW / base.width, 2) * readBoost
+        : Math.min(availW / base.width, availH / base.height, 1.6) * readBoost
+      : state.zoom;
+  scale = U.clamp(scale, 0.15, 6);
+  state.scale = scale;
+
+  const anchorVp = page.getViewport({ scale });
+  continuousState.viewports.set(anchorPage, anchorVp);
+  state.viewport = anchorVp;
+  markup.attachViewport(anchorVp);
+
+  const wasActiveSameDoc =
+    continuousState.active &&
+    continuousState.docToken === state.docToken &&
+    continuousState.numPages === state.numPages;
+
+  let prevOffsetRatioY = 0;
+  let prevCenterRatioX = 0.5;
+  if (wasActiveSameDoc) {
+    const prevSlot = getReadSlotParts(anchorPage).slot;
+    if (prevSlot && prevSlot.offsetHeight > 0) {
+      const topInSc = slotTopInScroller(prevSlot);
+      prevOffsetRatioY = (els.canvasScroll.scrollTop - topInSc) / prevSlot.offsetHeight;
+    }
+    if (els.canvasScroll.scrollWidth > 0) {
+      prevCenterRatioX =
+        (els.canvasScroll.scrollLeft + els.canvasScroll.clientWidth / 2) / els.canvasScroll.scrollWidth;
+    }
+  }
+
+  if (!wasActiveSameDoc) {
+    if (continuousState.observer) {
+      continuousState.observer.disconnect();
+      continuousState.observer = null;
+    }
+    if (els.readStack) {
+      els.readStack.innerHTML = '';
+      for (let p = 2; p <= state.numPages; p++) {
+        const slot = document.createElement('div');
+        slot.className = 'stage read-page';
+        slot.dataset.readPage = String(p);
+        slot.innerHTML = '<canvas class="read-page-canvas"></canvas><div class="overlay read-page-overlay"></div>';
+        els.readStack.appendChild(slot);
+      }
+      els.readStack.hidden = state.numPages <= 1;
+    }
+    els.stage.hidden = false;
+    els.stage.dataset.readPage = '1';
+    els.overlay.dataset.staticMode = '1';
+  }
+
+  const fallbackBase = continuousState.defaultBase || { width: base.width, height: base.height };
+  for (let p = 1; p <= state.numPages; p++) {
+    const { slot, canvas } = getReadSlotParts(p);
+    if (!slot) continue;
+    const b = continuousState.baseSizes.get(p) || fallbackBase;
+    const w = b.width * scale;
+    const h = b.height * scale;
+    slot.style.width = `${w}px`;
+    slot.style.height = `${h}px`;
+    if (canvas && !continuousState.rendered.has(p)) {
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+    }
+  }
+
+  continuousState.active = true;
+  continuousState.docToken = state.docToken;
+  continuousState.numPages = state.numPages;
+  continuousState.scale = scale;
+
+  if (!continuousState.observer && typeof IntersectionObserver !== 'undefined') {
+    continuousState.observer = new IntersectionObserver(
+      (entries) => {
+        if (!isContinuousRead() || !continuousState.active) return;
+        for (const en of entries) {
+          const p = Number(en.target.dataset.readPage);
+          if (!p) continue;
+          if (en.isIntersecting) {
+            continuousState.visible.add(p);
+            renderReadPage(p, state.renderToken);
+          } else {
+            continuousState.visible.delete(p);
+          }
+        }
+        pruneFarReadPages();
+      },
+      { root: els.canvasScroll, rootMargin: '125% 0px' }
+    );
+    continuousState.observer.observe(els.stage);
+    els.readStack?.querySelectorAll('[data-read-page]').forEach((slot) => {
+      continuousState.observer.observe(slot);
+    });
+  }
+
+  if (wasActiveSameDoc) {
+    const curSlot = getReadSlotParts(anchorPage).slot;
+    if (curSlot) {
+      programmaticScrollUntil = Date.now() + 180;
+      const topInSc = slotTopInScroller(curSlot);
+      els.canvasScroll.scrollTop = Math.max(0, topInSc + prevOffsetRatioY * curSlot.offsetHeight);
+      els.canvasScroll.scrollLeft = Math.max(
+        0,
+        prevCenterRatioX * els.canvasScroll.scrollWidth - els.canvasScroll.clientWidth / 2
+      );
+    }
+  } else if (anchorPage > 1) {
+    const curSlot = getReadSlotParts(anchorPage).slot;
+    if (curSlot) {
+      programmaticScrollUntil = Date.now() + 220;
+      const padTop = parseFloat(getComputedStyle(els.canvasScroll).paddingTop) || 16;
+      els.canvasScroll.scrollTo({ top: Math.max(0, slotTopInScroller(curSlot) - padTop), behavior: 'auto' });
+    }
+  }
+
+  await renderReadPage(anchorPage, token);
+  if (token !== state.renderToken || !isContinuousRead()) return;
+
+  // Prépare sans bloquer les pages immédiatement voisines si elles sont proches.
+  if (anchorPage + 1 <= state.numPages) renderReadPage(anchorPage + 1, token);
+  if (anchorPage - 1 >= 1) renderReadPage(anchorPage - 1, token);
+  pruneFarReadPages();
+
+  updateZoomLabel();
+  updatePageNav();
+  updateThumbActive();
+  updatePanelsForPage();
+}
+
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
@@ -654,6 +1083,13 @@ async function renderCurrent() {
   if (!state.engine) return;
   if (state.active) closeActive();
   const token = ++state.renderToken;
+  if (isContinuousRead()) {
+    await renderContinuous(token);
+    return;
+  }
+  if (continuousState.active) {
+    teardownContinuousRead();
+  }
   const n = state.pageIndex + 1;
 
   const page = await state.engine.getPage(n);
@@ -760,6 +1196,29 @@ async function goToPage(n, { keepScroll = false } = {}) {
   if (!state.engine) return;
   const target = U.clamp(Math.round(n) || 1, 1, state.numPages);
   closeActive();
+  if (isContinuousRead()) {
+    state.pageIndex = target - 1;
+    updatePageNav();
+    updateThumbActive();
+    updatePanelsForPage();
+    if (!continuousState.active || continuousState.docToken !== state.docToken) {
+      await renderCurrent();
+    } else {
+      const { slot } = getReadSlotParts(target);
+      if (slot && !keepScroll) {
+        programmaticScrollUntil = Date.now() + 220;
+        const padTop = parseFloat(getComputedStyle(els.canvasScroll).paddingTop) || 16;
+        els.canvasScroll.scrollTo({ top: Math.max(0, slotTopInScroller(slot) - padTop), behavior: 'auto' });
+      }
+      await renderReadPage(target, state.renderToken);
+      if (target + 1 <= state.numPages) renderReadPage(target + 1, state.renderToken);
+      if (target - 1 >= 1) renderReadPage(target - 1, state.renderToken);
+      pruneFarReadPages();
+    }
+    const activeThumb = els.thumbs.querySelector('.thumb.active');
+    activeThumb?.scrollIntoView({ block: 'nearest' });
+    return;
+  }
   if (target - 1 === state.pageIndex) {
     if (!keepScroll) els.canvasScroll.scrollTo({ top: 0 });
     updatePageNav();
@@ -1368,6 +1827,7 @@ function centerHorizontally() {
 /** Remplir et signer : outils de saisie, sans passer en modification du texte. */
 function setFillSign(on) {
   if (on && !isReading()) return;
+  const was = document.body.classList.contains('fillsign');
   document.body.classList.toggle('fillsign', !!on);
   if (!on) {
     try {
@@ -1380,6 +1840,10 @@ function setFillSign(on) {
     toast(t('read.fillHint'), 'info', { duration: 2600 });
   }
   updateDock();
+  if (was !== !!on && state.engine) {
+    if (state.zoom == null && state.scale) state.zoom = state.scale;
+    renderCurrent();
+  }
 }
 
 /** Renomme le document ouvert (liste des fichiers, titre et exports). */
@@ -2206,80 +2670,57 @@ function populateFontSelect() {
   els.fmtFont.innerHTML = html;
 }
 
-function renderOverlay() {
-  if (!state.engine || !state.viewport) return;
-  clearOverlay();
-  const pageNo = state.pageIndex + 1;
-  const vp = state.viewport;
-  const lines = editLinesForPage(pageNo);
-  const pageEdits = state.edits.filter((e) => e.page === pageNo);
-  const activeId = state.active?.edit?.id || null;
-  const covered = new Set(pageEdits.filter((e) => e.kind === 'edit' && e.lineId).map((e) => e.lineId));
-  const query = state.search.query;
-  const nq = query ? U.normalizeText(query) : '';
-  const activeMatch = state.search.matches[state.search.active];
-
-  // Lecture : texte transparent sélectionnable / copiable par-dessus la page.
-  if (isReading() && !document.body.classList.contains('annotating')) {
-    const layer = document.createElement('div');
-    layer.className = 'read-text-layer';
-    const addSpan = (text, bbox, size) => {
-      if (!text || !text.trim() || !bbox || bbox.w <= 0 || bbox.h <= 0) return;
-      const r = pdfRectToViewportRect(bbox, vp);
-      if (r.width < 2 || r.height < 2) return;
-      const fs = Math.max(4, r.height * 0.82);
-      measureCtx.font = `${fs}px sans-serif`;
-      const natural = measureCtx.measureText(text).width || 1;
-      const sx = U.clamp(r.width / natural, 0.2, 6);
-      const span = document.createElement('span');
-      span.textContent = text;
-      span.style.cssText = `left:${r.left}px;top:${r.top}px;height:${r.height}px;line-height:${r.height}px;font-size:${fs}px;transform:scaleX(${sx});`;
-      layer.appendChild(span);
-    };
-    for (const line of lines) {
-      if (covered.has(line.id)) continue;
-      addSpan(line.text, line.bbox);
-    }
-    for (const e of pageEdits) addSpan(e.text, e.bbox);
-    els.overlay.appendChild(layer);
-  }
-
-  // Zones de texte d'origine (cliquables)
-  for (const line of lines) {
-    if (!line.bbox || line.bbox.w <= 0 || line.bbox.h <= 0) continue;
-    if (covered.has(line.id)) continue;
-    const r = pdfRectToViewportRect(line.bbox, vp);
-    if (r.width < 1 || r.height < 1) continue;
-    const d = document.createElement('div');
-    d.className = 'line-block' + (line.source === 'ocr' ? ' ocr' : '');
-    d.dataset.lineId = line.id;
-    d.style.left = `${r.left}px`;
-    d.style.top = `${r.top}px`;
-    d.style.width = `${r.width}px`;
-    d.style.height = `${r.height}px`;
-    d.title = line.text;
-    if (nq && U.normalizeText(line.text).includes(nq)) {
-      d.classList.add('hit');
-      if (activeMatch && activeMatch.page === pageNo && activeMatch.lineId === line.id) {
-        d.classList.add('hit-active');
-      }
-    }
-    els.overlay.appendChild(d);
-  }
-
-  markup.render();
-  renderFormOverlay();
-
-  // Blocs déplacés : le texte d'origine reste recouvert à son ancienne place.
+function coveredLineIds(pageEdits) {
+  const s = new Set();
   for (const e of pageEdits) {
-    if (!e.origBbox) continue;
-    const ro = pdfRectToViewportRect(e.origBbox, vp);
-    const px = Math.max(1, (e.size || 10) * 0.12) * state.scale;
-    const py = Math.max(0.8, (e.size || 10) * 0.05) * state.scale;
-    const cover = document.createElement('div');
-    cover.className = 'edit-cover';
-    cover.style.cssText = `position:absolute;left:${ro.left - px}px;top:${ro.top - py}px;width:${ro.width + px * 2}px;height:${ro.height + py * 2}px;background:${e.bg && e.bg !== 'none' ? e.bg : 'transparent'};pointer-events:none;`;
-    els.overlay.appendChild(cover);
+    if (e.kind !== 'edit') continue;
+    if (Array.isArray(e.lineIds)) for (const id of e.lineIds) s.add(id);
+    if (e.lineId) s.add(e.lineId);
+  }
+  return s;
+}
+
+function appendReadTextLayer(targetOverlay, lines, pageEdits, covered, vp) {
+  const layer = document.createElement('div');
+  layer.className = 'read-text-layer';
+  const addSpan = (text, bbox) => {
+    if (!text || !text.trim() || !bbox || bbox.w <= 0 || bbox.h <= 0) return;
+    const r = pdfRectToViewportRect(bbox, vp);
+    if (r.width < 2 || r.height < 2) return;
+    const fs = Math.max(4, r.height * 0.82);
+    measureCtx.font = `${fs}px sans-serif`;
+    const natural = measureCtx.measureText(text).width || 1;
+    const sx = U.clamp(r.width / natural, 0.2, 6);
+    const span = document.createElement('span');
+    span.textContent = text;
+    span.style.cssText = `left:${r.left}px;top:${r.top}px;height:${r.height}px;line-height:${r.height}px;font-size:${fs}px;transform:scaleX(${sx});`;
+    layer.appendChild(span);
+  };
+  for (const line of lines) {
+    if (covered.has(line.id)) continue;
+    addSpan(line.text, line.bbox);
+  }
+  for (const e of pageEdits) addSpan(e.text, e.bbox);
+  targetOverlay.appendChild(layer);
+}
+
+function appendPageEditsToOverlay(targetOverlay, pageEdits, vp, scale, activeId = null) {
+  // Blocs déplacés ou multi-lignes : le texte d'origine reste recouvert à son ancienne place.
+  for (const e of pageEdits) {
+    const covers = Array.isArray(e.origBboxes) && e.origBboxes.length
+      ? e.origBboxes
+      : e.origBbox
+        ? [e.origBbox]
+        : [];
+    for (const box of covers) {
+      const ro = pdfRectToViewportRect(box, vp);
+      const px = Math.max(1, (e.size || 10) * 0.12) * scale;
+      const py = Math.max(0.8, (e.size || 10) * 0.05) * scale;
+      const cover = document.createElement('div');
+      cover.className = 'edit-cover';
+      cover.style.cssText = `position:absolute;left:${ro.left - px}px;top:${ro.top - py}px;width:${ro.width + px * 2}px;height:${ro.height + py * 2}px;background:${e.bg && e.bg !== 'none' ? e.bg : 'transparent'};pointer-events:none;`;
+      targetOverlay.appendChild(cover);
+    }
   }
 
   // Blocs modifiés / ajoutés (le bloc en cours d'édition est rendu par l'éditeur)
@@ -2288,7 +2729,6 @@ function renderOverlay() {
     if (!e.bbox || e.bbox.w <= 0) continue;
     const r = pdfRectToViewportRect(e.bbox, vp);
     if (r.width < 0.5 || r.height < 0.5) continue;
-    const scale = state.scale;
     const padX = Math.max(1, (e.size || 10) * 0.12) * scale;
     const padY = Math.max(0.8, (e.size || 10) * 0.05) * scale;
     const d = document.createElement('div');
@@ -2299,7 +2739,8 @@ function renderOverlay() {
     d.style.minWidth = `${r.width + padX * 2}px`;
     d.style.minHeight = `${r.height + padY * 2}px`;
     d.style.padding = `${padY}px ${padX}px`;
-    d.style.background = e.bg && e.bg !== 'none' && !e.origBbox ? e.bg : 'transparent';
+    const hasCustomCovers = (Array.isArray(e.origBboxes) && e.origBboxes.length) || !!e.origBbox;
+    d.style.background = e.bg && e.bg !== 'none' && !hasCustomCovers ? e.bg : 'transparent';
 
     if (e.font) ensureCatalogFont(e.font).then((ok) => ok && !fontsRendered.has(e.font) && (fontsRendered.add(e.font), renderOverlay()));
     const fontFamily = U.cssFontFamily(e.font);
@@ -2345,7 +2786,6 @@ function renderOverlay() {
       span.style.transform = `scaleX(${Number(e.hScale) / 100})`;
       span.style.transformOrigin = 'left top';
     }
-    // compense la réduction de taille pour garder la ligne de base
     if (fontSizePx < basePx) span.style.paddingTop = `${0.88 * (basePx - fontSizePx)}px`;
     d.appendChild(span);
 
@@ -2353,8 +2793,96 @@ function renderOverlay() {
     flag.className = 'edit-flag';
     flag.textContent = e.kind === 'add' ? 'Nouveau' : 'Modifié';
     d.appendChild(flag);
+    targetOverlay.appendChild(d);
+  }
+}
+
+function renderReadPageOverlay(pageNo, targetOverlay, vp, scale) {
+  if (!targetOverlay || !vp) return;
+  targetOverlay.innerHTML = '';
+  const lines = editLinesForPage(pageNo);
+  const pageEdits = state.edits.filter((e) => e.page === pageNo);
+  const covered = coveredLineIds(pageEdits);
+  const query = state.search.query;
+  const nq = query ? U.normalizeText(query) : '';
+  const activeMatch = state.search.matches[state.search.active];
+
+  appendReadTextLayer(targetOverlay, lines, pageEdits, covered, vp);
+
+  if (nq) {
+    for (const line of lines) {
+      if (!line.bbox || line.bbox.w <= 0 || line.bbox.h <= 0 || covered.has(line.id)) continue;
+      if (!U.normalizeText(line.text).includes(nq)) continue;
+      const r = pdfRectToViewportRect(line.bbox, vp);
+      if (r.width < 1 || r.height < 1) continue;
+      const d = document.createElement('div');
+      d.className = 'line-block hit' + (activeMatch && activeMatch.page === pageNo && activeMatch.lineId === line.id ? ' hit-active' : '');
+      d.dataset.lineId = line.id;
+      d.style.left = `${r.left}px`;
+      d.style.top = `${r.top}px`;
+      d.style.width = `${r.width}px`;
+      d.style.height = `${r.height}px`;
+      targetOverlay.appendChild(d);
+    }
+  }
+
+  markup.renderStaticPage(targetOverlay, {
+    page: pageNo,
+    scale,
+    rectFor: (b) => pdfRectToViewportRect(b, vp),
+  });
+  appendPageEditsToOverlay(targetOverlay, pageEdits, vp, scale, null);
+}
+
+function renderOverlay() {
+  if (!state.engine) return;
+  if (isContinuousRead() && continuousState.active) {
+    refreshContinuousOverlays();
+    return;
+  }
+  if (!state.viewport) return;
+  clearOverlay();
+  const pageNo = state.pageIndex + 1;
+  const vp = state.viewport;
+  const lines = editLinesForPage(pageNo);
+  const pageEdits = state.edits.filter((e) => e.page === pageNo);
+  const activeId = state.active?.edit?.id || null;
+  const covered = coveredLineIds(pageEdits);
+  const query = state.search.query;
+  const nq = query ? U.normalizeText(query) : '';
+  const activeMatch = state.search.matches[state.search.active];
+
+  // Lecture : texte transparent sélectionnable / copiable par-dessus la page.
+  if (isReading() && !document.body.classList.contains('annotating')) {
+    appendReadTextLayer(els.overlay, lines, pageEdits, covered, vp);
+  }
+
+  // Zones de texte d'origine (cliquables)
+  for (const line of lines) {
+    if (!line.bbox || line.bbox.w <= 0 || line.bbox.h <= 0) continue;
+    if (covered.has(line.id)) continue;
+    const r = pdfRectToViewportRect(line.bbox, vp);
+    if (r.width < 1 || r.height < 1) continue;
+    const d = document.createElement('div');
+    d.className = 'line-block' + (line.source === 'ocr' ? ' ocr' : '');
+    d.dataset.lineId = line.id;
+    d.style.left = `${r.left}px`;
+    d.style.top = `${r.top}px`;
+    d.style.width = `${r.width}px`;
+    d.style.height = `${r.height}px`;
+    d.title = line.text;
+    if (nq && U.normalizeText(line.text).includes(nq)) {
+      d.classList.add('hit');
+      if (activeMatch && activeMatch.page === pageNo && activeMatch.lineId === line.id) {
+        d.classList.add('hit-active');
+      }
+    }
     els.overlay.appendChild(d);
   }
+
+  markup.render();
+  renderFormOverlay();
+  appendPageEditsToOverlay(els.overlay, pageEdits, vp, state.scale, activeId);
 }
 
 function stagePoint(ev) {
@@ -4599,13 +5127,14 @@ async function focusMatch(i) {
   state.search.active = i;
   if (m.page !== state.pageIndex + 1) {
     await goToPage(m.page);
+    if (isContinuousRead()) renderOverlay();
   } else {
     renderOverlay();
   }
   renderSearchResults();
   updateHint();
   requestAnimationFrame(() => {
-    const el = els.overlay.querySelector('.hit-active');
+    const el = els.canvasScroll.querySelector('.hit-active');
     el?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
   });
 }
@@ -4763,6 +5292,7 @@ async function openPdfBytes(bytes, name, password = '', options = {}) {
     state.zoom = null;
     state.scale = 1;
     state.viewport = null;
+    teardownContinuousRead({ resetCache: true });
     state.pages = new Map();
     state.edits = [];
     state.cleanedPages = {};
@@ -5621,10 +6151,19 @@ function activateAnnoTool(tool) {
 function openAnnotate() {
   routeTo('doc');
   if (!state.engine) return;
+  const wasContinuous = isContinuousRead();
   closeActive();
   buildAnnoBar();
   els.annobar.hidden = false;
   document.body.classList.add('annotating');
+  if (wasContinuous) {
+    if (state.zoom == null && state.scale) state.zoom = state.scale;
+    const targetPage = state.pageIndex + 1;
+    teardownContinuousRead();
+    // Si on était sur une autre page que la 1, on redessine immédiatement cette page dans #stage.
+    if (targetPage !== 1) renderCurrent();
+    else renderOverlay();
+  }
   activateAnnoTool('highlight');
   if (!markupHistory.stack.length) pushMarkupHistory({ silent: true });
 }
@@ -5636,6 +6175,7 @@ function closeAnnotate() {
   els.annoTools?.querySelectorAll('.anno-btn').forEach((b) => b.classList.remove('active'));
   document.body.classList.remove('annotating');
   scheduleAutosave();
+  if (isContinuousRead()) renderCurrent();
 }
 
 let noteTarget = null;
@@ -7432,7 +7972,7 @@ function bindEvents() {
   // Navigation
   els.btnPrev.addEventListener('click', () => goToPage(state.pageIndex));
   els.btnNext.addEventListener('click', () => goToPage(state.pageIndex + 2));
-  bindPageFlip();
+  bindContinuousScrollAndWheel();
   els.pageInput.addEventListener('change', () => goToPage(parseInt(els.pageInput.value, 10) || 1));
   els.pageInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
@@ -7675,6 +8215,8 @@ function bindPinchZoom() {
   const distance = (touches) =>
     Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
 
+  const pinchTarget = () => (isContinuousRead() && els.pagesWrap ? els.pagesWrap : els.stage);
+
   el.addEventListener(
     'touchstart',
     (e) => {
@@ -7683,7 +8225,7 @@ function bindPinchZoom() {
       factor = 1;
       startDistance = distance(e.touches) || 1;
       startZoom = state.zoom ?? state.scale;
-      els.stage.classList.add('pinching');
+      pinchTarget().classList.add('pinching');
     },
     { passive: true }
   );
@@ -7694,7 +8236,7 @@ function bindPinchZoom() {
       if (!pinching || e.touches.length !== 2) return;
       e.preventDefault();
       factor = U.clamp(distance(e.touches) / startDistance, 0.3, 4);
-      els.stage.style.transform = `scale(${factor})`;
+      pinchTarget().style.transform = `scale(${factor})`;
     },
     { passive: false }
   );
@@ -7702,8 +8244,11 @@ function bindPinchZoom() {
   const end = () => {
     if (!pinching) return;
     pinching = false;
-    els.stage.classList.remove('pinching');
-    els.stage.style.transform = '';
+    for (const node of [els.stage, els.pagesWrap]) {
+      if (!node) continue;
+      node.classList.remove('pinching');
+      node.style.transform = '';
+    }
     state.zoom = U.clamp(startZoom * factor, 0.2, 6);
     renderCurrent();
   };
@@ -7723,7 +8268,7 @@ function bindSwipePaging() {
   let dx = 0;
 
   const canSwipe = () => {
-    if (!state.engine || state.active || markup.tool) return false;
+    if (!state.engine || isContinuousRead() || state.active || markup.tool) return false;
     if (!els.annobar?.hidden) return false;
     if (document.querySelector('dialog[open], #sheet:not([hidden])')) return false;
     // Ne pas voler le geste quand la page dépasse en largeur (zoom, paysage).
@@ -8002,6 +8547,8 @@ init();
 window.__pdfStudio = {
   state,
   markup,
+  continuousState,
+  isContinuousRead,
   /** Tests : ajoute une annotation comme le ferait un geste (avec historique). */
   addTestMarkup: (obj) => {
     if (!markupHistory.stack.length) pushMarkupHistory({ silent: true });

@@ -32,6 +32,7 @@ export function createMarkup({
   getPage = () => 1,
   onChange = () => {},
   onPickNote = () => {},
+  onStaticRender = null,
 } = {}) {
   const state = {
     objects: [],
@@ -64,6 +65,10 @@ export function createMarkup({
   /* ─────────────────────────── Rendu DOM ─────────────────────────── */
 
   function render() {
+    if (overlay?.dataset?.staticMode === '1') {
+      onStaticRender?.();
+      return;
+    }
     overlay.querySelectorAll('.mk').forEach((n) => n.remove());
     const page = getPage();
     const scale = getScale() || 1;
@@ -118,8 +123,8 @@ export function createMarkup({
     return state.objects.find((o) => o.id === selectedId) || null;
   }
 
-  function nodeFor(o, scale) {
-    const r = rectFor(o.bbox);
+  function nodeFor(o, scale, { rectForFn = rectFor, interactive = true } = {}) {
+    const r = rectForFn(o.bbox);
     if (!r || r.width <= 0 || r.height <= 0) return null;
     const el = document.createElement('div');
     el.className = `mk mk-${o.type}`;
@@ -177,6 +182,7 @@ export function createMarkup({
       el.style.fontSize = `${Math.max(6, (o.fontSize || 12) * scale)}px`;
       el.textContent = o.text || new Date().toLocaleDateString(uiLocale());
     }
+    if (!interactive) return el;
     if (o.id === selectedId) {
       el.classList.add('selected');
       el.appendChild(selectionHandles(o, scale));
@@ -195,6 +201,44 @@ export function createMarkup({
       });
     }
     return el;
+  }
+
+  /** Rendu statique des objets d'une page dans un calque de lecture continue. */
+  function renderStaticPage(targetOverlay, { page, scale = 1, rectFor: customRectFor = rectFor } = {}) {
+    if (!targetOverlay) return;
+    targetOverlay.querySelectorAll('.mk, .markup-ink').forEach((n) => n.remove());
+    const list = pageObjects(page);
+    if (!list.length) return;
+    const ink = list.filter((o) => o.type === 'ink');
+    if (ink.length) {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('class', 'markup-ink');
+      const w = targetOverlay.clientWidth || parseFloat(targetOverlay.parentElement?.style.width) || 1;
+      const h = targetOverlay.clientHeight || parseFloat(targetOverlay.parentElement?.style.height) || 1;
+      svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+      for (const o of ink) {
+        const d = inkPath(o, customRectFor);
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', d);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', o.color);
+        path.setAttribute('stroke-width', String(Math.max(1, o.width * scale)));
+        path.setAttribute('stroke-linecap', 'round');
+        path.setAttribute('stroke-linejoin', 'round');
+        path.dataset.inkId = o.id;
+        path.dataset.mkId = o.id;
+        svg.appendChild(path);
+      }
+      targetOverlay.appendChild(svg);
+    }
+    for (const o of list) {
+      if (o.type === 'ink') continue;
+      const node = nodeFor(o, scale, { rectForFn: customRectFor, interactive: false });
+      if (node) {
+        node.dataset.mkId = o.id;
+        targetOverlay.appendChild(node);
+      }
+    }
   }
 
   /** Types dont les proportions sont verrouillées (image, signature, texte). */
@@ -567,6 +611,7 @@ export function createMarkup({
 
   return {
     render,
+    renderStaticPage,
     select,
     clearSelection,
     get selectedId() {

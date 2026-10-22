@@ -107,8 +107,9 @@
 .canvas-scroll {
   touch-action: pan-x pan-y;
 }
-.stage.pinching {
-  transform-origin: center center;
+.stage.pinching,
+.pages-wrap.pinching {
+  transform-origin: center top;
   transition: none;
   will-change: transform;
 }
@@ -789,6 +790,50 @@ body.no-doc .hintbar {
 .stage canvas {
   display: block;
   border-radius: 3px;
+}
+
+.pages-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  min-width: min-content;
+}
+
+.read-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  width: 100%;
+}
+
+.read-stack[hidden],
+.stage[hidden] {
+  display: none !important;
+}
+
+.read-page {
+  position: relative;
+  flex: 0 0 auto;
+  contain: layout style;
+}
+
+.read-page .read-page-overlay .mk {
+  pointer-events: none;
+}
+
+.read-page .read-page-overlay .mk.mk-note,
+body.reading:not(.annotating):not(.fillsign) #overlay .mk.mk-note {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+body.reading:not(.annotating):not(.fillsign) .read-page .line-block,
+body.reading:not(.annotating):not(.fillsign) #overlay .line-block,
+body.reading:not(.annotating):not(.fillsign) .read-page .edit-block,
+body.reading:not(.annotating):not(.fillsign) #overlay .edit-block {
+  pointer-events: none;
 }
 
 .overlay {
