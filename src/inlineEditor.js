@@ -337,6 +337,7 @@ export function createInlineEditor({
     shell.style.textDecorationThickness = edit.underline ? `${Math.max(1, sizePx * 0.06)}px` : '';
     shell.style.color = edit.color || '#111827';
     shell.style.textAlign = edit.align || 'left';
+    if (textEl) textEl.style.textAlign = edit.align || 'left';
     const bg = edit.bg && edit.bg !== 'none' ? edit.bg : 'transparent';
     const hasCovers = (Array.isArray(edit.origBboxes) && edit.origBboxes.length > 0) || !!edit.origBbox;
     shell.style.setProperty('--inline-bg', edit.kind === 'add' || hasCovers ? 'transparent' : bg);

@@ -92,6 +92,7 @@ export function buildLines(items, styles, pageNo, fontMap = {}) {
       italic: !!line.italic,
       traitsFamily: line.traitsFamily,
       hasEOL: line.hasEOL,
+      justified: (line.justifiedSpaces || 0) >= 2,
     });
   };
 
@@ -102,6 +103,16 @@ export function buildLines(items, styles, pageNo, fontMap = {}) {
 
   for (const it of raw) {
     if (!it.str.trim()) {
+      if (
+        cur &&
+        it.str === ' ' &&
+        Math.abs(it.baseline - cur.baseline) <= Math.max(1.4, cur.fontSize * 0.42) &&
+        it.x - cur.endX <= Math.max(3, cur.fontSize * 0.35) &&
+        it.width > 0 &&
+        it.width <= cur.fontSize * 3.2
+      ) {
+        cur.bridgedSpace = { endX: it.x + it.width, width: it.width };
+      }
       if (cur && it.hasEOL) close();
       continue;
     }
@@ -115,17 +126,24 @@ export function buildLines(items, styles, pageNo, fontMap = {}) {
       (!cur.traitsKnown || !it.traitsKnown || cur.bold !== it.bold || cur.italic !== it.italic) &&
       it.str.trim().length > 0;
     const sizeChange = !!cur && Math.max(cur.fontSize, it.fontSize) / Math.max(0.1, Math.min(cur.fontSize, it.fontSize)) > 1.18;
+    const bridged =
+      !!cur?.bridgedSpace &&
+      !styleChange &&
+      !sizeChange &&
+      Math.abs(it.baseline - cur.baseline) <= tol &&
+      Math.abs(it.x - cur.bridgedSpace.endX) <= Math.max(3, it.fontSize * 0.35);
     const amountCont =
       !!cur &&
       Math.abs(it.baseline - cur.baseline) <= tol &&
       !sizeChange &&
       isAmountContinuation(cur.text, it.str, it.x - cur.endX, it.fontSize);
+    const effectiveGap = bridged ? Math.max(0, it.x - cur.bridgedSpace.endX) : cur ? it.x - cur.endX : 0;
     const startsNew =
       !cur ||
       (!amountCont && styleChange) ||
       sizeChange ||
       Math.abs(it.baseline - cur.baseline) > tol ||
-      (!amountCont && it.x - cur.endX > Math.max(6, it.fontSize * 1.05)) ||
+      (!amountCont && effectiveGap > Math.max(6, it.fontSize * 1.05)) ||
       it.x < cur.x - Math.max(10, it.fontSize * 1.5);
 
     if (startsNew) {
@@ -144,9 +162,16 @@ export function buildLines(items, styles, pageNo, fontMap = {}) {
         traitsKnown: it.traitsKnown,
         traitsFamily: it.traitsFamily,
         hasEOL: it.hasEOL,
+        justifiedSpaces: 0,
+        bridgedSpace: null,
       };
     } else {
       const gap = it.x - cur.endX;
+      const spaceMeasure = bridged ? cur.bridgedSpace.width : gap;
+      if (spaceMeasure > it.fontSize * 0.36 && spaceMeasure <= it.fontSize * 3.2) {
+        cur.justifiedSpaces = (cur.justifiedSpaces || 0) + 1;
+      }
+      cur.bridgedSpace = null;
       const needSpace =
         gap > Math.max(0.7, it.fontSize * 0.13) && !/\s$/.test(cur.text) && !/^\s/.test(it.str);
       // Police à chasse fixe : les colonnes alignées par espaces gardent leur nombre d'espaces.
@@ -180,6 +205,7 @@ export function buildLines(items, styles, pageNo, fontMap = {}) {
       traitsResolved: !!l.traitsFamily,
       fontSize,
       baseline: l.y,
+      ...(l.justified ? { justified: true } : {}),
       bbox: {
         x: l.x,
         y: l.y - fontSize * 0.26,

@@ -2972,6 +2972,7 @@ function appendPageEditsToOverlay(targetOverlay, pageEdits, vp, scale, activeId 
     d.style.left = `${r.left - padX}px`;
     d.style.top = `${r.top - padY}px`;
     d.style.minWidth = `${r.width + padX * 2}px`;
+    if (e.wrap) d.style.width = `${r.width + padX * 2}px`;
     d.style.minHeight = `${r.height + padY * 2}px`;
     d.style.padding = `${padY}px ${padX}px`;
     const hasCustomCovers = (Array.isArray(e.origBboxes) && e.origBboxes.length) || !!e.origBbox;
@@ -3013,7 +3014,7 @@ function appendPageEditsToOverlay(targetOverlay, pageEdits, vp, scale, activeId 
     if (e.underline) span.style.textDecoration = 'underline';
     if (e.align && e.align !== 'left') {
       span.style.textAlign = e.align;
-      span.style.width = '100%';
+      span.style.width = e.wrap ? `${r.width}px` : '100%';
     }
     span.style.color = e.color || '#111827';
     if (e.charSpacing) span.style.letterSpacing = `${Number(e.charSpacing) * scale * (fontSizePx / basePx)}px`;
@@ -3636,12 +3637,16 @@ let wrapMeasureEl = null;
  */
 function computeEditWrappedLines(edit) {
   if (!edit || !edit.wrap || !(edit.bbox?.w > 4)) {
-    if (edit) delete edit.wrappedLines;
+    if (edit) {
+      delete edit.wrappedLines;
+      delete edit.wrappedLineEnds;
+    }
     return null;
   }
   const raw = String(edit.text || '');
   if (!raw.trim()) {
     edit.wrappedLines = [''];
+    edit.wrappedLineEnds = [true];
     return edit.wrappedLines;
   }
   const scale = state.scale || 1;
@@ -3668,16 +3673,19 @@ function computeEditWrappedLines(edit) {
     wrapMeasureEl.style.width = `${widthPx / Math.max(0.2, hz)}px`;
 
     const out = [];
+    const ends = [];
     const range = document.createRange();
     for (const para of raw.split('\n')) {
       if (!para) {
         out.push('');
+        ends.push(true);
         continue;
       }
       wrapMeasureEl.textContent = para;
       const node = wrapMeasureEl.firstChild;
       if (!node || node.nodeType !== Node.TEXT_NODE) {
         out.push(para);
+        ends.push(true);
         continue;
       }
       let lineStart = 0;
@@ -3694,26 +3702,35 @@ function computeEditWrappedLines(edit) {
           curTop = r.top;
         } else if (r.top - curTop > basePx * 0.45) {
           out.push(para.slice(lineStart, i).replace(/[ \t]+$/, ''));
+          ends.push(false);
           lineStart = i;
           curTop = r.top;
         }
       }
       out.push(para.slice(lineStart).replace(/[ \t]+$/, ''));
+      ends.push(true);
     }
     wrapMeasureEl.textContent = '';
     if (out.length) {
       edit.wrappedLines = out;
+      edit.wrappedLineEnds = ends;
       return out;
     }
   }
 
   measureCtx.font = `${edit.italic ? 'italic ' : ''}${edit.bold ? '700' : '400'} ${basePx}px ${fontFamily}`;
-  const lines = wrapTextToWidth(
-    raw,
-    widthPx,
-    (str) => (measureCtx.measureText(str).width + cs * [...str].length) * hz
-  );
+  const measureFn = (str) => (measureCtx.measureText(str).width + cs * [...str].length) * hz;
+  const lines = [];
+  const ends = [];
+  for (const para of raw.split('\n')) {
+    const sub = wrapTextToWidth(para, widthPx, measureFn);
+    for (let i = 0; i < sub.length; i++) {
+      lines.push(sub[i]);
+      ends.push(i === sub.length - 1);
+    }
+  }
   edit.wrappedLines = lines;
+  edit.wrappedLineEnds = ends;
   return lines;
 }
 
@@ -3889,7 +3906,7 @@ function makeEditFromLine(line, pageNo) {
     bold: scanStyle ? scanStyle.bold : !!line.bold,
     italic: !!line.italic,
     underline: false,
-    align: 'left',
+    align: line.align || 'left',
     lineHeight: 1.16,
     color: fg,
     bg,
@@ -3910,19 +3927,31 @@ function makeEditFromParagraph(unit, pageNo) {
   const size = U.clamp(Math.round(rawSize * 2) / 2, 4, 120);
   const bold = scanStyle ? scanStyle.bold : !!unit.bold;
   const italic = !!unit.italic;
+  const align = unit.align || 'left';
 
-  // S'assure que la largeur du cadre accueille les lignes d'origine sans coupure parasite initiale.
+  // S'assure que la largeur du cadre accueille les lignes d'origine sans coupure parasite initiale,
+  // sans élargir inutilement un bloc justifié, centré ou aligné à droite.
   let minWidthPt = unit.bbox.w;
   try {
     measureCtx.font = `${italic ? 'italic ' : ''}${bold ? '700 ' : '400 '}${size}px ${U.cssFontFamily(font)}`;
     for (const l of unit.lines) {
-      minWidthPt = Math.max(minWidthPt, measureCtx.measureText(l.text.trim()).width + 2);
+      const lw = measureCtx.measureText(l.text.trim()).width;
+      if (lw > unit.bbox.w) minWidthPt = Math.max(minWidthPt, lw + 1);
     }
   } catch {
     /* mesure facultative */
   }
   const { w: pageW } = pdfPageSize();
-  const finalW = Math.min(Math.max(8, pageW - unit.bbox.x - 6), Math.max(unit.bbox.w, minWidthPt));
+  let finalX = unit.bbox.x;
+  let finalW = Math.min(Math.max(8, pageW - 12), Math.max(unit.bbox.w, minWidthPt));
+  if (finalW > unit.bbox.w) {
+    const dw = finalW - unit.bbox.w;
+    if (align === 'right') finalX = Math.max(6, unit.bbox.x - dw);
+    else if (align === 'center') finalX = Math.max(6, unit.bbox.x - dw / 2);
+  }
+  if (finalX + finalW > pageW - 6) {
+    finalW = Math.max(8, pageW - finalX - 6);
+  }
 
   const edit = {
     id: U.uid('edit'),
@@ -3935,7 +3964,7 @@ function makeEditFromParagraph(unit, pageNo) {
     fit: false,
     source: unit.source || 'pdf',
     hiddenLayer: !!unit.hiddenLayer,
-    bbox: { ...unit.bbox, w: finalW },
+    bbox: { ...unit.bbox, x: finalX, w: finalW },
     origBbox: { ...unit.bbox },
     origBboxes: unit.origBboxes.map((b) => ({ ...b })),
     baseline: unit.baseline,
@@ -3946,7 +3975,7 @@ function makeEditFromParagraph(unit, pageNo) {
     bold,
     italic,
     underline: false,
-    align: 'left',
+    align,
     lineHeight: unit.lineHeight || 1.16,
     color: fg,
     bg,

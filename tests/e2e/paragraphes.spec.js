@@ -159,4 +159,109 @@ test.describe('Reflux d’un paragraphe entier en mode Modifier', () => {
       expect(exportedCheck.texts).toContain(wl.trim());
     }
   });
+
+  test('conserve l’alignement d’origine (justifié, centré) à l’écran et à l’export, et permet de le modifier dans le panneau Modifier', async ({
+    page,
+  }) => {
+    const doc = await PDFDocument.create();
+    const helv = await doc.embedFont(StandardFonts.Helvetica);
+    const p1 = doc.addPage([595, 842]);
+
+    // Paragraphe 1 : justifié (lignes 1 et 2 étirées exactement de x = 60 à x + w = 440, ligne 3 courte).
+    const boxX = 60;
+    const boxW = 380;
+    const drawJustifiedLine = (words, y, size) => {
+      const widths = words.map((w) => helv.widthOfTextAtSize(w, size));
+      const sum = widths.reduce((a, b) => a + b, 0);
+      const gap = (boxW - sum) / Math.max(1, words.length - 1);
+      let x = boxX;
+      words.forEach((w, idx) => {
+        p1.drawText(idx < words.length - 1 ? `${w} ` : w, { x, y, size, font: helv, color: rgb(0.1, 0.1, 0.14) });
+        x += widths[idx] + gap;
+      });
+    };
+    drawJustifiedLine(['Le', 'present', 'avenant', 'contractuel', 'precise', 'les', 'modalites', 'techniques'], 740, 11);
+    drawJustifiedLine(['applicables', 'entre', 'les', 'deux', 'parties', 'pendant', 'toute', 'la', 'mission'], 725, 11);
+    p1.drawText('convenue pour cet exercice.', { x: boxX, y: 710, size: 11, font: helv, color: rgb(0.1, 0.1, 0.14) });
+
+    // Paragraphe 2 : centré autour de x = 297.5.
+    const centerLines = [
+      'Nous vous remercions vivement de votre confiance constante durant ce projet',
+      'et demeurons pleinement mobilises pour accompagner vos equipes metiers',
+      'tout au long du prochain trimestre.',
+    ];
+    centerLines.forEach((txt, idx) => {
+      const w = helv.widthOfTextAtSize(txt, 11);
+      p1.drawText(txt, { x: 297.5 - w / 2, y: 630 - idx * 15, size: 11, font: helv, color: rgb(0.1, 0.1, 0.14) });
+    });
+
+    const pdfBuf = Buffer.from(await doc.save());
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await init(page);
+    await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
+    await page.locator('#fileInput').setInputFiles({
+      name: 'alignements.pdf',
+      mimeType: 'application/pdf',
+      buffer: pdfBuf,
+    });
+    await page.locator('#docDock [data-dock=edit]').click();
+    await expect(page.locator('#overlay .line-block.para-block')).toHaveCount(2, { timeout: 15_000 });
+
+    // 1. Clique sur le paragraphe justifié : le bouton Justifier est actif dans le panneau Modifier.
+    await page.locator('#overlay .line-block.para-block').nth(0).click();
+    await expect(page.locator('#editPanel [data-ep-align="justify"]')).toHaveClass(/active/);
+    expect(await page.evaluate(() => getComputedStyle(document.querySelector('.inline-shell')).textAlign)).toBe('justify');
+
+    // Modifie son texte tout en gardant l'alignement justifié, puis valide en cliquant hors du bloc.
+    await page
+      .locator('.inline-shell .inline-text')
+      .first()
+      .fill(
+        'Le present avenant revise definitivement les modalites pratiques et financieres applicables entre les deux parties pendant toute la duree de cet exercice.'
+      );
+    await page.locator('#stage').click({ position: { x: 8, y: 8 } });
+    await expect(page.locator('.inline-shell')).toHaveCount(0);
+
+    // 2. Clique sur le second paragraphe (centré) : le bouton Centrer est actif, puis on le passe à droite dans le panneau Modifier.
+    await page.locator('#overlay .line-block.para-block').nth(0).click();
+    await expect(page.locator('#editPanel [data-ep-align="center"]')).toHaveClass(/active/);
+    await page.locator('#editPanel [data-ep-align="right"]').click();
+    await expect(page.locator('#editPanel [data-ep-align="right"]')).toHaveClass(/active/);
+    expect(await page.evaluate(() => getComputedStyle(document.querySelector('.inline-shell')).textAlign)).toBe('right');
+
+    // Valide l'édition et vérifie l'alignement à l'écran et dans le PDF exporté.
+    await page.locator('#stage').click({ position: { x: 8, y: 8 } });
+    await expect(page.locator('.inline-shell')).toHaveCount(0);
+    const screenAligns = await page.evaluate(() =>
+      [...document.querySelectorAll('.edit-block .edit-text')].map((el) => getComputedStyle(el).textAlign)
+    );
+    expect(screenAligns).toEqual(['justify', 'right']);
+
+    const exported = await page.evaluate(async () => {
+      const { PdfEngine } = await import('/src/pdfEngine.js');
+      const blob = await window.__pdfStudio.buildCurrentPdf();
+      const outBytes = new Uint8Array(await blob.arrayBuffer());
+      const eng = new PdfEngine(outBytes);
+      await eng.load();
+      const lines = await eng.extractLines(1);
+      eng.destroy();
+      return lines.map((l) => ({ text: l.text, x: l.bbox.x, right: l.bbox.x + l.bbox.w, y: l.baseline }));
+    });
+
+    // Les deux premières lignes du paragraphe justifié exporté vont de ~60 à ~440, la 3e commence à ~60.
+    const topPara = exported.filter((l) => l.y > 680).sort((a, b) => b.y - a.y);
+    expect(topPara.length).toBeGreaterThanOrEqual(3);
+    expect(Math.abs(topPara[0].x - boxX)).toBeLessThan(2);
+    expect(Math.abs(topPara[0].right - (boxX + boxW))).toBeLessThan(2.5);
+    expect(Math.abs(topPara[1].x - boxX)).toBeLessThan(2);
+    expect(Math.abs(topPara[1].right - (boxX + boxW))).toBeLessThan(2.5);
+
+    // Les lignes du second paragraphe passé à droite ont toutes le même bord droit.
+    const bottomPara = exported.filter((l) => l.y <= 680).sort((a, b) => b.y - a.y);
+    expect(bottomPara.length).toBeGreaterThanOrEqual(2);
+    const maxR = Math.max(...bottomPara.map((l) => l.right));
+    const minR = Math.min(...bottomPara.map((l) => l.right));
+    expect(maxR - minR).toBeLessThan(2.5);
+  });
 });

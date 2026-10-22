@@ -82,15 +82,31 @@ export function canMergeIntoParagraph(group, next) {
     }
   }
 
-  // Même marge gauche (autorise un léger alinéa positif sur la toute première ligne uniquement).
+  // Cohérence d'alignement horizontal : même marge gauche (gauche / justifié),
+  // même marge droite (aligné à droite) ou même axe central (centré).
   const marginTol = isOcr ? Math.max(7, fs * 0.72) : Math.max(4, fs * 0.45);
+  const centerTol = isOcr ? Math.max(8, fs * 0.85) : Math.max(5.5, fs * 0.55);
+  const candGroup = [...group, next];
+
   const bodyLeft = group.length >= 2 ? group[1].bbox.x : next.bbox.x;
+  let sameLeftMode = false;
   if (group.length === 1) {
     const indent = first.bbox.x - next.bbox.x;
     const sameLeft = Math.abs(indent) <= marginTol;
-    const firstLineIndent = indent > marginTol && indent <= fs * 2.4 && Math.abs(lineRight(first) - lineRight(next)) <= fs * 2.2;
-    if (!sameLeft && !firstLineIndent) return false;
-  } else if (Math.abs(next.bbox.x - bodyLeft) > marginTol) {
+    const firstLineIndent =
+      indent > marginTol && indent <= fs * 2.4 && Math.abs(lineRight(first) - lineRight(next)) <= fs * 2.2;
+    sameLeftMode = sameLeft || firstLineIndent;
+  } else {
+    sameLeftMode = Math.abs(next.bbox.x - bodyLeft) <= marginTol;
+  }
+
+  const rights = candGroup.map(lineRight);
+  const sameRightMode = Math.max(...rights) - Math.min(...rights) <= marginTol;
+
+  const centers = candGroup.map((l) => l.bbox.x + l.bbox.w / 2);
+  const sameCenterMode = Math.max(...centers) - Math.min(...centers) <= centerTol;
+
+  if (!sameLeftMode && !sameRightMode && !sameCenterMode) {
     return false;
   }
 
@@ -109,11 +125,22 @@ export function canMergeIntoParagraph(group, next) {
   // deux courtes cellules de tableau, deux étiquettes ou deux lignes d'adresse courtes).
   if (prev.bbox.w < fs * 13.5) return false;
 
-  const maxRightSoFar = Math.max(...group.map(lineRight), lineRight(next));
-  const bodyWidth = Math.max(1, maxRightSoFar - Math.min(first.bbox.x, bodyLeft));
-  // Si la ligne précédente s'arrête bien avant le bord droit du bloc, c'était la fin d'un paragraphe !
-  if (lineRight(prev) < maxRightSoFar - Math.max(fs * 4.2, bodyWidth * 0.26)) {
-    return false;
+  const maxRightSoFar = Math.max(...rights);
+  const minLeftSoFar = Math.min(...candGroup.map((l) => l.bbox.x));
+  const bodyWidth = Math.max(1, maxRightSoFar - minLeftSoFar);
+  if (sameLeftMode) {
+    // Si la ligne précédente s'arrête bien avant le bord droit du bloc, c'était la fin d'un paragraphe !
+    if (lineRight(prev) < maxRightSoFar - Math.max(fs * 4.2, bodyWidth * 0.26)) {
+      return false;
+    }
+  } else if (sameRightMode) {
+    if (prev.bbox.w < Math.max(fs * 13.5, bodyWidth * 0.68)) {
+      return false;
+    }
+  } else if (sameCenterMode) {
+    if (prev.bbox.w < Math.max(fs * 13.5, bodyWidth * 0.65)) {
+      return false;
+    }
   }
 
   return true;
@@ -192,6 +219,63 @@ export function groupLinesIntoParagraphs(lines) {
   return groups.map((g) => buildUnitFromGroup(g));
 }
 
+/**
+ * Détecte l'alignement horizontal d'un paragraphe d'origine :
+ * `'left'` | `'center'` | `'right'` | `'justify'`.
+ */
+export function detectParagraphAlign(group) {
+  if (!Array.isArray(group) || !group.length) return 'left';
+  if (group.length === 1) {
+    const only = group[0];
+    if (only.align === 'left' || only.align === 'center' || only.align === 'right' || only.align === 'justify') {
+      return only.align;
+    }
+    return only.justified ? 'justify' : 'left';
+  }
+
+  const isOcr = group.some((l) => l.source === 'ocr');
+  const sizes = group.map((l) => Math.max(4, l.fontSize || l.bbox.h)).sort((a, b) => a - b);
+  const fs = sizes[Math.floor(sizes.length / 2)];
+  const tol = isOcr ? Math.max(6.5, fs * 0.68) : Math.max(3.8, fs * 0.38);
+  const centerTol = isOcr ? Math.max(8, fs * 0.85) : Math.max(5, fs * 0.5);
+
+  const minX = Math.min(...group.map((l) => l.bbox.x));
+  const maxX = Math.max(...group.map(lineRight));
+  const midX = (minX + maxX) / 2;
+
+  const firstIndent = group[0].bbox.x - minX;
+  const bodyLines = firstIndent > tol && firstIndent <= fs * 2.5 ? group.slice(1) : group;
+  const leftAligned = bodyLines.every((l) => Math.abs(l.bbox.x - minX) <= tol);
+  const rightAlignedAll = group.every((l) => Math.abs(lineRight(l) - maxX) <= tol);
+
+  const nonLast = group.slice(0, -1);
+  const nonLastMaxX = Math.max(...nonLast.map(lineRight));
+  const nonLastRightAligned =
+    nonLast.every((l) => Math.abs(lineRight(l) - nonLastMaxX) <= tol) && Math.abs(nonLastMaxX - maxX) <= tol;
+
+  const centeredAll = group.every((l) => Math.abs(l.bbox.x + l.bbox.w / 2 - midX) <= centerTol);
+
+  if (!leftAligned && rightAlignedAll) {
+    return 'right';
+  }
+  if (!leftAligned && !rightAlignedAll && centeredAll) {
+    return 'center';
+  }
+  if (leftAligned && nonLastRightAligned) {
+    if (isOcr) {
+      if (nonLast.length >= 2 || rightAlignedAll) return 'justify';
+    } else {
+      const strictRightTol = Math.max(1.8, fs * 0.16);
+      const strictlyFlushRight =
+        nonLast.length >= 2 && nonLast.every((l) => Math.abs(lineRight(l) - nonLastMaxX) <= strictRightTol);
+      if (nonLast.some((l) => l.justified) || strictlyFlushRight || (rightAlignedAll && group[0].justified)) {
+        return 'justify';
+      }
+    }
+  }
+  return 'left';
+}
+
 export function buildUnitFromGroup(group) {
   if (group.length === 1) {
     const l = group[0];
@@ -207,6 +291,7 @@ export function buildUnitFromGroup(group) {
       fontSize: l.fontSize || 12,
       bold: !!l.bold,
       italic: !!l.italic,
+      align: detectParagraphAlign(group),
       baseline: lineBaseline(l),
       lineHeight: 1.16,
       bbox: { ...l.bbox },
@@ -251,6 +336,7 @@ export function buildUnitFromGroup(group) {
     fontSize: medianSize,
     bold: !!first.bold,
     italic: !!first.italic,
+    align: detectParagraphAlign(group),
     baseline: lineBaseline(first),
     lineHeight,
     bbox: {

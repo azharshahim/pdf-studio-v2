@@ -5759,6 +5759,9 @@ body.editing-wide .ep-hint {
   gap: 2px;
   margin-left: auto;
 }
+.ep-seg .ep-btn {
+  width: 31px;
+}
 .ep-btn {
   width: 34px;
   height: 34px;

@@ -556,8 +556,16 @@ export async function exportPdf({
       }
 
       // Bloc redimensionné ou paragraphe sans lignes pré-calculées : découpe dans la largeur du cadre.
+      let lineEnds = hasScreenLines
+        ? prepared.map((_, idx) =>
+            Array.isArray(e.wrappedLineEnds) && idx < e.wrappedLineEnds.length
+              ? !!e.wrappedLineEnds[idx]
+              : idx === prepared.length - 1
+          )
+        : prepared.map(() => true);
       if (e.wrap && !hasScreenLines && e.bbox.w > 8) {
         const wrapped = [];
+        const wrappedEnds = [];
         const baseW = (runs, s) => runs.reduce((acc, r) => acc + r.font.widthOfTextAtSize(r.text, s), 0);
         const hz0 = clamp(Number(e.hScale) || 100, 20, 400) / 100;
         const tc0 = clamp(Number(e.charSpacing) || 0, -5, 50);
@@ -578,14 +586,18 @@ export async function exportPdf({
             const tryText = current + word;
             if (current && measure(await makeRuns(tryText.replace(/ +$/, ''))) > e.bbox.w) {
               wrapped.push(await makeRuns(current.replace(/ +$/, '')));
+              wrappedEnds.push(false);
               current = word.replace(/^ +/, '');
             } else current = tryText;
           }
           wrapped.push(await makeRuns(current.replace(/ +$/, '')));
+          wrappedEnds.push(true);
         }
         prepared.length = 0;
         prepared.push(...wrapped);
+        lineEnds = wrappedEnds;
       }
+      if (lineEnds.length) lineEnds[lineEnds.length - 1] = true;
 
       // Espacement des caractères (pt, opérateur Tc) et échelle horizontale (%, Tz).
       const tc = clamp(Number(e.charSpacing) || 0, -5, 50);
@@ -603,37 +615,94 @@ export async function exportPdf({
         size = Math.max(4, size * factor);
       }
 
+      const splitRunsBySpaces = (lineRuns) => {
+        const toks = [];
+        for (const r of lineRuns) {
+          const parts = r.text.match(/ +|[^ ]+/g) || [];
+          for (const p of parts) {
+            toks.push({ text: p, font: r.font, isSpace: p[0] === ' ' });
+          }
+        }
+        while (toks.length && toks[0].isSpace) toks.shift();
+        while (toks.length && toks[toks.length - 1].isSpace) toks.pop();
+        return toks;
+      };
+
       const lineHeight =
         size * (Number.isFinite(Number(e.lineHeight)) && Number(e.lineHeight) > 0 ? Number(e.lineHeight) : 1.16);
-      const align = e.align === 'center' || e.align === 'right' ? e.align : 'left';
+      const align =
+        e.align === 'center' || e.align === 'right' || e.align === 'justify' ? e.align : 'left';
       let y = e.baseline ?? e.bbox.y + e.bbox.h * 0.24;
-      for (const runs of prepared) {
-        const total = widthOf(runs, size);
-        let x = e.bbox.x + 0.5;
-        if (align === 'center') x = e.bbox.x + (e.bbox.w - total) / 2;
-        else if (align === 'right') x = e.bbox.x + e.bbox.w - total;
-        const startX = x;
-        for (const run of runs) {
-          if (!run.text.trim()) {
-            x += runW(run, size);
-            continue;
+      for (let lineIdx = 0; lineIdx < prepared.length; lineIdx++) {
+        const runs = prepared[lineIdx];
+        const isParaEnd = !!lineEnds[lineIdx] || lineIdx === prepared.length - 1;
+        const toks = align === 'justify' ? splitRunsBySpaces(runs) : null;
+        const spaceChars = toks ? toks.filter((t) => t.isSpace).reduce((n, t) => n + t.text.length, 0) : 0;
+        const tokTotal = toks ? widthOf(toks, size) : 0;
+        const canJustify =
+          align === 'justify' && !isParaEnd && e.bbox.w > 8 && spaceChars >= 1 && e.bbox.w - tokTotal > 0.1;
+
+        if (canJustify) {
+          const extraPerSpace = (e.bbox.w - tokTotal) / spaceChars;
+          let x = e.bbox.x;
+          const startX = x;
+          for (const tok of toks) {
+            if (tok.isSpace) {
+              page.drawText(' ', {
+                x,
+                y,
+                size,
+                font: tok.font,
+                color: rgb(color.r, color.g, color.b),
+              });
+              x += runW(tok, size) + extraPerSpace * tok.text.length;
+            } else {
+              page.drawText(tok.text, {
+                x,
+                y,
+                size,
+                font: tok.font,
+                color: rgb(color.r, color.g, color.b),
+              });
+              x += runW(tok, size);
+            }
           }
-          page.drawText(run.text, {
-            x,
-            y,
-            size,
-            font: run.font,
-            color: rgb(color.r, color.g, color.b),
-          });
-          x += runW(run, size);
-        }
-        if (e.underline && total > 0.2) {
-          page.drawLine({
-            start: { x: startX, y: y - size * 0.14 },
-            end: { x: startX + total, y: y - size * 0.14 },
-            thickness: Math.max(0.5, size * 0.055),
-            color: rgb(color.r, color.g, color.b),
-          });
+          if (e.underline && e.bbox.w > 0.2) {
+            page.drawLine({
+              start: { x: startX, y: y - size * 0.14 },
+              end: { x: startX + e.bbox.w, y: y - size * 0.14 },
+              thickness: Math.max(0.5, size * 0.055),
+              color: rgb(color.r, color.g, color.b),
+            });
+          }
+        } else {
+          const total = widthOf(runs, size);
+          let x = align === 'justify' ? e.bbox.x : e.bbox.x + 0.5;
+          if (align === 'center') x = e.bbox.x + (e.bbox.w - total) / 2;
+          else if (align === 'right') x = e.bbox.x + e.bbox.w - total;
+          const startX = x;
+          for (const run of runs) {
+            if (!run.text.trim()) {
+              x += runW(run, size);
+              continue;
+            }
+            page.drawText(run.text, {
+              x,
+              y,
+              size,
+              font: run.font,
+              color: rgb(color.r, color.g, color.b),
+            });
+            x += runW(run, size);
+          }
+          if (e.underline && total > 0.2) {
+            page.drawLine({
+              start: { x: startX, y: y - size * 0.14 },
+              end: { x: startX + total, y: y - size * 0.14 },
+              thickness: Math.max(0.5, size * 0.055),
+              color: rgb(color.r, color.g, color.b),
+            });
+          }
         }
         y -= lineHeight;
       }

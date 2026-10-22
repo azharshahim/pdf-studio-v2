@@ -182,4 +182,114 @@ describe('détection et reflux de paragraphes', () => {
     }
     await doc.destroy();
   });
+
+  it('détecte et conserve l’alignement d’origine (gauche, centré, droite, justifié)', () => {
+    // 1. Aligné à gauche (drapeau droit irrégulier)
+    const leftUnits = groupLinesIntoParagraphs([
+      makeLine({ id: 'l1', text: 'Le présent avenant précise les modalités pratiques convenues', x: 60, y: 700, w: 342 }),
+      makeLine({ id: 'l2', text: 'entre les parties signataires du contrat principal de service', x: 60, y: 686, w: 368 }),
+      makeLine({ id: 'l3', text: 'pour toute la durée de la période.', x: 60, y: 672, w: 195 }),
+    ]);
+    expect(leftUnits).toHaveLength(1);
+    expect(leftUnits[0].align).toBe('left');
+
+    // 2. Justifié (même bord gauche ET même bord droit sur toutes les lignes hors dernière)
+    const justUnits = groupLinesIntoParagraphs([
+      makeLine({ id: 'j1', text: 'Le présent avenant précise les modalités pratiques convenues', x: 60, y: 620, w: 380 }),
+      makeLine({ id: 'j2', text: 'entre les parties signataires du contrat principal de service', x: 60, y: 606, w: 380 }),
+      makeLine({ id: 'j3', text: 'pour toute la durée de la période.', x: 60, y: 592, w: 195 }),
+    ]);
+    expect(justUnits).toHaveLength(1);
+    expect(justUnits[0].align).toBe('justify');
+
+    // 3. Centré (même axe central x + w/2 = 297.5)
+    const centerUnits = groupLinesIntoParagraphs([
+      makeLine({ id: 'c1', text: 'Nous vous remercions chaleureusement de votre confiance renouvelée', x: 107.5, y: 540, w: 380 }),
+      makeLine({ id: 'c2', text: 'tout au long de cette collaboration annuelle fructueuse', x: 127.5, y: 526, w: 340 }),
+      makeLine({ id: 'c3', text: 'et restons à votre entière disposition.', x: 187.5, y: 512, w: 220 }),
+    ]);
+    expect(centerUnits).toHaveLength(1);
+    expect(centerUnits[0].align).toBe('center');
+
+    // 4. Aligné à droite (même bord droit x + w = 520)
+    const rightUnits = groupLinesIntoParagraphs([
+      makeLine({ id: 'r1', text: 'Document établi pour faire valoir ce que de droit auprès', x: 160, y: 460, w: 360 }),
+      makeLine({ id: 'r2', text: 'des organismes compétents conformément aux dispositions', x: 140, y: 446, w: 380 }),
+      makeLine({ id: 'r3', text: 'légales actuellement en vigueur.', x: 310, y: 432, w: 210 }),
+    ]);
+    expect(rightUnits).toHaveLength(1);
+    expect(rightUnits[0].align).toBe('right');
+  });
+
+  it('exporte un paragraphe justifié avec bords gauche et droit alignés sauf sur la dernière ligne', async () => {
+    const src = await PDFDocument.create();
+    src.addPage([595, 842]);
+    const srcBytes = await src.save();
+
+    const wrappedLines = [
+      'Le contrat de prestation prend effet immédiatement',
+      'entre les parties signataires pour une durée ferme',
+      'de douze mois renouvelable.',
+    ];
+
+    const boxX = 60;
+    const boxW = 380; // bord droit attendu = 440
+
+    const { bytes: outBytes } = await exportPdf({
+      sourceBytes: srcBytes,
+      edits: [
+        {
+          id: 'edit-just-1',
+          page: 1,
+          kind: 'add',
+          paragraph: true,
+          wrap: true,
+          fit: false,
+          bbox: { x: boxX, y: 660, w: boxW, h: 46 },
+          baseline: 694,
+          text: wrappedLines.join(' '),
+          wrappedLines,
+          wrappedLineEnds: [false, false, true],
+          align: 'justify',
+          font: 'Helvetica',
+          size: 11,
+          lineHeight: 1.3,
+          color: '#111827',
+        },
+      ],
+    });
+
+    const doc = await pdfjsLib.getDocument({ data: outBytes, isEvalSupported: false }).promise;
+    const p1 = await doc.getPage(1);
+    const tc = await p1.getTextContent();
+    const visible = tc.items.filter((it) => it.str.trim().length > 0);
+
+    // Regroupe les items par ordonnée Y de ligne (du haut vers le bas).
+    const byRow = new Map();
+    for (const it of visible) {
+      const yKey = Math.round(it.transform[5]);
+      if (!byRow.has(yKey)) byRow.set(yKey, []);
+      byRow.get(yKey).push(it);
+    }
+    const rows = [...byRow.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([, arr]) => {
+        arr.sort((a, b) => a.transform[4] - b.transform[4]);
+        const left = arr[0].transform[4];
+        const last = arr[arr.length - 1];
+        const right = last.transform[4] + last.width;
+        return { text: arr.map((x) => x.str).join(' '), left, right };
+      });
+
+    expect(rows).toHaveLength(3);
+    // Lignes 1 et 2 (non finales) : justifiées de boxX (60) à boxX + boxW (440).
+    expect(Math.abs(rows[0].left - boxX)).toBeLessThan(1.2);
+    expect(Math.abs(rows[0].right - (boxX + boxW))).toBeLessThan(1.8);
+    expect(Math.abs(rows[1].left - boxX)).toBeLessThan(1.2);
+    expect(Math.abs(rows[1].right - (boxX + boxW))).toBeLessThan(1.8);
+    // Ligne 3 (dernière ligne) : alignée à gauche à boxX (60), non étirée jusqu'au bord droit.
+    expect(Math.abs(rows[2].left - boxX)).toBeLessThan(1.2);
+    expect(rows[2].right).toBeLessThan(boxX + boxW - 100);
+    await doc.destroy();
+  });
 });
