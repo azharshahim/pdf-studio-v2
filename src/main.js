@@ -1,7 +1,7 @@
 import './polyfills.js';
 import './style.css';
 import { PdfEngine, pdfRectToViewportRect, fontTraits } from './pdfEngine.js';
-import { recognizeCanvas, terminateOcr } from './ocrEngine.js';
+import { recognizeCanvas, recognizeLine, terminateOcr } from './ocrEngine.js';
 import { enhanceContrast, deskewCanvas } from './imagePrep.js';
 import * as PageOps from './pageOps.js';
 import { detectWatermarks, applyWatermarkChange } from './watermark.js';
@@ -386,6 +386,68 @@ function redoMarkup() {
   markup.setObjects(JSON.parse(markupHistory.stack[markupHistory.index]));
   scheduleAutosave();
   updateAnnoUndo();
+}
+
+/**
+ * Défilement continu en lecture : au bout de la page, continuer à défiler
+ * (molette ou glissement du doigt) passe à la page suivante, et inversement
+ * en haut de page, comme dans un lecteur à défilement continu.
+ */
+function bindPageFlip() {
+  const sc = els.canvasScroll;
+  if (!sc) return;
+  let acc = 0;
+  let lastT = 0;
+  let cooldown = 0;
+  const canFlip = () =>
+    state.engine && isReading() && !state.active && !document.body.classList.contains('annotating') && Date.now() > cooldown;
+  const atBottom = () => sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2;
+  const atTop = () => sc.scrollTop <= 1;
+  const flip = async (dir) => {
+    cooldown = Date.now() + 700;
+    acc = 0;
+    if (dir > 0 && state.pageIndex + 1 < state.numPages) {
+      await goToPage(state.pageIndex + 2);
+    } else if (dir < 0 && state.pageIndex > 0) {
+      await goToPage(state.pageIndex, { keepScroll: true });
+      sc.scrollTop = sc.scrollHeight;
+    }
+  };
+  sc.addEventListener(
+    'wheel',
+    (e) => {
+      if (e.ctrlKey || !canFlip()) return;
+      const down = e.deltaY > 0;
+      if ((down && atBottom()) || (!down && e.deltaY < 0 && atTop())) {
+        const now = Date.now();
+        if (now - lastT > 300) acc = 0;
+        lastT = now;
+        acc += e.deltaY;
+        if (Math.abs(acc) > 180) flip(acc > 0 ? 1 : -1);
+      } else acc = 0;
+    },
+    { passive: true }
+  );
+  let touch = null;
+  sc.addEventListener(
+    'touchstart',
+    (e) => {
+      touch = e.touches.length === 1 ? { y: e.touches[0].clientY, bottom: atBottom(), top: atTop(), at: Date.now() } : null;
+    },
+    { passive: true }
+  );
+  sc.addEventListener(
+    'touchend',
+    (e) => {
+      if (!touch || !canFlip()) return;
+      const dy = (e.changedTouches[0]?.clientY ?? touch.y) - touch.y;
+      const t = touch;
+      touch = null;
+      if (dy < -90 && t.bottom && atBottom()) flip(1);
+      else if (dy > 90 && t.top && atTop()) flip(-1);
+    },
+    { passive: true }
+  );
 }
 
 function updateAnnoUndo() {
@@ -1399,6 +1461,31 @@ function renderOverlay() {
   const query = state.search.query;
   const nq = query ? U.normalizeText(query) : '';
   const activeMatch = state.search.matches[state.search.active];
+
+  // Lecture : texte transparent sélectionnable / copiable par-dessus la page.
+  if (isReading() && !document.body.classList.contains('annotating')) {
+    const layer = document.createElement('div');
+    layer.className = 'read-text-layer';
+    const addSpan = (text, bbox, size) => {
+      if (!text || !text.trim() || !bbox || bbox.w <= 0 || bbox.h <= 0) return;
+      const r = pdfRectToViewportRect(bbox, vp);
+      if (r.width < 2 || r.height < 2) return;
+      const fs = Math.max(4, r.height * 0.82);
+      measureCtx.font = `${fs}px sans-serif`;
+      const natural = measureCtx.measureText(text).width || 1;
+      const sx = U.clamp(r.width / natural, 0.2, 6);
+      const span = document.createElement('span');
+      span.textContent = text;
+      span.style.cssText = `left:${r.left}px;top:${r.top}px;height:${r.height}px;line-height:${r.height}px;font-size:${fs}px;transform:scaleX(${sx});`;
+      layer.appendChild(span);
+    };
+    for (const line of lines) {
+      if (covered.has(line.id)) continue;
+      addSpan(line.text, line.bbox);
+    }
+    for (const e of pageEdits) addSpan(e.text, e.bbox);
+    els.overlay.appendChild(layer);
+  }
 
   // Zones de texte d'origine (cliquables)
   for (const line of lines) {
@@ -3217,6 +3304,86 @@ function groupOcrWords(words) {
     .filter((seg) => seg.text);
 }
 
+const NUMERIC_RE = /^[\d\s,.\-+/:€%$]+$/;
+
+/**
+ * Seconde lecture, bloc par bloc : chaque bloc est découpé, mis à l'échelle
+ * idéale (≈ 56 px de haut) et relu en « ligne unique ». Corrige surtout les
+ * chiffres, virgules et accents perdus à la première lecture. La nouvelle
+ * lecture n'est retenue que si elle est au moins aussi fiable et de longueur
+ * comparable.
+ */
+async function refineSegments(canvas, segments, langs, onProgress, shouldCancel) {
+  const work = document.createElement('canvas');
+  const wctx = work.getContext('2d', { willReadFrequently: true });
+  let i = 0;
+  for (const seg of segments) {
+    i++;
+    if (shouldCancel?.()) break;
+    onProgress?.({ status: 'refine', progress: i / segments.length });
+    const { x0, y0, x1, y1 } = seg.bbox;
+    const w = x1 - x0;
+    const h = y1 - y0;
+    if (h < 8 || w < 10 || h > 400) continue;
+    const pad = Math.max(4, Math.round(h * 0.3));
+    const compact = seg.text.replace(/\s/g, '');
+    const numeric = compact.length > 0 && NUMERIC_RE.test(compact);
+    const readAt = async (target) => {
+      const scale = U.clamp(target / h, 0.5, 4);
+      const cw = Math.max(8, Math.round((w + pad * 2) * scale));
+      const ch = Math.max(8, Math.round((h + pad * 2) * scale));
+      if (cw * ch > 3e6) return null;
+      work.width = cw;
+      work.height = ch;
+      wctx.fillStyle = '#fff';
+      wctx.fillRect(0, 0, cw, ch);
+      wctx.imageSmoothingEnabled = true;
+      wctx.imageSmoothingQuality = 'high';
+      wctx.drawImage(canvas, x0 - pad, y0 - pad, w + pad * 2, h + pad * 2, 0, 0, cw, ch);
+      return recognizeLine(work, langs, { digits: numeric });
+    };
+    try {
+      let res = await readAt(56);
+      if (!res) continue;
+      if (numeric) {
+        // Nombres : trois tailles, vote ; une virgule décimale détectée prime sur « 260068 ».
+        const alt = [res, await readAt(40), await readAt(80)].filter((r) => r && r.text);
+        const votes = new Map();
+        for (const r of alt) votes.set(r.text, (votes.get(r.text) || 0) + 1 + (/[.,]\d{1,4}\b/.test(r.text) ? 0.5 : 0));
+        const best = [...votes.entries()].sort((a, b) => b[1] - a[1])[0];
+        if (best) res = alt.find((r) => r.text === best[0]) || res;
+      }
+      const text = res.text;
+      if (!text || text === seg.text) continue;
+      const ratio = text.replace(/\s/g, '').length / Math.max(1, compact.length);
+      if (ratio < 0.6 || ratio > 1.6) continue;
+      if (res.confidence + 6 < seg.confidence) continue;
+      // Ne remplace pas du texte par du bruit : au moins un caractère lettre/chiffre.
+      if (!/[\p{L}\p{N}]/u.test(text)) continue;
+      seg.text = text;
+      seg.confidence = Math.round(Math.max(seg.confidence, res.confidence));
+    } catch {
+      /* on garde la première lecture */
+    }
+  }
+  // Séparateur décimal : si la page écrit presque tout avec une virgule, un « 173.75 » isolé en est une.
+  const dec = /\d[.,]\d{2}(?!\d)/;
+  const commas = segments.filter((g) => dec.test(g.text) && /\d,\d{2}(?!\d)/.test(g.text)).length;
+  const dots = segments.filter((g) => /\d\.\d{2}(?!\d)/.test(g.text) && !/,/.test(g.text)).length;
+  // Montant lu sans virgule (« 260068 » pour « 2600,68 ») dans un tableau où tout porte 2 décimales.
+  if (commas >= 10) {
+    for (const g of segments) {
+      const c = g.text.replace(/\s/g, '');
+      if (/^-?\d{5,7}$/.test(c) && g.text.trim() === c) g.text = c.replace(/(\d{2})$/, ',$1');
+    }
+  }
+  if (commas >= 4 && commas > dots * 3) {
+    for (const g of segments) {
+      if (NUMERIC_RE.test(g.text.replace(/\s/g, ''))) g.text = g.text.replace(/(\d)\.(\d{2})(?!\d)/g, '$1,$2');
+    }
+  }
+}
+
 /**
  * Épaisseur de trait de chaque mot reconnu : `bold` vaut true / false quand la
  * mesure est nette, et reste indéfini pour les mots trop courts ou ambigus.
@@ -3251,7 +3418,7 @@ function markWordWeights(canvas, words) {
 }
 
 /** Incrémenté quand la lecture OCR s'améliore : les anciennes lectures sont refaites. */
-const OCR_VERSION = 3;
+const OCR_VERSION = 4;
 
 async function runOcrOnPage(n, langs, onProgress) {
   const page = await state.engine.getPage(n);
@@ -3288,7 +3455,15 @@ async function runOcrOnPage(n, langs, onProgress) {
     .map((w) => ({ text: w.text, bbox: mapBox(w.bbox), confidence: w.confidence }))
     .filter((w) => w.bbox.w > 0.3 && w.bbox.h > 0.3);
 
-  const lines = groupOcrWords(res.words)
+  const segs = groupOcrWords(res.words);
+  await refineSegments(
+    prepared,
+    segs,
+    langs,
+    (m) => onProgress?.({ status: 'recognizing text', progress: 0.9 + 0.1 * (m.progress || 0) }),
+    () => state.ocr.cancel
+  );
+  const lines = segs
     .map((seg, i) => {
       const bbox = mapBox(seg.bbox);
       return {
@@ -4377,7 +4552,12 @@ async function applyPageOp(label, operation, targetPage) {
   try {
     const bytes = await operation();
     const name = state.fileName;
+    const oldHash = state.hash;
     await openPdfBytes(bytes, name);
+    // L'ancienne version n'a plus de raison d'être dans « Fichiers » : pas de doublon.
+    if (oldHash && state.hash && oldHash !== state.hash) {
+      Session.deleteDocument(oldHash).catch(() => {});
+    }
     setTab('pages');
     if (targetPage && targetPage > 1) {
       await goToPage(Math.min(targetPage, state.numPages));
@@ -6410,6 +6590,7 @@ function bindEvents() {
   // Navigation
   els.btnPrev.addEventListener('click', () => goToPage(state.pageIndex));
   els.btnNext.addEventListener('click', () => goToPage(state.pageIndex + 2));
+  bindPageFlip();
   els.pageInput.addEventListener('change', () => goToPage(parseInt(els.pageInput.value, 10) || 1));
   els.pageInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
@@ -6983,6 +7164,7 @@ window.__pdfStudio = {
     markup.setObjects([...markup.objects, obj]);
     pushMarkupHistory();
   },
+  setReadMode,
   /** Tests : document tel qu'utilisé par Compresser / Protéger / Convertir. */
   currentDocumentSource,
   openPdfBytes,

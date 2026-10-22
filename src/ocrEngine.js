@@ -119,6 +119,28 @@ export async function recognizeCanvas(canvas, langsKey, onProgress) {
   };
 }
 
+/**
+ * Relit une seule ligne (découpe d'un bloc) : mode « ligne unique » de
+ * Tesseract, beaucoup plus fiable pour les petits chiffres, virgules et
+ * accents. Pour les blocs numériques, seuls chiffres et signes courants sont
+ * autorisés.
+ */
+export async function recognizeLine(canvas, langsKey, { digits = false } = {}) {
+  const w = await ensureWorker(langsKey);
+  await w.setParameters({
+    tessedit_pageseg_mode: '7',
+    tessedit_char_whitelist: digits ? '0123456789,.-+/:€%$ ' : '',
+    preserve_interword_spaces: '1',
+  });
+  try {
+    const r = await w.recognize(canvas);
+    const data = r.data || {};
+    return { text: (data.text || '').replace(/\s+/g, ' ').trim(), confidence: data.confidence || 0 };
+  } finally {
+    await w.setParameters({ tessedit_pageseg_mode: '3', tessedit_char_whitelist: '' }).catch(() => {});
+  }
+}
+
 export async function terminateOcr() {
   if (!worker) return;
   try {

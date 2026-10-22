@@ -66,3 +66,40 @@ test('Compresser / Protéger / Convertir partent du document modifié', async ({
   });
   expect(text).toContain('Texte modifié 987');
 });
+
+test('lecture : le texte de la page est sélectionnable et copiable', async ({ page }) => {
+  await openDemo(page);
+  await page.evaluate(() => document.querySelector('#editDone')?.click());
+  // Passe en lecture seule via le menu du document.
+  await page.evaluate(() => window.__pdfStudio.setReadMode?.(true));
+  await expect.poll(() => page.evaluate(() => document.body.classList.contains('reading'))).toBe(true);
+  await expect(page.locator('.read-text-layer span').first()).toBeAttached();
+  const copied = await page.evaluate(() => {
+    const spans = [...document.querySelectorAll('.read-text-layer span')];
+    const range = document.createRange();
+    range.setStartBefore(spans[0]);
+    range.setEndAfter(spans[Math.min(2, spans.length - 1)]);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return { text: sel.toString(), first: spans[0].textContent };
+  });
+  expect(copied.text).toContain(copied.first.trim());
+});
+
+test('lecture : défiler au-delà du bas de la page passe à la page suivante', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'molette : Chromium');
+  await openDemo(page);
+  await page.evaluate(() => document.querySelector('#editDone')?.click());
+  const pages = await page.evaluate(() => window.__pdfStudio.state.numPages);
+  test.skip(pages < 2, 'document de démonstration à une seule page');
+  await page.evaluate(() => window.__pdfStudio.setReadMode(true));
+  await page.waitForTimeout(500);
+  await page.evaluate(() => {
+    const sc = document.getElementById('canvasScroll');
+    sc.scrollTop = sc.scrollHeight;
+  });
+  await page.mouse.move(300, 400);
+  for (let i = 0; i < 4; i++) await page.mouse.wheel(0, 120);
+  await expect.poll(() => page.evaluate(() => window.__pdfStudio.state.pageIndex)).toBe(1);
+});

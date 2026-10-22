@@ -307,3 +307,9 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - Les anciennes lectures OCR (version < 3) sont refaites à l'ouverture, sauf si des modifications s'appuient dessus.
 - Annuler / Rétablir : un seul historique, dans l'ordre réel (texte et annotations).
 - Tests : vitest 150, Playwright chromium 66.
+
+### v2.15 — lecture OCR, lecture seule, petits défauts
+- OCR : seconde lecture bloc par bloc (ligne unique, échelle idéale, chiffres seuls avec vote sur 3 tailles, virgule décimale cohérente) : sur le bulletin de test, plus aucun montant sans virgule ni point décimal parasite (≈ 25 s la page).
+- Lecture seule : texte sélectionnable / copiable ; défiler au-delà du bas (ou du haut) de la page passe à la page suivante (précédente).
+- Pages : plus de doublon dans « Fichiers » après une opération sur les pages ; polices à chasse fixe : espaces d'alignement conservés.
+- Tests : vitest 151, Playwright chromium 68.

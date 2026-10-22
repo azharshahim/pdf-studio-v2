@@ -32,4 +32,10 @@ describe('style mixte sur une ligne', () => {
       ['suite', 7],
     ]);
   });
+
+  it('police à chasse fixe : les espaces d’alignement sont conservés', () => {
+    const mono = (str, x, width) => ({ str, width, transform: [10, 0, 0, 10, x, 700], fontName: 'M' });
+    const lines = buildLines([mono('Total', 50, 30), mono('42,00', 89, 30)], { M: { fontFamily: 'monospace' } }, 1, {});
+    expect(lines[0].text).toBe('Total' + '  ' + '42,00');
+  });
 });

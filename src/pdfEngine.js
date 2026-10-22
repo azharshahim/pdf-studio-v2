@@ -76,7 +76,7 @@ export function buildLines(items, styles, pageNo, fontMap = {}) {
   let cur = null;
 
   const finalize = (line) => {
-    const text = line.text.replace(/\s+/g, ' ').trim();
+    const text = (line.mono ? line.text.replace(/\t/g, ' ') : line.text.replace(/\s+/g, ' ')).trim();
     if (!text) return;
     out.push({
       id: `p${pageNo}-l${out.length}`,
@@ -143,7 +143,11 @@ export function buildLines(items, styles, pageNo, fontMap = {}) {
       const gap = it.x - cur.endX;
       const needSpace =
         gap > Math.max(0.7, it.fontSize * 0.13) && !/\s$/.test(cur.text) && !/^\s/.test(it.str);
-      cur.text += (needSpace ? ' ' : '') + it.str;
+      // Police à chasse fixe : les colonnes alignées par espaces gardent leur nombre d'espaces.
+      const mono = /courier|mono|consolas|menlo|typewriter/i.test(`${it.fontFamily} ${it.traitsFamily}`);
+      const pad = needSpace ? (mono ? ' '.repeat(Math.max(1, Math.round(gap / (it.fontSize * 0.6)))) : ' ') : '';
+      cur.text += pad + it.str;
+      cur.mono = cur.mono || mono;
       cur.endX = Math.max(cur.endX, it.x + it.width);
       cur.x = Math.min(cur.x, it.x);
       cur.width = cur.endX - cur.x;
