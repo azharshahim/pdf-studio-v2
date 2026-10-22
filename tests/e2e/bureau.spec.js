@@ -48,4 +48,29 @@ test('grand écran : la mise en page reste figée quand on modifie une ligne', a
   await page.locator('#epCharSpacing').fill('0.5');
   await expect.poll(() => page.evaluate(() => window.__pdfStudio.state.active?.edit?.charSpacing)).toBe(0.5);
   expect(await rect()).toEqual(before);
+
+  // Poignées façon Acrobat : coins = redimensionner, bords = déplacer.
+  const ed = () => page.evaluate(() => JSON.parse(JSON.stringify(window.__pdfStudio.state.active.edit)));
+  const e0 = await ed();
+  const corner = await page.locator('.inline-corner.c-br').boundingBox();
+  await page.mouse.move(corner.x + corner.width / 2, corner.y + corner.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(corner.x + corner.width / 2 + 60, corner.y + corner.height / 2 + 20, { steps: 6 });
+  await page.mouse.up();
+  const e1 = await ed();
+  expect(e1.wrap).toBe(true);
+  expect(e1.bbox.w).toBeGreaterThan(e0.bbox.w + 10);
+  expect(e1.bbox.h).toBeGreaterThan(e0.bbox.h);
+  expect(e1.origBbox).toBeTruthy();
+
+  const edge = await page.locator('.inline-edge.e-t').boundingBox();
+  await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(edge.x + edge.width / 2 + 40, edge.y + edge.height / 2 + 40, { steps: 6 });
+  await page.mouse.up();
+  const e2 = await ed();
+  expect(e2.bbox.x).toBeGreaterThan(e1.bbox.x + 10);
+  expect(e2.bbox.y).toBeLessThan(e1.bbox.y - 10);
+  expect(e2.origBbox).toEqual(e1.origBbox);
+  expect(await rect()).toEqual(before);
 });

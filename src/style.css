@@ -2536,34 +2536,83 @@ body.editing .canvas-scroll {
   cursor: grabbing;
   opacity: 0.96;
 }
-.inline-handle {
+.inline-edge {
   position: absolute;
   z-index: 2;
-  width: 24px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--line-2);
-  border-radius: 50%;
-  background: var(--panel);
-  color: var(--accent);
-  box-shadow: var(--shadow-sm);
-  touch-action: none;
-  padding: 0;
-}
-.inline-handle[hidden] {
-  display: none;
-}
-.inline-handle.move {
-  left: -13px;
-  top: -13px;
   cursor: move;
+  touch-action: none;
 }
-.inline-handle.resize {
-  right: -13px;
-  bottom: -13px;
+.inline-edge.e-t,
+.inline-edge.e-b {
+  left: -4px;
+  right: -4px;
+  height: 14px;
+}
+.inline-edge.e-t {
+  top: -12px;
+}
+.inline-edge.e-b {
+  bottom: -12px;
+}
+.inline-edge.e-l,
+.inline-edge.e-r {
+  top: -4px;
+  bottom: -4px;
+  width: 14px;
+}
+.inline-edge.e-l {
+  left: -12px;
+}
+.inline-edge.e-r {
+  right: -12px;
+}
+/* Poignées rondes aux quatre coins, comme dans Acrobat. */
+.inline-corner {
+  position: absolute;
+  z-index: 3;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  background: #fff;
+  touch-action: none;
+}
+.inline-corner.c-tl {
+  left: -12px;
+  top: -12px;
   cursor: nwse-resize;
+}
+.inline-corner.c-tr {
+  right: -12px;
+  top: -12px;
+  cursor: nesw-resize;
+}
+.inline-corner.c-bl {
+  left: -12px;
+  bottom: -12px;
+  cursor: nesw-resize;
+}
+.inline-corner.c-br {
+  right: -12px;
+  bottom: -12px;
+  cursor: nwse-resize;
+}
+@media (pointer: coarse) {
+  .inline-corner {
+    width: 26px;
+    height: 26px;
+  }
+  .inline-corner.c-tl { left: -15px; top: -15px; }
+  .inline-corner.c-tr { right: -15px; top: -15px; }
+  .inline-corner.c-bl { left: -15px; bottom: -15px; }
+  .inline-corner.c-br { right: -15px; bottom: -15px; }
+  .inline-edge.e-t, .inline-edge.e-b { height: 22px; }
+  .inline-edge.e-t { top: -18px; }
+  .inline-edge.e-b { bottom: -18px; }
+  .inline-edge.e-l, .inline-edge.e-r { width: 22px; }
+  .inline-edge.e-l { left: -18px; }
+  .inline-edge.e-r { right: -18px; }
 }
 
 /* Survol : bordure fine sur la ligne éditable */
@@ -2603,21 +2652,6 @@ body.editing .canvas-scroll {
 body.no-doc .fab,
 body.editing .fab {
   display: none;
-}
-
-@media (pointer: coarse) {
-  .inline-handle {
-    width: 30px;
-    height: 30px;
-  }
-  .inline-handle.move {
-    left: -16px;
-    top: -16px;
-  }
-  .inline-handle.resize {
-    right: -16px;
-    bottom: -16px;
-  }
 }
 
 @media (max-width: 700px) {

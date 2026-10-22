@@ -77,8 +77,7 @@ export function createInlineEditor({
   let surface = 'ce'; // 'ce' = contenteditable, 'ta' = textarea
   let edit = null;
   let isNew = false;
-  let moveHandle = null;
-  let resizeHandle = null;
+  let handleEls = [];
   let dragState = null;
   let composing = false;
   let refreshQueued = false;
@@ -265,7 +264,7 @@ export function createInlineEditor({
     applyInputAttributes(textEl);
     buildSurfaceListeners(textEl);
     if (previous) previous.replaceWith(textEl);
-    else shell.insertBefore(textEl, moveHandle);
+    else shell.prepend(textEl);
     shell.dataset.surface = 'textarea';
     applyStyle();
     position();
@@ -285,29 +284,28 @@ export function createInlineEditor({
     applyInputAttributes(textEl);
     buildSurfaceListeners(textEl);
 
-    moveHandle = document.createElement('button');
-    moveHandle.type = 'button';
-    moveHandle.className = 'inline-handle move';
-    moveHandle.tabIndex = -1;
-    moveHandle.setAttribute('aria-label', 'Déplacer le bloc');
-    moveHandle.innerHTML =
-      '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 2v12M4 6l4-4 4 4M4 10l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
-    resizeHandle = document.createElement('button');
-    resizeHandle.type = 'button';
-    resizeHandle.className = 'inline-handle resize';
-    resizeHandle.tabIndex = -1;
-    resizeHandle.setAttribute('aria-label', 'Redimensionner le bloc');
-    resizeHandle.innerHTML =
-      '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 13L13 3M9 3h4v4M13 9v4H9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
-    for (const handle of [moveHandle, resizeHandle]) {
-      handle.addEventListener('pointerdown', (ev) => startDrag(handle === moveHandle ? 'move' : 'resize', ev));
+    // Poignées façon Acrobat : quatre coins pour redimensionner, quatre bords
+    // pour déplacer le bloc sur la page.
+    handleEls = [];
+    for (const side of ['t', 'r', 'b', 'l']) {
+      const edge = document.createElement('div');
+      edge.className = `inline-edge e-${side}`;
+      edge.setAttribute('aria-label', 'Déplacer le bloc');
+      edge.addEventListener('pointerdown', (ev) => startDrag('move', ev, edge));
+      shell.appendChild(edge);
+      handleEls.push(edge);
     }
-
-    shell.appendChild(textEl);
-    shell.appendChild(moveHandle);
-    shell.appendChild(resizeHandle);
+    for (const corner of ['tl', 'tr', 'bl', 'br']) {
+      const h = document.createElement('button');
+      h.type = 'button';
+      h.tabIndex = -1;
+      h.className = `inline-corner c-${corner}`;
+      h.setAttribute('aria-label', 'Redimensionner le bloc');
+      h.addEventListener('pointerdown', (ev) => startDrag(corner, ev, h));
+      shell.appendChild(h);
+      handleEls.push(h);
+    }
+    shell.prepend(textEl);
 
     shell.addEventListener('pointermove', onDragMove);
     shell.addEventListener('pointerup', endDrag);
@@ -338,10 +336,15 @@ export function createInlineEditor({
     shell.style.color = edit.color || '#111827';
     shell.style.textAlign = edit.align || 'left';
     const bg = edit.bg && edit.bg !== 'none' ? edit.bg : 'transparent';
-    shell.style.setProperty('--inline-bg', edit.kind === 'add' ? 'transparent' : bg);
+    shell.style.setProperty('--inline-bg', edit.kind === 'add' || edit.origBbox ? 'transparent' : bg);
     shell.classList.toggle('is-new', edit.kind === 'add');
-    if (moveHandle) moveHandle.hidden = edit.kind !== 'add';
-    if (resizeHandle) resizeHandle.hidden = edit.kind !== 'add';
+    const wrap = !!edit.wrap;
+    if (textEl) {
+      textEl.style.whiteSpace = wrap ? 'pre-wrap' : '';
+      textEl.style.overflowWrap = wrap ? 'break-word' : '';
+      textEl.style.overflowX = wrap ? 'hidden' : '';
+      if (textEl.tagName === 'TEXTAREA') textEl.wrap = wrap ? 'soft' : 'off';
+    }
   }
 
   function position() {
@@ -366,7 +369,10 @@ export function createInlineEditor({
     const available = Math.max(48, Math.min(overlay.clientWidth - left - 2, viewRight - left));
     // Une ligne d'origine plus large que l'écran est rognée au cadre visible :
     // c'est le texte qui défile dans le champ, pas la page.
-    shell.style.width = `${Math.min(Math.max(base, needed), available)}px`;
+    shell.style.width = edit.wrap
+      ? `${base}px`
+      : `${Math.min(Math.max(base, needed), available)}px`;
+    syncCover();
     shell.style.minHeight = `${Math.max(4, rect.height + padY * 2)}px`;
     shell.style.padding = `${padY}px ${padX}px`;
     if (textEl?.tagName === 'TEXTAREA' && !composing) {
@@ -635,6 +641,8 @@ export function createInlineEditor({
 
   function close() {
     if (shell) shell.remove();
+    coverEl?.remove();
+    coverEl = null;
     overlay.classList.remove('has-inline-editor');
     edit = null;
     isNew = false;
@@ -655,10 +663,33 @@ export function createInlineEditor({
 
   /* ──────────────────────────── Glisser-déposer ──────────────────────────── */
 
-  function startDrag(kind, ev) {
-    if (!edit || edit.kind !== 'add') return;
+  let coverEl = null;
+  /** Rectangle de la ligne d'origine, recouvert du fond quand le bloc a été déplacé. */
+  function syncCover() {
+    if (!edit || !edit.origBbox) {
+      coverEl?.remove();
+      coverEl = null;
+      return;
+    }
+    if (!coverEl) {
+      coverEl = document.createElement('div');
+      coverEl.className = 'edit-cover inline-cover';
+    }
+    if (shell && coverEl.parentNode !== overlay) overlay.insertBefore(coverEl, shell);
+    const r = rectFor(edit.origBbox);
+    const scale = getScale() || 1;
+    const padX = Math.max(1, (Number(edit.size) || 10) * 0.12) * scale;
+    const padY = Math.max(0.8, (Number(edit.size) || 10) * 0.05) * scale;
+    coverEl.style.cssText = `position:absolute;left:${r.left - padX}px;top:${r.top - padY}px;width:${r.width + padX * 2}px;height:${r.height + padY * 2}px;background:${edit.bg && edit.bg !== 'none' ? edit.bg : 'transparent'};pointer-events:none;`;
+  }
+
+  function startDrag(kind, ev, el) {
+    if (!edit) return;
     ev.preventDefault();
     ev.stopPropagation();
+    // Premier déplacement d'un bloc existant : on retient où se trouvait le texte
+    // d'origine, qui doit rester effacé (écran et export).
+    if (edit.kind !== 'add' && !edit.origBbox) edit.origBbox = { ...edit.bbox };
     const scale = getScale() || 1;
     dragState = {
       kind,
@@ -666,11 +697,12 @@ export function createInlineEditor({
       startX: ev.clientX,
       startY: ev.clientY,
       bbox: { ...edit.bbox },
-      baseline: edit.baseline ?? edit.bbox.y + edit.bbox.h * 0.76,
+      baseline: edit.baseline ?? edit.bbox.y + edit.bbox.h * 0.24,
       scale,
     };
-    (kind === 'move' ? moveHandle : resizeHandle).setPointerCapture?.(ev.pointerId);
+    el?.setPointerCapture?.(ev.pointerId);
     shell.classList.add('dragging');
+    syncCover();
   }
 
   function onDragMove(ev) {
@@ -678,14 +710,36 @@ export function createInlineEditor({
     if (ev.pointerId !== dragState.pointerId) return;
     ev.preventDefault();
     const dx = (ev.clientX - dragState.startX) / dragState.scale;
-    const dy = (ev.clientY - dragState.startY) / dragState.scale;
+    const dyUp = -(ev.clientY - dragState.startY) / dragState.scale;
+    const b = dragState.bbox;
     if (dragState.kind === 'move') {
-      edit.bbox.x = dragState.bbox.x + dx;
-      edit.bbox.y = dragState.bbox.y - dy;
-      edit.baseline = dragState.baseline - dy;
+      edit.bbox.x = b.x + dx;
+      edit.bbox.y = b.y + dyUp;
+      edit.baseline = dragState.baseline + dyUp;
     } else {
-      edit.bbox.w = Math.max(30, dragState.bbox.w + dx);
+      const k = dragState.kind;
+      const MIN_W = 24;
+      const MIN_H = 6;
+      if (k.includes('r')) {
+        edit.bbox.w = Math.max(MIN_W, b.w + dx);
+        edit.wrap = true;
+      } else if (k.includes('l')) {
+        const w = Math.max(MIN_W, b.w - dx);
+        edit.bbox.x = b.x + (b.w - w);
+        edit.bbox.w = w;
+        edit.wrap = true;
+      }
+      if (k.includes('t')) {
+        const h = Math.max(MIN_H, b.h + dyUp);
+        edit.bbox.h = h;
+        edit.baseline = dragState.baseline + (h - b.h);
+      } else if (k.includes('b')) {
+        const h = Math.max(MIN_H, b.h - dyUp);
+        edit.bbox.y = b.y + (b.h - h);
+        edit.bbox.h = h;
+      }
     }
+    applyStyle();
     position();
     onChange?.(edit);
   }

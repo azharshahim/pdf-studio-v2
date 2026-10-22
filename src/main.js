@@ -1358,6 +1358,18 @@ function renderOverlay() {
   markup.render();
   renderFormOverlay();
 
+  // Blocs déplacés : le texte d'origine reste recouvert à son ancienne place.
+  for (const e of pageEdits) {
+    if (!e.origBbox) continue;
+    const ro = pdfRectToViewportRect(e.origBbox, vp);
+    const px = Math.max(1, (e.size || 10) * 0.12) * state.scale;
+    const py = Math.max(0.8, (e.size || 10) * 0.05) * state.scale;
+    const cover = document.createElement('div');
+    cover.className = 'edit-cover';
+    cover.style.cssText = `position:absolute;left:${ro.left - px}px;top:${ro.top - py}px;width:${ro.width + px * 2}px;height:${ro.height + py * 2}px;background:${e.bg && e.bg !== 'none' ? e.bg : 'transparent'};pointer-events:none;`;
+    els.overlay.appendChild(cover);
+  }
+
   // Blocs modifiés / ajoutés (le bloc en cours d'édition est rendu par l'éditeur)
   for (const e of pageEdits) {
     if (e.id === activeId) continue;
@@ -1375,14 +1387,14 @@ function renderOverlay() {
     d.style.minWidth = `${r.width + padX * 2}px`;
     d.style.minHeight = `${r.height + padY * 2}px`;
     d.style.padding = `${padY}px ${padX}px`;
-    d.style.background = e.bg && e.bg !== 'none' ? e.bg : 'transparent';
+    d.style.background = e.bg && e.bg !== 'none' && !e.origBbox ? e.bg : 'transparent';
 
     if (e.font) ensureCatalogFont(e.font).then((ok) => ok && !fontsRendered.has(e.font) && (fontsRendered.add(e.font), renderOverlay()));
     const fontFamily = U.cssFontFamily(e.font);
     const basePx = Math.max(1, (e.size || 10) * scale);
     let fontSizePx = basePx;
     const lines = String(e.text || '').split('\n');
-    if (e.fit !== false && e.bbox.w > 2 && lines.some((l) => l.trim())) {
+    if (e.fit !== false && !e.wrap && e.bbox.w > 2 && lines.some((l) => l.trim())) {
       try {
         measureCtx.font = `${e.italic ? 'italic ' : ''}${e.bold ? '700' : '400'} ${basePx}px ${fontFamily}`;
         let maxW = 0;
@@ -1400,7 +1412,11 @@ function renderOverlay() {
     span.className = 'edit-text';
     span.textContent = e.text || '';
     span.style.display = 'block';
-    span.style.whiteSpace = 'pre';
+    span.style.whiteSpace = e.wrap ? 'pre-wrap' : 'pre';
+    if (e.wrap) {
+      span.style.overflowWrap = 'break-word';
+      span.style.width = `${r.width}px`;
+    }
     span.style.fontFamily = fontFamily;
     span.style.fontSize = `${fontSizePx}px`;
     span.style.lineHeight = String(e.lineHeight || 1.16);
@@ -1920,6 +1936,8 @@ function editSignature(e) {
     e.fit,
     Number(e.charSpacing) || 0,
     Number(e.hScale) || 100,
+    !!e.wrap,
+    e.bbox ? [Math.round(e.bbox.x), Math.round(e.bbox.y), Math.round(e.bbox.w), Math.round(e.bbox.h)] : null,
   ]);
 }
 

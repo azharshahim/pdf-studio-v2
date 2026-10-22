@@ -418,11 +418,12 @@ export async function exportPdf({
           const padY = Math.max(0.8, (e.size || 10) * 0.05);
           const { r, g, b } = hexToRgb01(e.bg, { r: 1, g: 1, b: 1 });
           ctx.fillStyle = `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
+          const cb = e.origBbox || e.bbox;
           ctx.fillRect(
-            (e.bbox.x - padX) * scale,
-            (pageH - (e.bbox.y + e.bbox.h + padY)) * scale,
-            (e.bbox.w + padX * 2) * scale,
-            (e.bbox.h + padY * 2) * scale
+            (cb.x - padX) * scale,
+            (pageH - (cb.y + cb.h + padY)) * scale,
+            (cb.w + padX * 2) * scale,
+            (cb.h + padY * 2) * scale
           );
         }
         const encoded = await canvasToImageBytes(canvas, rasterQuality);
@@ -452,15 +453,16 @@ export async function exportPdf({
       if (!e.bg || e.bg === 'none') continue;
       // Texte réellement retiré du flux : rien à masquer. Couche cachée (scan) :
       // l'image du scan reste dessous, il faut toujours la couvrir.
-      if (removed.has(e.bbox) && !e.hiddenLayer && e.source !== 'ocr') continue;
+      const cb = e.origBbox || e.bbox;
+      if (removed.has(cb) && !e.hiddenLayer && e.source !== 'ocr') continue;
       const { r, g, b } = hexToRgb01(e.bg, { r: 1, g: 1, b: 1 });
       const padX = Math.max(1, (e.size || 10) * 0.12);
       const padY = Math.max(0.8, (e.size || 10) * 0.05);
       page.drawRectangle({
-        x: e.bbox.x - padX,
-        y: e.bbox.y - padY,
-        width: e.bbox.w + padX * 2,
-        height: e.bbox.h + padY * 2,
+        x: cb.x - padX,
+        y: cb.y - padY,
+        width: cb.w + padX * 2,
+        height: cb.h + padY * 2,
         color: rgb(r, g, b),
       });
       masked = true;
@@ -496,6 +498,38 @@ export async function exportPdf({
         prepared.push(runs);
       }
 
+      // Bloc redimensionné à la main : le texte passe à la ligne dans la largeur du cadre.
+      if (e.wrap && e.bbox.w > 8) {
+        const wrapped = [];
+        const baseW = (runs, s) => runs.reduce((acc, r) => acc + r.font.widthOfTextAtSize(r.text, s), 0);
+        const hz0 = clamp(Number(e.hScale) || 100, 20, 400) / 100;
+        const tc0 = clamp(Number(e.charSpacing) || 0, -5, 50);
+        const measure = (runs) => (baseW(runs, size) + tc0 * runs.reduce((n, r) => n + [...r.text].length, 0)) * hz0;
+        const makeRuns = async (str) => {
+          const out = [];
+          for (const run of splitScriptRuns(str)) {
+            const resolved = await resolveRunFont(run, e.font, e.bold, e.italic);
+            const text = resolved.unicode ? run.text : sanitizePdfText(run.text);
+            if (text) out.push({ text, font: resolved.font });
+          }
+          return out;
+        };
+        for (const line of preparedLines) {
+          const words = line.split(/(?<= )/); // garde l'espace final de chaque mot
+          let current = '';
+          for (const word of words) {
+            const tryText = current + word;
+            if (current && measure(await makeRuns(tryText.replace(/ +$/, ''))) > e.bbox.w) {
+              wrapped.push(await makeRuns(current.replace(/ +$/, '')));
+              current = word;
+            } else current = tryText;
+          }
+          wrapped.push(await makeRuns(current.replace(/ +$/, '')));
+        }
+        prepared.length = 0;
+        prepared.push(...wrapped);
+      }
+
       // Espacement des caractères (pt, opérateur Tc) et échelle horizontale (%, Tz).
       const tc = clamp(Number(e.charSpacing) || 0, -5, 50);
       const hz = clamp(Number(e.hScale) || 100, 20, 400) / 100;
@@ -503,7 +537,7 @@ export async function exportPdf({
       const widthOf = (runs, s) => runs.reduce((acc, r) => acc + runW(r, s), 0);
       const spaced = tc !== 0 || hz !== 1;
       if (spaced) page.pushOperators(pushGraphicsState(), setCharacterSpacing(tc), setCharacterSqueeze(hz * 100));
-      if (e.fit !== false && e.bbox.w > 2) {
+      if (e.fit !== false && !e.wrap && e.bbox.w > 2) {
         let factor = 1;
         for (const runs of prepared) {
           const w = widthOf(runs, size);
@@ -564,7 +598,7 @@ export async function exportPdf({
       if (!b || b.w <= 0.5 || b.h <= 0.5) continue;
       const cx = b.x + b.w / 2;
       const cy = b.y + b.h / 2;
-      if (pageEdits.some((e) => overlaps(cx, cy, e.bbox))) continue;
+      if (pageEdits.some((e) => overlaps(cx, cy, e.origBbox || e.bbox))) continue;
       const raw = String(item.text || '').trim();
       if (!raw) continue;
       const visual = prepareTextForPdf(raw);

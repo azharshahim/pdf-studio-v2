@@ -296,3 +296,8 @@ assertion en échec. Chaque test concerné repasse seul. La CI
 - Panneau « Modifier » à droite (≥ 901 px) : police, taille, couleur, alignement, G/I/S, interligne, espacement des caractères (Tc), échelle horizontale (Tz), dupliquer/supprimer, ajouter du texte.
 - Cadres pointillés permanents autour des blocs, tracés à l'extérieur du texte.
 - Tests : vitest 149, Playwright chromium 63, bureau (1280×800) OK.
+
+### v2.13 — déplacer et redimensionner un bloc (comme Acrobat)
+- Bloc sélectionné : cadre bleu, poignées rondes aux 4 coins (redimensionner, le texte passe à la ligne), bords du cadre pour le déplacer.
+- L'emplacement d'origine reste effacé (écran et export) ; export avec retour à la ligne dans la largeur du cadre.
+- Tests : vitest 150, Playwright chromium 64 (dont déplacement/redimensionnement sur grand écran).

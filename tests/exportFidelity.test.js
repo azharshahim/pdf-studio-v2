@@ -85,6 +85,31 @@ describe.skipIf(!hasPoppler)('fidélité de l’export (rendu Poppler)', () => {
     expect(await width({ hScale: 200 })).toBeGreaterThan(plain + 10);
   });
 
+  it('bloc redimensionné : le texte passe à la ligne et l’ancien emplacement reste effacé', async () => {
+    stubFonts();
+    const { bytes } = await exportPdf({
+      sourceBytes: await blank(),
+      edits: [
+        baseEdit({
+          text: 'un deux trois quatre cinq six sept huit',
+          bbox: { x: 150, y: 60, w: 60, h: 20 },
+          origBbox: { x: 36, y: 144, w: 90, h: 20 },
+          baseline: 100,
+          size: 12,
+          wrap: true,
+        }),
+      ],
+      ocrPages: [],
+    });
+    const img = render(bytes);
+    // ancien emplacement (« Ancien ») effacé
+    expect(darkIn(img, 38, 38, 60, 20)).toBeLessThan(5);
+    // le texte occupe plusieurs lignes dans la colonne de 60 pt
+    expect(darkIn(img, 150, 90, 70, 14)).toBeGreaterThan(8);
+    expect(darkIn(img, 150, 104, 70, 14)).toBeGreaterThan(8);
+    expect(darkIn(img, 215, 80, 40, 60)).toBeLessThan(5); // rien au-delà de la largeur du cadre
+  });
+
   it('un scan à couche cachée est masqué avant le nouveau texte', async () => {
     const doc = await PDFDocument.create();
     const page = doc.addPage([300, 200]);
