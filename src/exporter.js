@@ -450,19 +450,25 @@ export async function exportPdf({
         const canvas = await renderPage(pageNo);
         const ctx = canvas.getContext('2d');
         const scale = canvas.width / pageW;
+        const boxesOf = (e) =>
+          Array.isArray(e.origBboxes) && e.origBboxes.length
+            ? e.origBboxes.filter((b) => b && b.w > 0 && b.h > 0)
+            : [e.origBbox || e.bbox];
         for (const e of pageEdits) {
           if (!e.bg || e.bg === 'none') continue;
           const padX = Math.max(1, (e.size || 10) * 0.12);
           const padY = Math.max(0.8, (e.size || 10) * 0.05);
           const { r, g, b } = hexToRgb01(e.bg, { r: 1, g: 1, b: 1 });
           ctx.fillStyle = `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
-          const cb = e.origBbox || e.bbox;
-          ctx.fillRect(
-            (cb.x - padX) * scale,
-            (pageH - (cb.y + cb.h + padY)) * scale,
-            (cb.w + padX * 2) * scale,
-            (cb.h + padY * 2) * scale
-          );
+          for (const cb of boxesOf(e)) {
+            if (!cb) continue;
+            ctx.fillRect(
+              (cb.x - padX) * scale,
+              (pageH - (cb.y + cb.h + padY)) * scale,
+              (cb.w + padX * 2) * scale,
+              (cb.h + padY * 2) * scale
+            );
+          }
         }
         const encoded = await canvasToImageBytes(canvas, rasterQuality);
         const image =
@@ -479,6 +485,15 @@ export async function exportPdf({
     }
   }
 
+  const editOriginalBoxes = (e) => {
+    if (e.kind === 'add') return [];
+    if (Array.isArray(e.origBboxes) && e.origBboxes.length) {
+      return e.origBboxes.filter((b) => b && b.w > 0 && b.h > 0);
+    }
+    const b = e.origBbox || e.bbox;
+    return b && b.w > 0 && b.h > 0 ? [b] : [];
+  };
+
   // 2. Masque de secours pour les zones non retirées du flux
   for (const [pageNo, pageEdits] of editsByPage) {
     if (stats.rasterizedPages.includes(pageNo)) continue;
@@ -489,21 +504,22 @@ export async function exportPdf({
     let masked = false;
     for (const e of sorted) {
       if (!e.bg || e.bg === 'none') continue;
-      // Texte réellement retiré du flux : rien à masquer. Couche cachée (scan) :
-      // l'image du scan reste dessous, il faut toujours la couvrir.
-      const cb = e.origBbox || e.bbox;
-      if (removed.has(cb) && !e.hiddenLayer && e.source !== 'ocr') continue;
       const { r, g, b } = hexToRgb01(e.bg, { r: 1, g: 1, b: 1 });
       const padX = Math.max(1, (e.size || 10) * 0.12);
       const padY = Math.max(0.8, (e.size || 10) * 0.05);
-      page.drawRectangle({
-        x: cb.x - padX,
-        y: cb.y - padY,
-        width: cb.w + padX * 2,
-        height: cb.h + padY * 2,
-        color: rgb(r, g, b),
-      });
-      masked = true;
+      // Texte réellement retiré du flux : rien à masquer. Couche cachée (scan) :
+      // l'image du scan reste dessous, il faut toujours la couvrir.
+      for (const cb of editOriginalBoxes(e)) {
+        if (removed.has(cb) && !e.hiddenLayer && e.source !== 'ocr') continue;
+        page.drawRectangle({
+          x: cb.x - padX,
+          y: cb.y - padY,
+          width: cb.w + padX * 2,
+          height: cb.h + padY * 2,
+          color: rgb(r, g, b),
+        });
+        masked = true;
+      }
     }
     if (masked) stats.maskedPages.push(pageNo);
   }
@@ -517,7 +533,10 @@ export async function exportPdf({
       const raw = String(e.text || '');
       if (!raw.trim()) continue;
       const color = hexToRgb01(e.color || '#111827');
-      const preparedLines = prepareTextForPdf(raw).split('\n');
+      const hasScreenLines = Array.isArray(e.wrappedLines) && e.wrappedLines.length > 0;
+      const preparedLines = hasScreenLines
+        ? e.wrappedLines.map((ln) => prepareTextForPdf(String(ln ?? '')))
+        : prepareTextForPdf(raw).split('\n');
       let size = clamp(Number(e.size) || 12, 4, 300);
 
       // Prépare chaque ligne en segments (arabe / latin / symboles).
@@ -536,8 +555,8 @@ export async function exportPdf({
         prepared.push(runs);
       }
 
-      // Bloc redimensionné à la main : le texte passe à la ligne dans la largeur du cadre.
-      if (e.wrap && e.bbox.w > 8) {
+      // Bloc redimensionné ou paragraphe sans lignes pré-calculées : découpe dans la largeur du cadre.
+      if (e.wrap && !hasScreenLines && e.bbox.w > 8) {
         const wrapped = [];
         const baseW = (runs, s) => runs.reduce((acc, r) => acc + r.font.widthOfTextAtSize(r.text, s), 0);
         const hz0 = clamp(Number(e.hScale) || 100, 20, 400) / 100;
@@ -559,7 +578,7 @@ export async function exportPdf({
             const tryText = current + word;
             if (current && measure(await makeRuns(tryText.replace(/ +$/, ''))) > e.bbox.w) {
               wrapped.push(await makeRuns(current.replace(/ +$/, '')));
-              current = word;
+              current = word.replace(/^ +/, '');
             } else current = tryText;
           }
           wrapped.push(await makeRuns(current.replace(/ +$/, '')));
@@ -636,7 +655,14 @@ export async function exportPdf({
       if (!b || b.w <= 0.5 || b.h <= 0.5) continue;
       const cx = b.x + b.w / 2;
       const cy = b.y + b.h / 2;
-      if (pageEdits.some((e) => overlaps(cx, cy, e.origBbox || e.bbox))) continue;
+      if (
+        pageEdits.some(
+          (e) =>
+            overlaps(cx, cy, e.bbox) || editOriginalBoxes(e).some((ob) => overlaps(cx, cy, ob))
+        )
+      ) {
+        continue;
+      }
       const raw = String(item.text || '').trim();
       if (!raw) continue;
       const visual = prepareTextForPdf(raw);

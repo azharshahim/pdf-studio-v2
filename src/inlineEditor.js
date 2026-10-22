@@ -231,7 +231,8 @@ export function createInlineEditor({
         onCommit?.('shortcut');
       }
       if (ev.key === 'Enter' && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey) {
-        // Une ligne du PDF reste une ligne : Entrée valide, Maj+Entrée passe
+        if (edit?.paragraph) return;
+        // Une ligne isolée du PDF reste une ligne : Entrée valide, Maj+Entrée passe
         // à la ligne (le bloc peut alors s'agrandir).
         ev.preventDefault();
         onCommit?.('enter');
@@ -336,7 +337,8 @@ export function createInlineEditor({
     shell.style.color = edit.color || '#111827';
     shell.style.textAlign = edit.align || 'left';
     const bg = edit.bg && edit.bg !== 'none' ? edit.bg : 'transparent';
-    shell.style.setProperty('--inline-bg', edit.kind === 'add' || edit.origBbox ? 'transparent' : bg);
+    const hasCovers = (Array.isArray(edit.origBboxes) && edit.origBboxes.length > 0) || !!edit.origBbox;
+    shell.style.setProperty('--inline-bg', edit.kind === 'add' || hasCovers ? 'transparent' : bg);
     shell.classList.toggle('is-new', edit.kind === 'add');
     const wrap = !!edit.wrap;
     if (textEl) {
@@ -641,8 +643,7 @@ export function createInlineEditor({
 
   function close() {
     if (shell) shell.remove();
-    coverEl?.remove();
-    coverEl = null;
+    clearCovers();
     overlay.classList.remove('has-inline-editor');
     edit = null;
     isNew = false;
@@ -663,24 +664,41 @@ export function createInlineEditor({
 
   /* ──────────────────────────── Glisser-déposer ──────────────────────────── */
 
-  let coverEl = null;
-  /** Rectangle de la ligne d'origine, recouvert du fond quand le bloc a été déplacé. */
+  let coverEls = [];
+  function clearCovers() {
+    for (const c of coverEls) c.remove();
+    coverEls = [];
+  }
+  /** Rectangles des lignes d'origine, recouverts du fond (paragraphe ou bloc déplacé). */
   function syncCover() {
-    if (!edit || !edit.origBbox) {
-      coverEl?.remove();
-      coverEl = null;
+    const boxes =
+      edit && Array.isArray(edit.origBboxes) && edit.origBboxes.length
+        ? edit.origBboxes
+        : edit && edit.origBbox
+          ? [edit.origBbox]
+          : [];
+    if (!edit || !boxes.length) {
+      clearCovers();
       return;
     }
-    if (!coverEl) {
-      coverEl = document.createElement('div');
-      coverEl.className = 'edit-cover inline-cover';
+    while (coverEls.length > boxes.length) {
+      coverEls.pop().remove();
     }
-    if (shell && coverEl.parentNode !== overlay) overlay.insertBefore(coverEl, shell);
-    const r = rectFor(edit.origBbox);
+    while (coverEls.length < boxes.length) {
+      const c = document.createElement('div');
+      c.className = 'edit-cover inline-cover';
+      coverEls.push(c);
+    }
     const scale = getScale() || 1;
     const padX = Math.max(1, (Number(edit.size) || 10) * 0.12) * scale;
     const padY = Math.max(0.8, (Number(edit.size) || 10) * 0.05) * scale;
-    coverEl.style.cssText = `position:absolute;left:${r.left - padX}px;top:${r.top - padY}px;width:${r.width + padX * 2}px;height:${r.height + padY * 2}px;background:${edit.bg && edit.bg !== 'none' ? edit.bg : 'transparent'};pointer-events:none;`;
+    const bg = edit.bg && edit.bg !== 'none' ? edit.bg : 'transparent';
+    for (let i = 0; i < boxes.length; i++) {
+      const c = coverEls[i];
+      if (shell && c.parentNode !== overlay) overlay.insertBefore(c, shell);
+      const r = rectFor(boxes[i]);
+      c.style.cssText = `position:absolute;left:${r.left - padX}px;top:${r.top - padY}px;width:${r.width + padX * 2}px;height:${r.height + padY * 2}px;background:${bg};pointer-events:none;`;
+    }
   }
 
   function startDrag(kind, ev, el) {

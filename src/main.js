@@ -35,6 +35,7 @@ import * as U from './utils.js';
 import { initShell, routeTo, openSheet, closeSheet, isSheetOpen, isMobile, renderTools, showOnboarding } from './shell.js';
 import { createMarkup, HIGHLIGHT_COLORS, STAMP_PRESETS } from './markup.js';
 import { computeEditZoom, centerAxis } from './zoomView.js';
+import { groupLinesIntoParagraphs, buildUnitFromGroup, wrapTextToWidth } from './paragraphs.js';
 import {
   renderPagesGrid,
   estimateCompression,
@@ -279,6 +280,7 @@ const state = {
   cleanQualityTier: 'standard', // 'eco' | 'standard' (JPEG 0,88) | 'high'
   active: null, // { edit, snapshot, isNew }
   addMode: false,
+  editGranularity: null, // 'paragraph' | 'line' | null (auto : paragraphe sur PC, ligne sur téléphone)
   search: { query: '', matches: [], active: -1 },
   textIndexReady: false,
   ensuringAll: null,
@@ -621,6 +623,55 @@ function editLinesForPage(n) {
   if (pd.lines && pd.lines.length) return pd.lines;
   if (pd.ocr && pd.ocr.lines.length) return pd.ocr.lines;
   return pd.lines || [];
+}
+
+/** Mode de sélection en édition : par défaut paragraphe sur PC, ligne sur téléphone. */
+function currentEditGranularity() {
+  if (state.editGranularity === 'paragraph' || state.editGranularity === 'line') {
+    return state.editGranularity;
+  }
+  return isMobile() ? 'line' : 'paragraph';
+}
+
+function syncGranularityUi() {
+  const gran = currentEditGranularity();
+  document.querySelectorAll('[data-edit-granularity]').forEach((btn) => {
+    const active = btn.dataset.editGranularity === gran;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  const chip = document.getElementById('hintGranularity');
+  if (chip) {
+    chip.hidden = !state.engine || isReading() || state.addMode;
+    chip.textContent = gran === 'paragraph' ? t('ep.byParagraph') : t('ep.byLine');
+  }
+  const fabGran = document.getElementById('btnEditGranularity');
+  const fabGranLabel = document.getElementById('btnEditGranularityLabel');
+  if (fabGran) {
+    fabGran.hidden = !state.engine || isReading() || state.addMode;
+    if (fabGranLabel) {
+      fabGranLabel.textContent = gran === 'paragraph' ? t('ep.byParagraph') : t('ep.byLine');
+    }
+  }
+}
+
+function setEditGranularity(next) {
+  if (next !== 'paragraph' && next !== 'line') return;
+  if (state.active) closeActive();
+  state.editGranularity = next;
+  syncGranularityUi();
+  renderOverlay();
+}
+
+function editUnitsForPage(pageNo) {
+  const lines = editLinesForPage(pageNo);
+  const pageEdits = state.edits.filter((e) => e.page === pageNo);
+  const covered = coveredLineIds(pageEdits);
+  const uncovered = lines.filter((l) => l && l.bbox && l.bbox.w > 0 && l.bbox.h > 0 && !covered.has(l.id));
+  if (currentEditGranularity() === 'paragraph') {
+    return groupLinesIntoParagraphs(uncovered);
+  }
+  return uncovered.map((l) => buildUnitFromGroup([l]));
 }
 
 /* ─────────────────────────── Rendu ─────────────────────────── */
@@ -2857,29 +2908,57 @@ function renderOverlay() {
     appendReadTextLayer(els.overlay, lines, pageEdits, covered, vp);
   }
 
-  // Zones de texte d'origine (cliquables)
-  for (const line of lines) {
-    if (!line.bbox || line.bbox.w <= 0 || line.bbox.h <= 0) continue;
-    if (covered.has(line.id)) continue;
-    const r = pdfRectToViewportRect(line.bbox, vp);
-    if (r.width < 1 || r.height < 1) continue;
-    const d = document.createElement('div');
-    d.className = 'line-block' + (line.source === 'ocr' ? ' ocr' : '');
-    d.dataset.lineId = line.id;
-    d.style.left = `${r.left}px`;
-    d.style.top = `${r.top}px`;
-    d.style.width = `${r.width}px`;
-    d.style.height = `${r.height}px`;
-    d.title = line.text;
-    if (nq && U.normalizeText(line.text).includes(nq)) {
-      d.classList.add('hit');
-      if (activeMatch && activeMatch.page === pageNo && activeMatch.lineId === line.id) {
-        d.classList.add('hit-active');
+  // Zones de texte d'origine (cliquables : par paragraphe ou par ligne selon l'option active)
+  if (isReading()) {
+    for (const line of lines) {
+      if (!line.bbox || line.bbox.w <= 0 || line.bbox.h <= 0) continue;
+      if (covered.has(line.id)) continue;
+      const r = pdfRectToViewportRect(line.bbox, vp);
+      if (r.width < 1 || r.height < 1) continue;
+      const d = document.createElement('div');
+      d.className = 'line-block' + (line.source === 'ocr' ? ' ocr' : '');
+      d.dataset.lineId = line.id;
+      d.style.left = `${r.left}px`;
+      d.style.top = `${r.top}px`;
+      d.style.width = `${r.width}px`;
+      d.style.height = `${r.height}px`;
+      d.title = line.text;
+      if (nq && U.normalizeText(line.text).includes(nq)) {
+        d.classList.add('hit');
+        if (activeMatch && activeMatch.page === pageNo && activeMatch.lineId === line.id) {
+          d.classList.add('hit-active');
+        }
       }
+      els.overlay.appendChild(d);
     }
-    els.overlay.appendChild(d);
+  } else {
+    const units = editUnitsForPage(pageNo);
+    for (const unit of units) {
+      const r = pdfRectToViewportRect(unit.bbox, vp);
+      if (r.width < 1 || r.height < 1) continue;
+      const d = document.createElement('div');
+      d.className =
+        'line-block' +
+        (unit.source === 'ocr' ? ' ocr' : '') +
+        (unit.isParagraph ? ' para-block' : '');
+      d.dataset.lineId = unit.id;
+      if (unit.isParagraph) d.dataset.paraLines = String(unit.lines.length);
+      d.style.left = `${r.left}px`;
+      d.style.top = `${r.top}px`;
+      d.style.width = `${r.width}px`;
+      d.style.height = `${r.height}px`;
+      d.title = unit.text;
+      if (nq && U.normalizeText(unit.text).includes(nq)) {
+        d.classList.add('hit');
+        if (activeMatch && activeMatch.page === pageNo && unit.lineIds.includes(activeMatch.lineId)) {
+          d.classList.add('hit-active');
+        }
+      }
+      els.overlay.appendChild(d);
+    }
   }
 
+  syncGranularityUi();
   markup.render();
   renderFormOverlay();
   appendPageEditsToOverlay(els.overlay, pageEdits, vp, state.scale, activeId);
@@ -3105,6 +3184,15 @@ function bindEditPanel() {
   // Les boutons ne prennent pas le focus : le curseur reste dans le bloc édité.
   panel.addEventListener('pointerdown', (ev) => {
     if (ev.target.closest('button')) ev.preventDefault();
+  });
+  document.querySelectorAll('[data-edit-granularity]').forEach((btn) =>
+    btn.addEventListener('click', () => setEditGranularity(btn.dataset.editGranularity))
+  );
+  document.getElementById('hintGranularity')?.addEventListener('click', () => {
+    setEditGranularity(currentEditGranularity() === 'paragraph' ? 'line' : 'paragraph');
+  });
+  document.getElementById('btnEditGranularity')?.addEventListener('click', () => {
+    setEditGranularity(currentEditGranularity() === 'paragraph' ? 'line' : 'paragraph');
   });
   panel.querySelectorAll('[data-ep-fmt]').forEach((btn) =>
     btn.addEventListener('click', () => applyFormat((e) => {
@@ -3355,7 +3443,100 @@ const refreshTextEcho = U.debounce(() => {
   updateTextPanel();
 }, 200);
 
+let wrapMeasureEl = null;
+
+/**
+ * Mesure les lignes visuelles réellement affichées à l'écran pour un bloc à
+ * retour automatique (`edit.wrap`), afin que l'export PDF respecte les mêmes
+ * retours à la ligne au mot près.
+ */
+function computeEditWrappedLines(edit) {
+  if (!edit || !edit.wrap || !(edit.bbox?.w > 4)) {
+    if (edit) delete edit.wrappedLines;
+    return null;
+  }
+  const raw = String(edit.text || '');
+  if (!raw.trim()) {
+    edit.wrappedLines = [''];
+    return edit.wrappedLines;
+  }
+  const scale = state.scale || 1;
+  const basePx = Math.max(1, (Number(edit.size) || 10) * scale);
+  const hz = (Number(edit.hScale) || 100) / 100;
+  const cs = (Number(edit.charSpacing) || 0) * scale;
+  const widthPx = Math.max(8, edit.bbox.w * scale);
+  const fontFamily = U.cssFontFamily(edit.font);
+
+  if (typeof document !== 'undefined' && document.body && typeof document.createRange === 'function') {
+    if (!wrapMeasureEl || !wrapMeasureEl.isConnected) {
+      wrapMeasureEl = document.createElement('div');
+      wrapMeasureEl.setAttribute('aria-hidden', 'true');
+      wrapMeasureEl.style.cssText =
+        'position:fixed;left:-99999px;top:0;visibility:hidden;pointer-events:none;margin:0;padding:0;border:0;white-space:pre-wrap;overflow-wrap:break-word;';
+      document.body.appendChild(wrapMeasureEl);
+    }
+    wrapMeasureEl.style.fontFamily = fontFamily;
+    wrapMeasureEl.style.fontSize = `${basePx}px`;
+    wrapMeasureEl.style.fontWeight = edit.bold ? '700' : '400';
+    wrapMeasureEl.style.fontStyle = edit.italic ? 'italic' : 'normal';
+    wrapMeasureEl.style.lineHeight = String(edit.lineHeight || 1.16);
+    wrapMeasureEl.style.letterSpacing = cs ? `${cs}px` : 'normal';
+    wrapMeasureEl.style.width = `${widthPx / Math.max(0.2, hz)}px`;
+
+    const out = [];
+    const range = document.createRange();
+    for (const para of raw.split('\n')) {
+      if (!para) {
+        out.push('');
+        continue;
+      }
+      wrapMeasureEl.textContent = para;
+      const node = wrapMeasureEl.firstChild;
+      if (!node || node.nodeType !== Node.TEXT_NODE) {
+        out.push(para);
+        continue;
+      }
+      let lineStart = 0;
+      let curTop = null;
+      const len = para.length;
+      for (let i = 0; i < len; i++) {
+        if (para[i] === ' ') continue;
+        range.setStart(node, i);
+        range.setEnd(node, i + 1);
+        const rects = range.getClientRects();
+        const r = rects[rects.length - 1];
+        if (!r || (!r.width && !r.height)) continue;
+        if (curTop === null) {
+          curTop = r.top;
+        } else if (r.top - curTop > basePx * 0.45) {
+          out.push(para.slice(lineStart, i).replace(/[ \t]+$/, ''));
+          lineStart = i;
+          curTop = r.top;
+        }
+      }
+      out.push(para.slice(lineStart).replace(/[ \t]+$/, ''));
+    }
+    wrapMeasureEl.textContent = '';
+    if (out.length) {
+      edit.wrappedLines = out;
+      return out;
+    }
+  }
+
+  measureCtx.font = `${edit.italic ? 'italic ' : ''}${edit.bold ? '700' : '400'} ${basePx}px ${fontFamily}`;
+  const lines = wrapTextToWidth(
+    raw,
+    widthPx,
+    (str) => (measureCtx.measureText(str).width + cs * [...str].length) * hz
+  );
+  edit.wrappedLines = lines;
+  return lines;
+}
+
 function onInlineChange() {
+  if (state.active?.edit?.wrap) {
+    computeEditWrappedLines(state.active.edit);
+  }
   inline.refresh();
   updateEditbarCount();
   updateExportUi();
@@ -3378,6 +3559,7 @@ function editSignature(e) {
     Number(e.charSpacing) || 0,
     Number(e.hScale) || 100,
     !!e.wrap,
+    e.wrappedLines || null,
     e.bbox ? [Math.round(e.bbox.x), Math.round(e.bbox.y), Math.round(e.bbox.w), Math.round(e.bbox.h)] : null,
   ]);
 }
@@ -3532,6 +3714,64 @@ function makeEditFromLine(line, pageNo) {
   };
 }
 
+function makeEditFromParagraph(unit, pageNo) {
+  const firstLine = unit.lines[0];
+  const { bg, fg } = sampleColorsForBbox(unit.bbox);
+  const scanStyle = unit.hiddenLayer || unit.source === 'ocr' ? guessScanLineStyle(firstLine) : null;
+  if (scanStyle) preloadScanFonts();
+  const font = scanStyle ? scanStyle.font : unit.font || 'Helvetica';
+  const rawSize = scanStyle
+    ? Math.min(scanStyle.size || (unit.fontSize || 12) * scanStyle.scale, Math.max(4, firstLine.bbox.h * 1.5))
+    : unit.fontSize || 12;
+  const size = U.clamp(Math.round(rawSize * 2) / 2, 4, 120);
+  const bold = scanStyle ? scanStyle.bold : !!unit.bold;
+  const italic = !!unit.italic;
+
+  // S'assure que la largeur du cadre accueille les lignes d'origine sans coupure parasite initiale.
+  let minWidthPt = unit.bbox.w;
+  try {
+    measureCtx.font = `${italic ? 'italic ' : ''}${bold ? '700 ' : '400 '}${size}px ${U.cssFontFamily(font)}`;
+    for (const l of unit.lines) {
+      minWidthPt = Math.max(minWidthPt, measureCtx.measureText(l.text.trim()).width + 2);
+    }
+  } catch {
+    /* mesure facultative */
+  }
+  const { w: pageW } = pdfPageSize();
+  const finalW = Math.min(Math.max(8, pageW - unit.bbox.x - 6), Math.max(unit.bbox.w, minWidthPt));
+
+  const edit = {
+    id: U.uid('edit'),
+    page: pageNo,
+    kind: 'edit',
+    lineId: unit.id,
+    lineIds: [...unit.lineIds],
+    paragraph: true,
+    wrap: true,
+    fit: false,
+    source: unit.source || 'pdf',
+    hiddenLayer: !!unit.hiddenLayer,
+    bbox: { ...unit.bbox, w: finalW },
+    origBbox: { ...unit.bbox },
+    origBboxes: unit.origBboxes.map((b) => ({ ...b })),
+    baseline: unit.baseline,
+    originalText: unit.text,
+    text: unit.text,
+    font,
+    size,
+    bold,
+    italic,
+    underline: false,
+    align: 'left',
+    lineHeight: unit.lineHeight || 1.16,
+    color: fg,
+    bg,
+    confidence: typeof unit.confidence === 'number' ? unit.confidence : undefined,
+  };
+  computeEditWrappedLines(edit);
+  return edit;
+}
+
 /* ─────────────── Zoom d'édition et retour à la vue précédente ─────────────── */
 
 /** Hauteur du clavier virtuel (px), exposée par --kb-offset. */
@@ -3634,27 +3874,57 @@ function focusLineInView(line) {
 
 async function selectLine(lineId) {
   const pageNo = state.pageIndex + 1;
-  const line = editLinesForPage(pageNo).find((l) => l.id === lineId);
+  const units = editUnitsForPage(pageNo);
+  const unit = units.find((u) => u.id === lineId || u.lineIds.includes(lineId));
+  const line = unit ? unit.lines[0] : editLinesForPage(pageNo).find((l) => l.id === lineId);
   if (!line) return;
+  const isPara = !!unit?.isParagraph;
+  const targetId = unit ? unit.id : lineId;
   // Le point touché a été mémorisé avant le zoom : on le convertit ici, sur la
-  // géométrie encore affichée, en index de caractère de la ligne d'origine.
-  const blockEl = els.overlay.querySelector(`.line-block[data-line-id="${CSS.escape(lineId)}"]`);
-  const caret = caretForElement(blockEl || { dataset: {} }, {
-    text: line.text,
-    font: line.font,
-    size: line.fontSize,
-    bold: line.bold,
-    italic: line.italic,
-  });
+  // géométrie encore affichée, en index de caractère de la ligne ou du paragraphe d'origine.
+  const blockEl = els.overlay.querySelector(`.line-block[data-line-id="${CSS.escape(targetId)}"]`);
+  let caret = null;
+  if (isPara && pendingPointer.point && blockEl && state.viewport) {
+    // Identifie la sous-ligne touchée dans le paragraphe pour placer le curseur sous le doigt.
+    const stageRect = els.stage.getBoundingClientRect();
+    const clickY = pendingPointer.point.y - stageRect.top;
+    let charBase = 0;
+    let picked = unit.lines[0];
+    let pickedBase = 0;
+    let bestDist = Infinity;
+    for (const sub of unit.lines) {
+      const sr = pdfRectToViewportRect(sub.bbox, state.viewport);
+      const dist = Math.abs(clickY - (sr.top + sr.height / 2));
+      if (dist < bestDist) {
+        bestDist = dist;
+        picked = sub;
+        pickedBase = charBase;
+      }
+      charBase += sub.text.trim().length + 1;
+    }
+    const subRect = pdfRectToViewportRect(picked.bbox, state.viewport);
+    const frac = U.clamp((pendingPointer.point.x - (stageRect.left + subRect.left)) / Math.max(1, subRect.width), 0, 1);
+    const localOff = Math.round(frac * picked.text.trim().length);
+    caret = { offset: Math.min(unit.text.length, pickedBase + localOff), word: !!pendingPointer.word };
+  } else {
+    caret = caretForElement(blockEl || { dataset: {} }, {
+      text: line.text,
+      font: line.font,
+      size: line.fontSize,
+      bold: line.bold,
+      italic: line.italic,
+    });
+  }
   if (state.active) closeActive({ restore: false });
   // L'interface d'édition change la largeur disponible : on fige le zoom pour
   // que la page ne se redimensionne pas au toucher.
   if (state.zoom == null && state.scale) state.zoom = state.scale;
   const viewToken = captureEditView();
-  await zoomForLine(line);
-  focusLineInView(line);
+  const focusTarget = isPara ? unit : line;
+  await zoomForLine(focusTarget);
+  focusLineInView(focusTarget);
   const before = U.clone(state.edits);
-  const edit = makeEditFromLine(line, pageNo);
+  const edit = isPara ? makeEditFromParagraph(unit, pageNo) : makeEditFromLine(line, pageNo);
   state.edits.push(edit);
   state.active = {
     edit,
@@ -3771,6 +4041,9 @@ function duplicateActiveEdit() {
   copy.id = U.uid('edit');
   copy.kind = 'add';
   copy.lineId = null;
+  copy.lineIds = null;
+  copy.origBbox = null;
+  copy.origBboxes = null;
   copy.source = 'add';
   copy.bbox = { ...copy.bbox, x: copy.bbox.x + 14, y: copy.bbox.y - 14 };
   copy.baseline = (copy.baseline ?? copy.bbox.y) - 14;
@@ -4935,12 +5208,22 @@ function getPageText(n) {
   const byLine = new Map(
     edits.filter((e) => e.kind === 'edit' && e.lineId).map((e) => [e.lineId, e])
   );
-  const rows = base.map((l) => ({
-    x: l.bbox.x,
-    y: l.baseline ?? l.bbox.y + l.bbox.h,
-    h: l.bbox.h,
-    text: byLine.has(l.id) ? byLine.get(l.id).text : l.text,
-  }));
+  const absorbed = new Set();
+  for (const e of edits) {
+    if (e.kind === 'edit' && Array.isArray(e.lineIds)) {
+      for (const id of e.lineIds) {
+        if (id !== e.lineId) absorbed.add(id);
+      }
+    }
+  }
+  const rows = base
+    .filter((l) => !absorbed.has(l.id))
+    .map((l) => ({
+      x: l.bbox.x,
+      y: l.baseline ?? l.bbox.y + l.bbox.h,
+      h: l.bbox.h,
+      text: byLine.has(l.id) ? byLine.get(l.id).text : l.text,
+    }));
   for (const e of edits) {
     if (e.kind === 'add' && e.text.trim()) {
       rows.push({ x: e.bbox.x, y: e.baseline ?? e.bbox.y, h: e.bbox.h, text: e.text });
@@ -4980,6 +5263,7 @@ function updateTextPanel() {
 
 function updateHint() {
   updateDock();
+  syncGranularityUi();
   if (!state.engine) return;
   const pd = getPageData(state.pageIndex + 1);
   els.hintCancel.hidden = !state.addMode;
@@ -5056,10 +5340,16 @@ async function performSearch(rawQuery) {
   for (let n = 1; n <= state.numPages; n++) {
     const pd = getPageData(n);
     const lines = pd.lines?.length ? pd.lines : pd.ocr?.lines || [];
-    const byLine = new Map(
-      state.edits.filter((e) => e.page === n && e.kind === 'edit').map((e) => [e.lineId, e])
-    );
+    const pageEdits = state.edits.filter((e) => e.page === n && e.kind === 'edit');
+    const byLine = new Map(pageEdits.map((e) => [e.lineId, e]));
+    const absorbed = new Set();
+    for (const e of pageEdits) {
+      if (Array.isArray(e.lineIds)) {
+        for (const id of e.lineIds) if (id !== e.lineId) absorbed.add(id);
+      }
+    }
     for (const line of lines) {
+      if (absorbed.has(line.id)) continue;
       const edit = byLine.get(line.id);
       const text = edit ? edit.text : line.text;
       if (!text) continue;
@@ -8549,6 +8839,8 @@ window.__pdfStudio = {
   markup,
   continuousState,
   isContinuousRead,
+  setEditGranularity,
+  currentEditGranularity,
   /** Tests : ajoute une annotation comme le ferait un geste (avec historique). */
   addTestMarkup: (obj) => {
     if (!markupHistory.stack.length) pushMarkupHistory({ silent: true });

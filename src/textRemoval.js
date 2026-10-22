@@ -370,7 +370,11 @@ export function removeTextInBBoxes(pdfDoc, editsByPage) {
     if (!page) continue;
     const boxes = edits
       .filter((e) => e.kind !== 'add' && e.bbox && e.bbox.w > 0 && e.bbox.h > 0)
-      .map((e) => e.origBbox || e.bbox);
+      .flatMap((e) =>
+        Array.isArray(e.origBboxes) && e.origBboxes.length
+          ? e.origBboxes.filter((b) => b && b.w > 0 && b.h > 0)
+          : [e.origBbox || e.bbox]
+      );
     if (!boxes.length) continue;
 
     try {

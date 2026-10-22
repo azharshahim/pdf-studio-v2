@@ -271,6 +271,7 @@
           <div class="hintbar" id="hintbar" hidden>
             <span class="hint-dot"></span>
             <span id="hintText" data-i18n="hint.edit">Cliquez sur un texte pour le modifier</span>
+            <button class="linkbtn gran-chip" id="hintGranularity" type="button" hidden></button>
             <button class="linkbtn" id="hintCancel" hidden>Annuler</button>
           </div>
         </main>
@@ -441,6 +442,10 @@
             <button class="icon-btn tiny" type="button" id="epClose" data-i18n-title="ep.close" aria-label="Fermer" data-icon="x"></button>
           </header>
           <div class="ep-body">
+            <div class="ep-granularity" role="group" aria-label="Mode de sélection du texte">
+              <button type="button" class="ep-gran-btn" data-edit-granularity="paragraph" data-i18n="ep.byParagraph">Modifier par paragraphe</button>
+              <button type="button" class="ep-gran-btn" data-edit-granularity="line" data-i18n="ep.byLine">Par ligne</button>
+            </div>
             <p class="ep-hint" id="epHint" data-i18n="ep.hint">Cliquez sur un bloc de texte (cadre en pointillés) pour le modifier.</p>
             <h3 class="ep-sec" data-i18n="ep.format">Mettre le texte en forme</h3>
             <fieldset class="ep-fields" id="epFields" disabled>
@@ -652,6 +657,12 @@
 
       <div class="fmt-pop more-pop" id="fmtMorePop" hidden>
         <div class="more-row">
+          <div class="ep-granularity compact" role="group" aria-label="Mode de sélection du texte">
+            <button type="button" class="ep-gran-btn" data-edit-granularity="paragraph" data-i18n="ep.byParagraph">Modifier par paragraphe</button>
+            <button type="button" class="ep-gran-btn" data-edit-granularity="line" data-i18n="ep.byLine">Par ligne</button>
+          </div>
+        </div>
+        <div class="more-row">
           <span data-i18n="editor.lineHeight">Interligne</span>
           <div class="fmt-stepper">
             <button class="fmt-btn" type="button" data-lh="-0.1" aria-label="Réduire l’interligne">−</button>
@@ -669,6 +680,10 @@
       <div class="annobar-row" id="annoTools"></div>
       <div class="anno-sub" id="annoSub" hidden></div>
     </div>
+
+    <button class="gran-pill" id="btnEditGranularity" type="button" hidden>
+      <span id="btnEditGranularityLabel" data-i18n="ep.byLine">Par ligne</span>
+    </button>
 
     <button class="fab" id="btnAddText" type="button" aria-label="Ajouter du texte" data-i18n-title="editor.addText">
       <span data-icon="plus"></span><span data-i18n="editor.addTextShort">Texte</span>
