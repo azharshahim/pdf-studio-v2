@@ -292,4 +292,82 @@ describe('détection et reflux de paragraphes', () => {
     expect(rows[2].right).toBeLessThan(boxX + boxW - 100);
     await doc.destroy();
   });
+
+  it('reconnaît un paragraphe justifié de 2 lignes grâce à la marge droite de la page', () => {
+    // Autre paragraphe justifié de la page : ses lignes pleines finissent à x = 450.
+    const other = [
+      makeLine({ id: 'o1', text: 'Les parties conviennent des modalités suivantes pour', x: 50, y: 700, w: 400 }),
+      makeLine({ id: 'o2', text: 'la bonne exécution du présent contrat de prestation', x: 50, y: 686, w: 400 }),
+      makeLine({ id: 'o3', text: 'de services.', x: 50, y: 672, w: 70 }),
+    ];
+    // Paragraphe de 2 lignes : la 1re ligne (étirée) finit aussi à 450, la 2e est courte.
+    const two = [
+      makeLine({ id: 't1', text: 'Le paiement intervient sous trente jours', x: 50, y: 640, w: 400 }),
+      makeLine({ id: 't2', text: 'à réception de la facture.', x: 50, y: 626, w: 150 }),
+    ];
+    const units = groupLinesIntoParagraphs([...other, ...two]);
+    const u = units.find((x) => x.lineIds.includes('t1'));
+    expect(u.isParagraph).toBe(true);
+    expect(u.align).toBe('justify');
+
+    // Même paragraphe seul sur la page, sans marge de référence : prudence, à gauche.
+    const alone = groupLinesIntoParagraphs(two).find((x) => x.lineIds.includes('t1'));
+    expect(alone.align).toBe('left');
+
+    // Une 1re ligne qui s'arrête avant la marge commune reste alignée à gauche.
+    const ragged = [
+      makeLine({ id: 'r1', text: 'Le paiement intervient sous trente jours', x: 50, y: 640, w: 330 }),
+      makeLine({ id: 'r2', text: 'à réception de la facture.', x: 50, y: 626, w: 150 }),
+    ];
+    const r = groupLinesIntoParagraphs([...other, ...ragged]).find((x) => x.lineIds.includes('r1'));
+    expect(r.align).toBe('left');
+  });
+
+  it('détecte le retrait de première ligne et le reproduit à l’export', async () => {
+    const lines = [
+      makeLine({ id: 'i1', text: 'Conformément aux conditions générales de vente', x: 74, y: 700, w: 340 }),
+      makeLine({ id: 'i2', text: 'acceptées par le client, la présente facture est', x: 50, y: 686, w: 364 }),
+      makeLine({ id: 'i3', text: 'payable à trente jours.', x: 50, y: 672, w: 140 }),
+    ];
+    const u = groupLinesIntoParagraphs(lines).find((x) => x.lineIds.includes('i1'));
+    expect(u.isParagraph).toBe(true);
+    expect(u.firstIndent).toBeGreaterThan(20);
+    expect(u.firstIndent).toBeLessThan(28);
+    expect(u.bbox.x).toBe(50);
+
+    const src = await PDFDocument.create();
+    src.addPage([595, 842]);
+    const { bytes } = await exportPdf({
+      sourceBytes: await src.save(),
+      edits: [
+        {
+          id: 'edit-indent',
+          page: 1,
+          kind: 'add',
+          paragraph: true,
+          wrap: true,
+          fit: false,
+          bbox: { x: 50, y: 660, w: 364, h: 46 },
+          baseline: 700,
+          indent: 24,
+          text: 'Première ligne en retrait suite du texte',
+          wrappedLines: ['Première ligne en retrait', 'suite du texte'],
+          wrappedLineEnds: [false, true],
+          align: 'left',
+          font: 'Helvetica',
+          size: 11,
+          lineHeight: 1.3,
+          color: '#111827',
+        },
+      ],
+    });
+    const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+    const tc = await (await doc.getPage(1)).getTextContent();
+    const items = tc.items.filter((it) => it.str.trim());
+    const first = items.find((it) => it.str.startsWith('Première'));
+    const second = items.find((it) => it.str.startsWith('suite'));
+    expect(Math.abs(first.transform[4] - (50 + 24 + 0.5))).toBeLessThan(1);
+    expect(Math.abs(second.transform[4] - (50 + 0.5))).toBeLessThan(1);
+    await doc.destroy();
+  });
 });

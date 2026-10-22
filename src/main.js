@@ -36,6 +36,7 @@ import { initShell, routeTo, openSheet, closeSheet, isSheetOpen, isMobile, rende
 import { createMarkup, HIGHLIGHT_COLORS, STAMP_PRESETS } from './markup.js';
 import { computeEditZoom, centerAxis } from './zoomView.js';
 import { groupLinesIntoParagraphs, buildUnitFromGroup, wrapTextToWidth } from './paragraphs.js';
+import { hyphenateText, stripShy, SHY } from './hyphenate.js';
 import { groupOcrWords } from './ocrGrouping.js';
 import {
   renderPagesGrid,
@@ -2999,12 +3000,15 @@ function appendPageEditsToOverlay(targetOverlay, pageEdits, vp, scale, activeId 
 
     const span = document.createElement('span');
     span.className = 'edit-text';
-    span.textContent = e.text || '';
+    span.textContent = e.wrap ? editDisplayText(e) : e.text || '';
     span.style.display = 'block';
     span.style.whiteSpace = e.wrap ? 'pre-wrap' : 'pre';
     if (e.wrap) {
       span.style.overflowWrap = 'break-word';
+      span.style.hyphens = 'manual';
       span.style.width = `${r.width}px`;
+      const ind = editFirstIndent(e);
+      if (ind) span.style.textIndent = `${(ind * scale) / Math.max(0.2, (Number(e.hScale) || 100) / 100)}px`;
     }
     span.style.fontFamily = fontFamily;
     span.style.fontSize = `${fontSizePx}px`;
@@ -3630,10 +3634,57 @@ const refreshTextEcho = U.debounce(() => {
 
 let wrapMeasureEl = null;
 
+/** Retrait de première ligne d'un bloc (pt), seulement pour un texte aligné à gauche ou justifié. */
+function editFirstIndent(edit) {
+  const ind = Number(edit?.indent) || 0;
+  if (!(ind > 0) || !edit.wrap) return 0;
+  const align = edit.align || 'left';
+  if (align !== 'left' && align !== 'justify') return 0;
+  return Math.min(ind, Math.max(0, (edit.bbox?.w || 0) * 0.6));
+}
+
+function setHidden(obj, key, value) {
+  Object.defineProperty(obj, key, { value, writable: true, configurable: true, enumerable: false });
+}
+
+/**
+ * Texte affiché d'un bloc à retour automatique, avec traits d'union
+ * conditionnels (U+00AD) : tous les mots longs d'un paragraphe justifié, et,
+ * quelle que soit l'alignement, les mots trop longs pour tenir sur une ligne.
+ */
+function editDisplayText(edit) {
+  const raw = String(edit?.text || '');
+  if (!edit?.wrap || !raw) return raw;
+  const scale = state.scale || 1;
+  const hz = (Number(edit.hScale) || 100) / 100;
+  const cs = (Number(edit.charSpacing) || 0) * scale;
+  const basePx = Math.max(1, (Number(edit.size) || 10) * scale);
+  const widthPx = Math.max(8, (edit.bbox?.w || 0) * scale);
+  const key = JSON.stringify([raw, edit.align, edit.font, edit.bold, edit.italic, edit.size, edit.hScale, edit.charSpacing, Math.round(widthPx), edit.hyphenate]);
+  if (edit._displayKey === key && typeof edit._display === 'string') return edit._display;
+  let out = raw;
+  if (edit.hyphenate !== false) {
+    if ((edit.align || 'left') === 'justify') {
+      out = hyphenateText(raw);
+    } else {
+      try {
+        measureCtx.font = `${edit.italic ? 'italic ' : ''}${edit.bold ? '700' : '400'} ${basePx}px ${U.cssFontFamily(edit.font)}`;
+        const tooLong = (w) => (measureCtx.measureText(w).width + cs * w.length) * hz > widthPx * 0.98;
+        out = hyphenateText(raw, { minWordLength: 6, filter: tooLong });
+      } catch {
+        out = raw;
+      }
+    }
+  }
+  setHidden(edit, '_display', out);
+  setHidden(edit, '_displayKey', key);
+  return out;
+}
+
 /**
  * Mesure les lignes visuelles réellement affichées à l'écran pour un bloc à
  * retour automatique (`edit.wrap`), afin que l'export PDF respecte les mêmes
- * retours à la ligne au mot près.
+ * retours à la ligne au mot près (césure et retrait de première ligne compris).
  */
 function computeEditWrappedLines(edit) {
   if (!edit || !edit.wrap || !(edit.bbox?.w > 4)) {
@@ -3649,19 +3700,27 @@ function computeEditWrappedLines(edit) {
     edit.wrappedLineEnds = [true];
     return edit.wrappedLines;
   }
+  const display = editDisplayText(edit);
   const scale = state.scale || 1;
   const basePx = Math.max(1, (Number(edit.size) || 10) * scale);
   const hz = (Number(edit.hScale) || 100) / 100;
   const cs = (Number(edit.charSpacing) || 0) * scale;
   const widthPx = Math.max(8, edit.bbox.w * scale);
+  const indentPx = (editFirstIndent(edit) * scale) / Math.max(0.2, hz);
   const fontFamily = U.cssFontFamily(edit.font);
+  // Ligne coupée sur un trait d'union conditionnel : le tiret devient visible.
+  const finish = (str, brokenInside) => {
+    let t = str.replace(/[ \t]+$/, '');
+    if (brokenInside && t.endsWith(SHY)) t = t.slice(0, -1) + '-';
+    return stripShy(t);
+  };
 
   if (typeof document !== 'undefined' && document.body && typeof document.createRange === 'function') {
     if (!wrapMeasureEl || !wrapMeasureEl.isConnected) {
       wrapMeasureEl = document.createElement('div');
       wrapMeasureEl.setAttribute('aria-hidden', 'true');
       wrapMeasureEl.style.cssText =
-        'position:fixed;left:-99999px;top:0;visibility:hidden;pointer-events:none;margin:0;padding:0;border:0;white-space:pre-wrap;overflow-wrap:break-word;';
+        'position:fixed;left:-99999px;top:0;visibility:hidden;pointer-events:none;margin:0;padding:0;border:0;white-space:pre-wrap;overflow-wrap:break-word;hyphens:manual;';
       document.body.appendChild(wrapMeasureEl);
     }
     wrapMeasureEl.style.fontFamily = fontFamily;
@@ -3675,7 +3734,10 @@ function computeEditWrappedLines(edit) {
     const out = [];
     const ends = [];
     const range = document.createRange();
-    for (const para of raw.split('\n')) {
+    let firstPara = true;
+    for (const para of display.split('\n')) {
+      wrapMeasureEl.style.textIndent = firstPara && indentPx ? `${indentPx}px` : '0px';
+      firstPara = false;
       if (!para) {
         out.push('');
         ends.push(true);
@@ -3684,7 +3746,7 @@ function computeEditWrappedLines(edit) {
       wrapMeasureEl.textContent = para;
       const node = wrapMeasureEl.firstChild;
       if (!node || node.nodeType !== Node.TEXT_NODE) {
-        out.push(para);
+        out.push(stripShy(para));
         ends.push(true);
         continue;
       }
@@ -3692,7 +3754,7 @@ function computeEditWrappedLines(edit) {
       let curTop = null;
       const len = para.length;
       for (let i = 0; i < len; i++) {
-        if (para[i] === ' ') continue;
+        if (para[i] === ' ' || para[i] === SHY) continue;
         range.setStart(node, i);
         range.setEnd(node, i + 1);
         const rects = range.getClientRects();
@@ -3701,16 +3763,17 @@ function computeEditWrappedLines(edit) {
         if (curTop === null) {
           curTop = r.top;
         } else if (r.top - curTop > basePx * 0.45) {
-          out.push(para.slice(lineStart, i).replace(/[ \t]+$/, ''));
+          out.push(finish(para.slice(lineStart, i), true));
           ends.push(false);
           lineStart = i;
           curTop = r.top;
         }
       }
-      out.push(para.slice(lineStart).replace(/[ \t]+$/, ''));
+      out.push(finish(para.slice(lineStart), false));
       ends.push(true);
     }
     wrapMeasureEl.textContent = '';
+    wrapMeasureEl.style.textIndent = '0px';
     if (out.length) {
       edit.wrappedLines = out;
       edit.wrappedLineEnds = ends;
@@ -3719,11 +3782,13 @@ function computeEditWrappedLines(edit) {
   }
 
   measureCtx.font = `${edit.italic ? 'italic ' : ''}${edit.bold ? '700' : '400'} ${basePx}px ${fontFamily}`;
-  const measureFn = (str) => (measureCtx.measureText(str).width + cs * [...str].length) * hz;
+  const measureFn = (str) => (measureCtx.measureText(stripShy(str)).width + cs * [...stripShy(str)].length) * hz;
   const lines = [];
   const ends = [];
-  for (const para of raw.split('\n')) {
-    const sub = wrapTextToWidth(para, widthPx, measureFn);
+  let first = true;
+  for (const para of display.split('\n')) {
+    const sub = wrapTextToWidth(para, widthPx, measureFn, { firstIndent: first ? indentPx * hz : 0 });
+    first = false;
     for (let i = 0; i < sub.length; i++) {
       lines.push(sub[i]);
       ends.push(i === sub.length - 1);
@@ -3976,6 +4041,7 @@ function makeEditFromParagraph(unit, pageNo) {
     italic,
     underline: false,
     align,
+    ...(unit.firstIndent > 0 && finalX === unit.bbox.x ? { indent: unit.firstIndent } : {}),
     lineHeight: unit.lineHeight || 1.16,
     color: fg,
     bg,

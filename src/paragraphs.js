@@ -93,8 +93,14 @@ export function canMergeIntoParagraph(group, next) {
   if (group.length === 1) {
     const indent = first.bbox.x - next.bbox.x;
     const sameLeft = Math.abs(indent) <= marginTol;
+    // Alinéa : la première ligne commence plus à droite (jusqu'à ~4 cadratins) et ne
+    // dépasse pas la marge droite de la suivante ; en texte aligné à gauche, elle
+    // peut s'arrêter un peu avant.
     const firstLineIndent =
-      indent > marginTol && indent <= fs * 2.4 && Math.abs(lineRight(first) - lineRight(next)) <= fs * 2.2;
+      indent > marginTol &&
+      indent <= fs * 4 &&
+      lineRight(first) <= lineRight(next) + fs * 2.2 &&
+      first.bbox.w >= next.bbox.w * 0.45;
     sameLeftMode = sameLeft || firstLineIndent;
   } else {
     sameLeftMode = Math.abs(next.bbox.x - bodyLeft) <= marginTol;
@@ -216,14 +222,14 @@ export function groupLinesIntoParagraphs(lines) {
     groups.push(group);
   }
 
-  return groups.map((g) => buildUnitFromGroup(g));
+  return groups.map((g) => buildUnitFromGroup(g, { lines: valid }));
 }
 
 /**
  * Détecte l'alignement horizontal d'un paragraphe d'origine :
  * `'left'` | `'center'` | `'right'` | `'justify'`.
  */
-export function detectParagraphAlign(group) {
+export function detectParagraphAlign(group, ctx = null) {
   if (!Array.isArray(group) || !group.length) return 'left';
   if (group.length === 1) {
     const only = group[0];
@@ -244,7 +250,7 @@ export function detectParagraphAlign(group) {
   const midX = (minX + maxX) / 2;
 
   const firstIndent = group[0].bbox.x - minX;
-  const bodyLines = firstIndent > tol && firstIndent <= fs * 2.5 ? group.slice(1) : group;
+  const bodyLines = firstIndent > tol && firstIndent <= fs * 4 ? group.slice(1) : group;
   const leftAligned = bodyLines.every((l) => Math.abs(l.bbox.x - minX) <= tol);
   const rightAlignedAll = group.every((l) => Math.abs(lineRight(l) - maxX) <= tol);
 
@@ -273,10 +279,43 @@ export function detectParagraphAlign(group) {
       }
     }
   }
+  if (group.length === 2 && leftAligned && looksJustifiedTwoLines(group, ctx, { isOcr, fs, tol, minX })) {
+    return 'justify';
+  }
   return 'left';
 }
 
-export function buildUnitFromGroup(group) {
+/**
+ * Paragraphe de 2 lignes : une seule ligne pleine ne suffit pas à elle seule.
+ * On le considère justifié si
+ *  - la première ligne s'arrête exactement sur une marge droite partagée par
+ *    d'autres lignes de la même colonne (le bord droit du texte de la page) ;
+ *  - la dernière ligne est nettement plus courte ;
+ *  - la première ligne est « étirée » : moins de caractères par point que la
+ *    seconde (espaces élargis), ou espaces justifiés repérés à la lecture.
+ */
+function looksJustifiedTwoLines(group, ctx, { isOcr, fs, tol, minX }) {
+  const [a, b] = group;
+  const ra = lineRight(a);
+  const rb = lineRight(b);
+  if (!(rb < ra - fs * 1.5)) return false;
+  const others = (ctx?.lines || []).filter((l) => l && l.bbox && l.id !== a.id && l.id !== b.id);
+  if (!others.length) return false;
+  const strict = isOcr ? Math.max(3, fs * 0.3) : Math.max(1.8, fs * 0.16);
+  const sameColumn = others.filter(
+    (l) => Math.abs(l.bbox.x - minX) <= Math.max(tol * 2, fs * 2.6) && Math.abs(lineRight(l) - ra) <= strict,
+  );
+  if (sameColumn.length < 2) return false;
+  if (a.justified) return true;
+  const ta = String(a.text || '').trim();
+  const tb = String(b.text || '').trim();
+  if (ta.length < 12 || tb.length < 4) return false;
+  const densA = a.bbox.w / ta.length;
+  const densB = b.bbox.w / tb.length;
+  return densA > densB * (isOcr ? 1.05 : 1.02);
+}
+
+export function buildUnitFromGroup(group, ctx = null) {
   if (group.length === 1) {
     const l = group[0];
     return {
@@ -291,7 +330,7 @@ export function buildUnitFromGroup(group) {
       fontSize: l.fontSize || 12,
       bold: !!l.bold,
       italic: !!l.italic,
-      align: detectParagraphAlign(group),
+      align: detectParagraphAlign(group, ctx),
       baseline: lineBaseline(l),
       lineHeight: 1.16,
       bbox: { ...l.bbox },
@@ -319,6 +358,13 @@ export function buildUnitFromGroup(group) {
     .replace(/\s+/g, ' ')
     .trim();
 
+  // Retrait de première ligne : la première ligne commence nettement plus à droite
+  // que les suivantes, qui partagent la même marge gauche.
+  const restMinX = Math.min(...group.slice(1).map((l) => l.bbox.x));
+  const indentTol = first.source === 'ocr' ? Math.max(5, medianSize * 0.5) : Math.max(2.5, medianSize * 0.3);
+  const rawIndent = first.bbox.x - restMinX;
+  const firstIndent = rawIndent > indentTol && rawIndent <= medianSize * 4 ? Math.round(rawIndent * 100) / 100 : 0;
+
   const confs = group.map((l) => l.confidence).filter((c) => typeof c === 'number');
   const confidence = confs.length
     ? Math.round((confs.reduce((a, b) => a + b, 0) / confs.length) * 100) / 100
@@ -336,7 +382,7 @@ export function buildUnitFromGroup(group) {
     fontSize: medianSize,
     bold: !!first.bold,
     italic: !!first.italic,
-    align: detectParagraphAlign(group),
+    align: detectParagraphAlign(group, ctx),
     baseline: lineBaseline(first),
     lineHeight,
     bbox: {
@@ -346,35 +392,49 @@ export function buildUnitFromGroup(group) {
       h: Math.max(4, maxY - minY),
     },
     origBboxes: group.map((l) => ({ ...l.bbox })),
+    firstIndent,
     confidence,
   };
 }
 
 /**
  * Découpe `text` en lignes visuelles tenant dans `maxWidth` selon `measureFn(str) -> width`.
- * Respecte les retours à la ligne explicites (`\n`) et coupe les mots trop longs si nécessaire.
+ * Respecte les retours à la ligne explicites (`\n`), coupe aux traits d'union
+ * conditionnels (U+00AD, rendus par un tiret en fin de ligne) et retire
+ * `firstIndent` de la largeur disponible de la toute première ligne.
  */
-export function wrapTextToWidth(text, maxWidth, measureFn) {
+export function wrapTextToWidth(text, maxWidth, measureFn, { firstIndent = 0 } = {}) {
+  const SHY = '\u00AD';
+  const clean = (str) => str.split(SHY).join('');
   const rawLines = String(text ?? '').split('\n');
-  if (!(maxWidth > 4) || typeof measureFn !== 'function') return rawLines;
+  if (!(maxWidth > 4) || typeof measureFn !== 'function') return rawLines.map(clean);
   const out = [];
+  let isFirst = true;
+  const visible = (str) => {
+    const t = str.replace(/ +$/, '');
+    return t.endsWith(SHY) ? clean(t) + '-' : clean(t);
+  };
   for (const para of rawLines) {
     if (!para) {
       out.push('');
+      isFirst = false;
       continue;
     }
-    const tokens = para.split(/(?<= )/);
+    const tokens = para.split(/(?<= )|(?<=\u00AD)/);
     let current = '';
     for (const tok of tokens) {
+      const limit = isFirst ? Math.max(4, maxWidth - firstIndent) : maxWidth;
       const candidate = current + tok;
-      if (current && measureFn(candidate.replace(/ +$/, '')) > maxWidth) {
-        out.push(current.replace(/ +$/, ''));
+      if (current && measureFn(visible(candidate)) > limit) {
+        out.push(visible(current));
+        isFirst = false;
         current = tok.replace(/^ +/, '');
       } else {
         current = candidate;
       }
     }
-    out.push(current.replace(/ +$/, ''));
+    out.push(clean(current.replace(/ +$/, '')));
+    isFirst = false;
   }
   return out;
 }

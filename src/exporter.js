@@ -639,12 +639,19 @@ export async function exportPdf({
         const toks = align === 'justify' ? splitRunsBySpaces(runs) : null;
         const spaceChars = toks ? toks.filter((t) => t.isSpace).reduce((n, t) => n + t.text.length, 0) : 0;
         const tokTotal = toks ? widthOf(toks, size) : 0;
+        // Retrait de première ligne (paragraphe d'origine aligné à gauche ou justifié).
+        const indentPt =
+          lineIdx === 0 && e.wrap && (align === 'left' || align === 'justify') && Number(e.indent) > 0
+            ? Math.min(Number(e.indent), e.bbox.w * 0.6)
+            : 0;
+        const lineX = e.bbox.x + indentPt;
+        const lineW = e.bbox.w - indentPt;
         const canJustify =
-          align === 'justify' && !isParaEnd && e.bbox.w > 8 && spaceChars >= 1 && e.bbox.w - tokTotal > 0.1;
+          align === 'justify' && !isParaEnd && lineW > 8 && spaceChars >= 1 && lineW - tokTotal > 0.1;
 
         if (canJustify) {
-          const extraPerSpace = (e.bbox.w - tokTotal) / spaceChars;
-          let x = e.bbox.x;
+          const extraPerSpace = (lineW - tokTotal) / spaceChars;
+          let x = lineX;
           const startX = x;
           for (const tok of toks) {
             if (tok.isSpace) {
@@ -670,14 +677,14 @@ export async function exportPdf({
           if (e.underline && e.bbox.w > 0.2) {
             page.drawLine({
               start: { x: startX, y: y - size * 0.14 },
-              end: { x: startX + e.bbox.w, y: y - size * 0.14 },
+              end: { x: startX + lineW, y: y - size * 0.14 },
               thickness: Math.max(0.5, size * 0.055),
               color: rgb(color.r, color.g, color.b),
             });
           }
         } else {
           const total = widthOf(runs, size);
-          let x = align === 'justify' ? e.bbox.x : e.bbox.x + 0.5;
+          let x = align === 'justify' ? lineX : lineX + 0.5;
           if (align === 'center') x = e.bbox.x + (e.bbox.w - total) / 2;
           else if (align === 'right') x = e.bbox.x + e.bbox.w - total;
           const startX = x;

@@ -264,4 +264,89 @@ test.describe('Reflux d’un paragraphe entier en mode Modifier', () => {
     const minR = Math.min(...bottomPara.map((l) => l.right));
     expect(maxR - minR).toBeLessThan(2.5);
   });
+
+  test('retrait de première ligne et césure : écran, lignes mesurées et export identiques', async ({ page }) => {
+    await init(page);
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const pg = doc.addPage([595, 842]);
+    const draw = (t, x, y) => pg.drawText(t, { x, y, size: 11.5, font, color: rgb(0.1, 0.12, 0.16) });
+    draw('Conformément aux conditions générales acceptées par le client,', 84, 735);
+    draw('la présente facture est payable à trente jours à compter de sa date', 56, 719);
+    draw('d’émission, sans escompte pour paiement anticipé.', 56, 703);
+    const buffer = Buffer.from(await doc.save());
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/?open=home', { waitUntil: 'domcontentloaded' });
+    await page.locator('#fileInput').setInputFiles({ name: 'retrait.pdf', mimeType: 'application/pdf', buffer });
+    await expect(page.locator('#docDock [data-dock="edit"]')).toBeVisible({ timeout: 20_000 });
+    await page.locator('#docDock [data-dock="edit"]').click();
+    const para = page.locator('#overlay .line-block.para-block').first();
+    await expect(para).toBeVisible({ timeout: 15_000 });
+    await para.click();
+
+    const editor = page.locator('.inline-shell .inline-text');
+    await expect(editor).toBeVisible();
+    const indentCss = await editor.evaluate((el) => parseFloat(getComputedStyle(el).textIndent) || 0);
+    expect(indentCss).toBeGreaterThan(10);
+
+    const text =
+      'Conformément aux conditions générales préalablement acceptées par le client professionnel, la présente facture récapitulative est intégralement payable à trente jours, sans escompte pour paiement anticipé ni indemnisation complémentaire.';
+    await editor.fill(text);
+    await page.locator('#editPanel [data-ep-align="justify"]').click();
+    await page.locator('#stage').click({ position: { x: 8, y: 8 } });
+    await expect(page.locator('.inline-shell')).toHaveCount(0);
+
+    const snap = await page.evaluate(() => {
+      const e = window.__pdfStudio.state.edits[0];
+      const span = document.querySelector('#overlay .edit-block .edit-text');
+      return {
+        indent: e.indent || 0,
+        align: e.align,
+        lines: e.wrappedLines,
+        spanIndent: span ? parseFloat(getComputedStyle(span).textIndent) || 0 : 0,
+        spanHasShy: span ? span.textContent.includes('­') : false,
+      };
+    });
+    expect(snap.align).toBe('justify');
+    expect(snap.indent).toBeGreaterThan(20);
+    expect(snap.spanIndent).toBeGreaterThan(10);
+    expect(snap.spanHasShy).toBe(true); // mots longs prêts à être coupés
+    for (const l of snap.lines) expect(l.includes('­')).toBe(false);
+    // Recoller les lignes (tirets de césure retirés) redonne exactement le texte saisi.
+    const rejoined = snap.lines
+      .map((l, i) => (i < snap.lines.length - 1 && /\p{L}-$/u.test(l) ? l.slice(0, -1) + '\u0000' : l + ' '))
+      .join('')
+      .replace(/\u0000/g, '')
+      .trim();
+    expect(rejoined).toBe(text);
+
+    const xs = await page.evaluate(async () => {
+      const { exportPdf } = await import('/src/exporter.js');
+      const { PdfEngine } = await import('/src/pdfEngine.js');
+      const src = await window.__pdfStudio.currentDocumentSource();
+      const { bytes } = await exportPdf({ sourceBytes: src.bytes, edits: window.__pdfStudio.state.edits });
+      src.dispose();
+      const eng = new PdfEngine(bytes);
+      await eng.load();
+      const lines = await eng.extractLines(1);
+      eng.destroy();
+      // Bord gauche de chaque rangée (une ligne justifiée peut être lue en plusieurs morceaux).
+      const rows = new Map();
+      for (const l of lines) {
+        if (!l.text.trim()) continue;
+        const key = Math.round(l.bbox.y);
+        const r = rows.get(key) || { x: Infinity, text: '' };
+        if (l.bbox.x < r.x) r.text = l.text.trim() + ' ' + r.text;
+        else r.text += ' ' + l.text.trim();
+        r.x = Math.min(r.x, l.bbox.x);
+        rows.set(key, r);
+      }
+      return [...rows.entries()].sort((a, b) => b[0] - a[0]).map(([, r]) => r);
+    });
+    expect(xs.length).toBeGreaterThanOrEqual(3);
+    expect(xs[0].text.startsWith('Conformément')).toBe(true);
+    expect(xs[0].x).toBeGreaterThan(75);
+    for (const l of xs.slice(1)) expect(l.x).toBeLessThan(62);
+  });
 });
