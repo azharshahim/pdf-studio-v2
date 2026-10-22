@@ -2,6 +2,7 @@ import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import { assetUrl } from './utils.js';
 import { matchCatalogByName } from './fonts.js';
+import { isAmountContinuation } from './ocrGrouping.js';
 
 // Le build `legacy` de pdf.js inclut les polyfills (Promise.try,
 // Map#getOrInsertComputed…) nécessaires aux navigateurs un peu anciens.
@@ -114,12 +115,17 @@ export function buildLines(items, styles, pageNo, fontMap = {}) {
       (!cur.traitsKnown || !it.traitsKnown || cur.bold !== it.bold || cur.italic !== it.italic) &&
       it.str.trim().length > 0;
     const sizeChange = !!cur && Math.max(cur.fontSize, it.fontSize) / Math.max(0.1, Math.min(cur.fontSize, it.fontSize)) > 1.18;
+    const amountCont =
+      !!cur &&
+      Math.abs(it.baseline - cur.baseline) <= tol &&
+      !sizeChange &&
+      isAmountContinuation(cur.text, it.str, it.x - cur.endX, it.fontSize);
     const startsNew =
       !cur ||
-      styleChange ||
+      (!amountCont && styleChange) ||
       sizeChange ||
       Math.abs(it.baseline - cur.baseline) > tol ||
-      it.x - cur.endX > Math.max(6, it.fontSize * 1.05) ||
+      (!amountCont && it.x - cur.endX > Math.max(6, it.fontSize * 1.05)) ||
       it.x < cur.x - Math.max(10, it.fontSize * 1.5);
 
     if (startsNew) {

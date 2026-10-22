@@ -36,6 +36,7 @@ import { initShell, routeTo, openSheet, closeSheet, isSheetOpen, isMobile, rende
 import { createMarkup, HIGHLIGHT_COLORS, STAMP_PRESETS } from './markup.js';
 import { computeEditZoom, centerAxis } from './zoomView.js';
 import { groupLinesIntoParagraphs, buildUnitFromGroup, wrapTextToWidth } from './paragraphs.js';
+import { groupOcrWords } from './ocrGrouping.js';
 import {
   renderPagesGrid,
   estimateCompression,
@@ -4792,99 +4793,7 @@ function updateOcrButtons() {
   if (pill && !running) pill.hidden = true;
 }
 
-/**
- * Regroupe les mots OCR en segments horizontaux cohérents.
- * Contrairement aux lignes Tesseract, les colonnes éloignées (tableaux,
- * en-têtes gauche/droite) sont séparées pour que chaque bloc soit éditable seul.
- */
-function groupOcrWords(words) {
-  const items = words
-    .filter((w) => w.text && w.text.trim())
-    .map((w) => ({
-      text: w.text.trim(),
-      x0: w.bbox.x0,
-      y0: w.bbox.y0,
-      x1: w.bbox.x1,
-      y1: w.bbox.y1,
-      h: Math.max(1, w.bbox.y1 - w.bbox.y0),
-      confidence: w.confidence || 0,
-      ratio: w.ratio,
-    }))
-    .sort((a, b) => (a.y0 + a.y1) - (b.y0 + b.y1) || a.x0 - b.x0);
-
-  const rows = [];
-  for (const it of items) {
-    const cy = (it.y0 + it.y1) / 2;
-    let row = null;
-    for (const r of rows) {
-      if (Math.abs(r.cy - cy) <= Math.max(5, Math.min(it.h, r.h) * 0.6)) {
-        row = r;
-        break;
-      }
-    }
-    if (!row) {
-      row = { cy, h: it.h, items: [] };
-      rows.push(row);
-    }
-    row.items.push(it);
-    row.h = Math.max(row.h, it.h);
-  }
-
-  const segments = [];
-  for (const row of rows) {
-    row.items.sort((a, b) => a.x0 - b.x0);
-    // Graisse : comparaison des mots d'une même ligne entre eux (un « N° SS » gras
-    // devant un numéro normal), sinon seuils absolus.
-    const rated = row.items.filter((i) => typeof i.ratio === 'number');
-    if (rated.length) {
-      const vals = rated.map((i) => i.ratio);
-      const mn = Math.min(...vals);
-      const mx = Math.max(...vals);
-      if (rated.length >= 2 && mx / Math.max(mn, 0.01) > 1.3) {
-        const mid = (mn + mx) / 2;
-        for (const i of rated) i.bold = i.ratio > mid;
-      } else {
-        for (const i of rated) {
-          if (i.ratio > 0.2) i.bold = true;
-          else if (i.ratio < 0.14) i.bold = false;
-        }
-      }
-    }
-    let seg = null;
-    for (const it of row.items) {
-      const gap = seg ? it.x0 - seg.x1 : 0;
-      const maxH = Math.max(it.h, seg ? seg.h : 0);
-      // Changement net de graisse (« N° SS » gras, numéro normal…) : bloc à part,
-      // pour que chaque style reste modifiable sans toucher à l'autre.
-      const styleBreak = seg && typeof it.bold === 'boolean' && typeof seg.bold === 'boolean' && it.bold !== seg.bold;
-      if (!seg || styleBreak || gap > Math.max(maxH * 0.85, 10)) {
-        if (seg) segments.push(seg);
-        seg = { x0: it.x0, y0: it.y0, x1: it.x1, y1: it.y1, h: it.h, items: [it], bold: it.bold };
-      } else {
-        if (typeof seg.bold !== 'boolean' && typeof it.bold === 'boolean') seg.bold = it.bold;
-        seg.items.push(it);
-        seg.x1 = Math.max(seg.x1, it.x1);
-        seg.y0 = Math.min(seg.y0, it.y0);
-        seg.y1 = Math.max(seg.y1, it.y1);
-        seg.h = Math.max(seg.h, it.h);
-      }
-    }
-    if (seg) segments.push(seg);
-  }
-
-  return segments
-    .map((seg) => ({
-      text: seg.items.map((i) => i.text).join(' ').replace(/\s+/g, ' ').trim(),
-      bbox: { x0: seg.x0, y0: seg.y0, x1: seg.x1, y1: seg.y1 },
-      bold: seg.bold,
-      confidence: Math.round(
-        seg.items.reduce((sum, i) => sum + (i.confidence || 0), 0) / Math.max(1, seg.items.length)
-      ),
-    }))
-    .filter((seg) => seg.text);
-}
-
-const NUMERIC_RE = /^[\d\s,.\-+/:€%$]+$/;
+const NUMERIC_RE = /^(?:[\d\s,.\-−+/:€%$£¥]|EUR|USD|CHF|GBP|CAD|MAD)+$/i;
 
 /**
  * Seconde lecture, bloc par bloc : chaque bloc est découpé, mis à l'échelle
